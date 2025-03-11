@@ -247,7 +247,9 @@ export const UpdateProvider = ({
     }
     const { checkStrategy, dismissErrorAfter, autoMarkSuccess } = options;
     if (autoMarkSuccess) {
-      markSuccess();
+      setTimeout(() => {
+        markSuccess();
+      }, 1000);
     }
     if (checkStrategy === 'both' || checkStrategy === 'onAppResume') {
       stateListener.current = AppState.addEventListener(
