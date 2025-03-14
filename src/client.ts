@@ -9,7 +9,11 @@ import {
   promiseAny,
   testUrls,
 } from './utils';
-import { EmitterSubscription, Platform, DeviceEventEmitter } from 'react-native';
+import {
+  EmitterSubscription,
+  Platform,
+  DeviceEventEmitter,
+} from 'react-native';
 import { PermissionsAndroid } from './permissions';
 import {
   PushyModule,
