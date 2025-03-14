@@ -278,7 +278,7 @@ export const UpdateProvider = ({
 
   const parseTestPayload = useCallback(
     (payload: UpdateTestPayload) => {
-      if (payload && payload.type && payload.type.startsWith('__rnUpdate')) {
+      if (payload && payload.type && payload.type.startsWith('__rnPushy')) {
         const logger = options.logger || (() => {});
         options.logger = ({ type, data }) => {
           logger({ type, data });
