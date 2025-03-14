@@ -354,6 +354,7 @@ export class Pushy {
       return;
     }
     if (onDownloadProgress) {
+      // @ts-expect-error harmony not in existing platforms
       if (Platform.OS === 'harmony') {
         Pushy.progressHandlers[hash] = DeviceEventEmitter.addListener(
           'RCTPushyDownloadProgress',
