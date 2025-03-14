@@ -181,7 +181,7 @@ export const UpdateProvider = ({
       setUpdateInfo(info);
       if (info.expired) {
         const { downloadUrl } = info;
-        if (downloadUrl) {
+        if (downloadUrl && Pushy.apkStatus === null) {
           if (options.updateStrategy === 'silentAndNow') {
             if (Platform.OS === 'android' && downloadUrl.endsWith('.apk')) {
               downloadAndInstallApk(downloadUrl);
