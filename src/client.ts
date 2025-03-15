@@ -353,6 +353,7 @@ export class Pushy {
     if (Pushy.progressHandlers[hash]) {
       return;
     }
+    const patchStartTime = Date.now();
     if (onDownloadProgress) {
       // @ts-expect-error harmony not in existing platforms
       if (Platform.OS === 'harmony') {
@@ -458,9 +459,18 @@ export class Pushy {
       }
       return;
     } else {
+      const duration = Date.now() - patchStartTime;
+      const data: Record<string, any> = {
+        newVersion: hash,
+        diff: succeeded,
+        duration,
+      };
+      if (errorMessages.length > 0) {
+        data.error = errorMessages.join(';');
+      }
       this.report({
         type: 'downloadSuccess',
-        data: { newVersion: hash, diff: succeeded },
+        data,
       });
     }
     log(`downloaded ${succeeded} hash:`, hash);
