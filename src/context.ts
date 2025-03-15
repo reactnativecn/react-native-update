@@ -43,6 +43,5 @@ export const UpdateContext = createContext<{
 
 export const useUpdate = () => useContext(UpdateContext);
 
+/** @deprecated Please use `useUpdate` instead */
 export const usePushy = useUpdate;
-
-export const useCresc = useUpdate;
