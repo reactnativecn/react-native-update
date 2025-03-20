@@ -139,14 +139,7 @@ export const UpdateProvider = ({
         return false;
       }
     },
-    [
-      client,
-      options.updateStrategy,
-      options.afterDownloadUpdate,
-      alertUpdate,
-      alertError,
-      throwErrorIfEnabled,
-    ],
+    [client, options, alertUpdate, alertError, throwErrorIfEnabled],
   );
 
   const downloadAndInstallApk = useCallback(
