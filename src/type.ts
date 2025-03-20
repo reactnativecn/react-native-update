@@ -88,6 +88,7 @@ export interface ClientOptions {
   throwError?: boolean;
   beforeCheckUpdate?: () => Promise<boolean>;
   beforeDownloadUpdate?: (info: CheckResult) => Promise<boolean>;
+  afterDownloadUpdate?: (info: CheckResult) => Promise<boolean>;
 }
 
 export interface UpdateTestPayload {
