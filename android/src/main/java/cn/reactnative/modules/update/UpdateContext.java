@@ -7,14 +7,11 @@ import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Environment;
 import android.util.Log;
-
 import com.facebook.react.ReactInstanceManager;
-
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
-
 import java.io.File;
 
 public class UpdateContext {

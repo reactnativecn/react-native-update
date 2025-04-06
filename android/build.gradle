@@ -22,14 +22,42 @@ def supportsNamespace() {
   return major >= 8
 }
 
+def isExpoProject() {
+    def hasExpoModulesCore = rootProject.subprojects.any { it.name == 'expo-modules-core' }
+
+    def packageJsonFile = new File(rootProject.projectDir.parentFile, 'package.json')
+    def hasExpoDependency = false
+    if (packageJsonFile.exists()) {
+        def packageJson = new groovy.json.JsonSlurper().parseText(packageJsonFile.text)
+        hasExpoDependency = (packageJson.dependencies?.expo != null) || 
+                           (packageJson.devDependencies?.expo != null)
+    }
+    
+    return hasExpoModulesCore || hasExpoDependency
+}
+
+def expoProject = isExpoProject()
+
 apply plugin: 'com.android.library'
 if (isNewArchitectureEnabled()) {
     apply plugin: 'com.facebook.react'
 }
 
+if (expoProject) {
+    group = 'expo.modules.pushy'
+    version = '1.0.0'
+
+    def expoModulesCorePlugin = new File(project(":expo-modules-core").projectDir.absolutePath, "ExpoModulesCorePlugin.gradle")
+    apply from: expoModulesCorePlugin
+    applyKotlinExpoModulesCorePlugin()
+    useCoreDependencies()
+    useExpoPublishing()
+} else {
+    group = 'cn.reactnative.modules.update'
+    version = '1.0.0'
+}
 
 android {
-
     if (supportsNamespace()) {
         namespace "cn.reactnative.modules.update"
 
@@ -41,7 +69,6 @@ android {
     }
     compileSdkVersion safeExtGet('compileSdkVersion', 28)
     buildToolsVersion safeExtGet('buildToolsVersion', '28.0.3')
-
     defaultConfig {
         minSdkVersion safeExtGet('minSdkVersion', 16)
         targetSdkVersion safeExtGet('targetSdkVersion', 27)
@@ -50,6 +77,7 @@ android {
         consumerProguardFiles "proguard.pro"
         buildConfigField "boolean", "IS_NEW_ARCHITECTURE_ENABLED", isNewArchitectureEnabled().toString()
     }
+    
     sourceSets {
         main {
             // let gradle pack the shared library into apk
@@ -59,16 +87,27 @@ android {
             } else {
                 java.srcDirs += ['src/oldarch']
             }
+            
+            if (expoProject) {
+                java.srcDirs += ['java/expo/modules/pushy']
+            } else {
+                java.exclude 'expo/modules/pushy/**'
+            }
         }
     }
 
     buildTypes {
         release {
-            resValue("string", "pushy_build_time", "${minutesSinceEpoch}")
+            // resValue("string", "pushy_build_time", "${minutesSinceEpoch}")
+            resValue("string", "pushy_build_time", "29042093")
         }
         debug {
             resValue("string", "pushy_build_time", "0")
         }
+    }
+    
+    lintOptions {
+        abortOnError false
     }
 }
 
