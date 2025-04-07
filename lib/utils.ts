@@ -42,16 +42,16 @@ const ping =
                 return url;
               }
               logger('ping failed', url, status, statusText);
-              return null;
+              throw new Error('Ping failed');
             })
             .catch((e) => {
               pingFinished = true;
               logger('ping error', url, e);
-              return null;
+              throw e;
             }),
-          new Promise((r) =>
+          new Promise((_, reject) =>
             setTimeout(() => {
-              r(null);
+              reject(new Error('Ping timeout'));
               if (!pingFinished) {
                 logger('ping timeout', url);
               }
