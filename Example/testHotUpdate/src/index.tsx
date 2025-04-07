@@ -53,6 +53,7 @@ function App() {
   return (
     <View style={styles.container}>
       <Text style={styles.welcome}>欢迎使用Pushy热更新服务</Text>
+      <Text style={styles.welcome}>😁热更新成功</Text>
       <View style={{flexDirection: 'row'}}>
         <Text>
           {useDefaultAlert ? '当前使用' : '当前不使用'}默认的alert更新提示
