@@ -100,6 +100,14 @@ export const UpdateProvider = ({
           return false;
         }
         stateListener.current && stateListener.current.remove();
+
+        if (
+          options.afterDownloadUpdate &&
+          (await options.afterDownloadUpdate(info)) === false
+        ) {
+          log('afterDownloadUpdate returned false, skipping');
+          return false;
+        }
         if (options.updateStrategy === 'silentAndNow') {
           client.switchVersion(hash);
           return true;
@@ -131,13 +139,7 @@ export const UpdateProvider = ({
         return false;
       }
     },
-    [
-      client,
-      options.updateStrategy,
-      alertUpdate,
-      alertError,
-      throwErrorIfEnabled,
-    ],
+    [client, options, alertUpdate, alertError, throwErrorIfEnabled],
   );
 
   const downloadAndInstallApk = useCallback(

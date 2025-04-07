@@ -98,8 +98,7 @@ android {
 
     buildTypes {
         release {
-            // resValue("string", "pushy_build_time", "${minutesSinceEpoch}")
-            resValue("string", "pushy_build_time", "29042093")
+            resValue("string", "pushy_build_time", "${minutesSinceEpoch}")
         }
         debug {
             resValue("string", "pushy_build_time", "0")
