@@ -338,6 +338,26 @@ RCT_EXPORT_METHOD(reloadUpdate:(NSDictionary *)options
     }
 }
 
+RCT_EXPORT_METHOD(restartApp:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+{
+    @try {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self.bridge reload];
+        });
+        #if __has_include("RCTReloadCommand.h")
+            // reload 0.62+
+            RCTReloadCommandSetBundleURL([[self class] bundleURL]);
+            RCTTriggerReloadCommandListeners(@"pushy restartApp");
+        #endif
+
+        resolve(@true);
+    }
+    @catch (NSException *exception) {
+        reject(@"执行报错", exception.reason, nil);
+    }
+}
+
 RCT_EXPORT_METHOD(markSuccess:(RCTPromiseResolveBlock)resolve
                                     rejecter:(RCTPromiseRejectBlock)reject)
 {

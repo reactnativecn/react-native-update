@@ -176,6 +176,35 @@ public class UpdateModuleImpl {
         });
     }
 
+    public static void restartApp(final ReactApplicationContext mContext, Promise promise) {
+          UiThreadUtil.runOnUiThread(new Runnable() {
+              @Override
+              public void run() {
+                  try {
+                      final Context application = mContext.getApplicationContext();
+                      ReactInstanceManager instanceManager = ((ReactApplication) application).getReactNativeHost().getReactInstanceManager();
+
+                      instanceManager.recreateReactContextInBackground();
+                      promise.resolve(true);
+
+                  } catch (Throwable err) {
+                      promise.reject("restartApp failed: "+err.getMessage());
+                      Log.e("pushy", "restartApp failed", err);
+
+                      final Activity currentActivity = mContext.getCurrentActivity();
+                      if (currentActivity == null) {
+                          return;
+                      }
+                      currentActivity.runOnUiThread(new Runnable() {
+                          @Override
+                          public void run() {
+                              currentActivity.recreate();
+                          }
+                      });
+                  }
+              }
+          });
+      }
 
     public static void setNeedUpdate(UpdateContext updateContext, ReadableMap options, Promise promise) {
         final String hash = options.getString("hash");

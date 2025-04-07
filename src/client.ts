@@ -544,6 +544,9 @@ export class Pushy {
       delete Pushy.progressHandlers[progressKey];
     }
   };
+  restartApp = async () => {
+    return PushyModule.restartApp();
+  };
 }
 
 // for international users
