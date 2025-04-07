@@ -30,17 +30,45 @@ export function assertRelease() {
 const ping =
   Platform.OS === 'web'
     ? Promise.resolve
-    : async (url: string) =>
-        Promise.race([
+    : async (url: string) => {
+        let pingFinished = false;
+        return Promise.race([
           fetch(url, {
             method: 'HEAD',
-          }).then(({ status }) => (status === 200 ? url : null)),
-          new Promise(r => setTimeout(() => r(null), 2000)),
+          })
+            .then(({ status, statusText }) => {
+              pingFinished = true;
+              if (status === 200) {
+                return url;
+              }
+              logger('ping failed', url, status, statusText);
+              throw new Error('Ping failed');
+            })
+            .catch(e => {
+              pingFinished = true;
+              logger('ping error', url, e);
+              throw e;
+            }),
+          new Promise((_, reject) =>
+            setTimeout(() => {
+              reject(new Error('Ping timeout'));
+              if (!pingFinished) {
+                logger('ping timeout', url);
+              }
+            }, 2000),
+          ),
         ]);
+      };
+
 
 export const testUrls = async (urls?: string[]) => {
   if (!urls?.length) {
     return null;
   }
-  return promiseAny(urls.map(ping)).catch(() => null);
+  const ret = await promiseAny(urls.map(ping));
+  if (ret) {
+    return ret;
+  }
+  logger('all ping failed, use first url:', urls[0]);
+  return urls[0];
 };
