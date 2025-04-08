@@ -225,6 +225,29 @@ public class UpdateModule extends ReactContextBaseJavaModule {
     }
 
     @ReactMethod
+    public void restartApp(final Promise promise) {
+
+        UiThreadUtil.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    final Context application = getReactApplicationContext().getApplicationContext();
+                    ReactInstanceManager instanceManager = updateContext.getCustomReactInstanceManager();
+                    if (instanceManager == null) {
+                        instanceManager = ((ReactApplication) application).getReactNativeHost().getReactInstanceManager();
+                    }
+                    instanceManager.recreateReactContextInBackground();
+                    promise.resolve(true);
+
+                } catch (Throwable err) {
+                    promise.reject(err);
+                    Log.e("pushy", "restartApp failed ", err);
+                }
+            }
+        });
+    }
+
+    @ReactMethod
     public void setNeedUpdate(ReadableMap options) {
         final String hash = options.getString("hash");
 

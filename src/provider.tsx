@@ -316,6 +316,13 @@ export const UpdateProvider = ({
     [parseTestPayload],
   );
 
+  const restartApp = useCallback(
+    async () => {
+      return client.restartApp();
+    },
+    [client],
+  );
+
   useEffect(() => {
     const parseLinking = (url: string | null) => {
       if (!url) {
@@ -361,6 +368,7 @@ export const UpdateProvider = ({
         downloadAndInstallApk,
         getCurrentVersionInfo,
         parseTestQrCode,
+        restartApp,
       }}>
       {children}
     </UpdateContext.Provider>

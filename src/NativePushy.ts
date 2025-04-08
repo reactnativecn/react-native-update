@@ -15,6 +15,7 @@ export interface Spec extends TurboModule {
   getLocalHashInfo(hash: string): Promise<string>;
   setUuid(uuid: string): Promise<void>;
   reloadUpdate(options: { hash: string }): Promise<void>;
+  restartApp(): Promise<void>;
   setNeedUpdate(options: { hash: string }): Promise<void>;
   markSuccess(): Promise<void>;
   downloadPatchFromPpk(options: {
