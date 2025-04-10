@@ -54,6 +54,9 @@ export interface EventData {
   message?: string;
   rolledBackVersion?: string;
   newVersion?: string;
+  name?: string;
+  description?: string;
+  metaInfo?: string;
   [key: string]: any;
 }
 

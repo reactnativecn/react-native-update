@@ -26,6 +26,7 @@ import {
   setLocalHashInfo,
   isFirstTime,
   isRolledBack,
+  getCurrentVersionInfo,
 } from './core';
 
 const SERVER_PRESETS = {
@@ -128,6 +129,7 @@ export class Pushy {
     log(type + ' ' + message);
     await this.loggerPromise.promise;
     const { logger = noop, appKey } = this.options;
+    const info = await getCurrentVersionInfo();
     logger({
       type,
       data: {
@@ -137,6 +139,7 @@ export class Pushy {
         packageVersion,
         buildTime,
         message,
+        ...info,
         ...data,
       },
     });
