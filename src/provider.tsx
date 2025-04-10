@@ -316,12 +316,9 @@ export const UpdateProvider = ({
     [parseTestPayload],
   );
 
-  const restartApp = useCallback(
-    async () => {
-      return client.restartApp();
-    },
-    [client],
-  );
+  const restartApp = useCallback(async () => {
+    return client.restartApp();
+  }, [client]);
 
   useEffect(() => {
     const parseLinking = (url: string | null) => {
