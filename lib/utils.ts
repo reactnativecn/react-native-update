@@ -4,7 +4,7 @@ export function promiseAny<T>(promises: Promise<T>[]) {
   return new Promise<T>((resolve, reject) => {
     let count = 0;
 
-    promises.forEach(promise => {
+    promises.forEach((promise) => {
       Promise.resolve(promise)
         .then(resolve)
         .catch(() => {
@@ -44,7 +44,7 @@ const ping =
               logger('ping failed', url, status, statusText);
               throw new Error('Ping failed');
             })
-            .catch(e => {
+            .catch((e) => {
               pingFinished = true;
               logger('ping error', url, e);
               throw e;
@@ -60,15 +60,16 @@ const ping =
         ]);
       };
 
-
 export const testUrls = async (urls?: string[]) => {
   if (!urls?.length) {
     return null;
   }
-  const ret = await promiseAny(urls.map(ping));
-  if (ret) {
-    return ret;
-  }
+  try {
+    const ret = await promiseAny(urls.map(ping));
+    if (ret) {
+      return ret;
+    }
+  } catch {}
   logger('all ping failed, use first url:', urls[0]);
   return urls[0];
 };
