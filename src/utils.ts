@@ -77,10 +77,13 @@ export const testUrls = async (urls?: string[]) => {
   if (!urls?.length) {
     return null;
   }
-  const ret = await promiseAny(urls.map(ping));
-  if (ret) {
-    return ret;
-  }
+
+  try {
+    const ret = await promiseAny(urls.map(ping));
+    if (ret) {
+      return ret;
+    }
+  } catch {}
   log('all ping failed, use first url:', urls[0]);
   return urls[0];
 };
