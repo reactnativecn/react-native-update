@@ -241,7 +241,7 @@ export const UpdateProvider = ({
       client,
       alertError,
       throwErrorIfEnabled,
-      options.updateStrategy,
+      options,
       alertUpdate,
       downloadAndInstallApk,
       downloadUpdate,

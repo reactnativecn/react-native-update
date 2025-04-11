@@ -154,6 +154,7 @@ export class Pushy {
   };
   static assertHash = (hash: string) => {
     if (!Pushy.downloadedHash) {
+      log('no downloaded hash');
       return;
     }
     if (hash !== Pushy.downloadedHash) {
