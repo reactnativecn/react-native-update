@@ -12,7 +12,7 @@ import {
   Platform,
   Linking,
 } from 'react-native';
-import { Pushy, Cresc } from './client';
+import { Pushy, Cresc, sharedState } from './client';
 import { currentVersion, packageVersion, getCurrentVersionInfo } from './core';
 import { CheckResult, ProgressData, UpdateTestPayload } from './type';
 import { UpdateContext } from './context';
@@ -190,7 +190,7 @@ export const UpdateProvider = ({
           return;
         }
         const { downloadUrl } = info;
-        if (downloadUrl && Pushy.apkStatus === null) {
+        if (downloadUrl && sharedState.apkStatus === null) {
           if (options.updateStrategy === 'silentAndNow') {
             if (Platform.OS === 'android' && downloadUrl.endsWith('.apk')) {
               downloadAndInstallApk(downloadUrl);

@@ -61,7 +61,7 @@ const defaultClientOptions: ClientOptions = {
   throwError: false,
 };
 
-const sharedState: {
+export const sharedState: {
   progressHandlers: Record<string, EmitterSubscription>;
   downloadedHash?: string;
   apkStatus: 'downloading' | 'downloaded' | null;
