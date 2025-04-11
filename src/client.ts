@@ -153,10 +153,10 @@ export class Pushy {
     return `${endpoint}/checkUpdate/${this.options.appKey}`;
   };
   static assertHash = (hash: string) => {
-    if (!this.downloadedHash) {
+    if (!Pushy.downloadedHash) {
       return;
     }
-    if (hash !== this.downloadedHash) {
+    if (hash !== Pushy.downloadedHash) {
       log(`use downloaded hash ${Pushy.downloadedHash} first`);
       return;
     }
