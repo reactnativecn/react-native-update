@@ -62,7 +62,7 @@ const ping =
               if (!pingFinished) {
                 log('ping timeout', url);
               }
-            }, 2000),
+            }, 5000),
           ),
         ]);
       };
@@ -81,6 +81,7 @@ export const testUrls = async (urls?: string[]) => {
   try {
     const ret = await promiseAny(urls.map(ping));
     if (ret) {
+      log('ping success, use url:', ret);
       return ret;
     }
   } catch {}
