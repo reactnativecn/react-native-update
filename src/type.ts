@@ -92,6 +92,7 @@ export interface ClientOptions {
   beforeCheckUpdate?: () => Promise<boolean>;
   beforeDownloadUpdate?: (info: CheckResult) => Promise<boolean>;
   afterDownloadUpdate?: (info: CheckResult) => Promise<boolean>;
+  onPackageExpired?: (info: CheckResult) => Promise<boolean>;
 }
 
 export interface UpdateTestPayload {

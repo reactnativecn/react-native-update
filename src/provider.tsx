@@ -171,7 +171,7 @@ export const UpdateProvider = ({
         return;
       }
       const rollout = info.config?.rollout?.[packageVersion];
-      if (rollout) {
+      if (info.update && rollout) {
         if (!isInRollout(rollout)) {
           log(`not in ${rollout}% rollout, ignored`);
           return;
@@ -182,6 +182,13 @@ export const UpdateProvider = ({
       updateInfoRef.current = info;
       setUpdateInfo(info);
       if (info.expired) {
+        if (
+          options.onPackageExpired &&
+          (await options.onPackageExpired(info)) === false
+        ) {
+          log('onPackageExpired returned false, skipping');
+          return;
+        }
         const { downloadUrl } = info;
         if (downloadUrl && Pushy.apkStatus === null) {
           if (options.updateStrategy === 'silentAndNow') {
