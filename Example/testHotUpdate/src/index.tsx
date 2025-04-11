@@ -204,16 +204,17 @@ const styles = StyleSheet.create({
 });
 
 // use Pushy for China users
-// const updateClient = new Pushy({
+const updateClient = new Pushy({
+  appKey,
+  debug: true,
+  // updateStrategy: 'silentAndLater',
+});
+
+// use Cresc for global users
+// const updateClient = new Cresc({
 //   appKey,
 //   debug: true,
 // });
-
-// use Cresc for global users
-const updateClient = new Cresc({
-  appKey,
-  debug: true,
-});
 
 export default function Root() {
   return (

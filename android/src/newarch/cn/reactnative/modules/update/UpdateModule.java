@@ -99,7 +99,7 @@ public class UpdateModule extends NativePushySpec {
 
     @Override
     public void restartApp(Promise promise) {
-        UpdateModuleImpl.restartApp(updateContext, mContext, promise);
+        UpdateModuleImpl.restartApp(mContext, promise);
     }
 
     @Override
