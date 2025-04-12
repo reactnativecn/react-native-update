@@ -64,6 +64,7 @@ struct Index {
             new AnyJSBundleProvider([
               // local debug mode
               new MetroJSBundleProvider(),
+              // release mode
               new FileJSBundleProvider(this.rnohCoreContext.uiAbilityContext),
               new ResourceJSBundleProvider(this.rnohCoreContext.uiAbilityContext.resourceManager, 'bundle.harmony.js')
             ]),
