@@ -12,7 +12,7 @@ import {
   Platform,
   Linking,
 } from 'react-native';
-import { Pushy, Cresc } from './client';
+import { Pushy, Cresc, sharedState } from './client';
 import { currentVersion, packageVersion, getCurrentVersionInfo } from './core';
 import { CheckResult, ProgressData, UpdateTestPayload } from './type';
 import { UpdateContext } from './context';
@@ -171,7 +171,7 @@ export const UpdateProvider = ({
         return;
       }
       const rollout = info.config?.rollout?.[packageVersion];
-      if (rollout) {
+      if (info.update && rollout) {
         if (!isInRollout(rollout)) {
           log(`not in ${rollout}% rollout, ignored`);
           return;
@@ -182,8 +182,15 @@ export const UpdateProvider = ({
       updateInfoRef.current = info;
       setUpdateInfo(info);
       if (info.expired) {
+        if (
+          options.onPackageExpired &&
+          (await options.onPackageExpired(info)) === false
+        ) {
+          log('onPackageExpired returned false, skipping');
+          return;
+        }
         const { downloadUrl } = info;
-        if (downloadUrl && Pushy.apkStatus === null) {
+        if (downloadUrl && sharedState.apkStatus === null) {
           if (options.updateStrategy === 'silentAndNow') {
             if (Platform.OS === 'android' && downloadUrl.endsWith('.apk')) {
               downloadAndInstallApk(downloadUrl);
@@ -234,7 +241,7 @@ export const UpdateProvider = ({
       client,
       alertError,
       throwErrorIfEnabled,
-      options.updateStrategy,
+      options,
       alertUpdate,
       downloadAndInstallApk,
       downloadUpdate,
@@ -316,6 +323,10 @@ export const UpdateProvider = ({
     [parseTestPayload],
   );
 
+  const restartApp = useCallback(async () => {
+    return client.restartApp();
+  }, [client]);
+
   useEffect(() => {
     const parseLinking = (url: string | null) => {
       if (!url) {
@@ -361,6 +372,7 @@ export const UpdateProvider = ({
         downloadAndInstallApk,
         getCurrentVersionInfo,
         parseTestQrCode,
+        restartApp,
       }}>
       {children}
     </UpdateContext.Provider>

@@ -49,20 +49,20 @@ const ping =
                 return url;
               }
               log('ping failed', url, status, statusText);
-              return null;
+              throw new Error('Ping failed');
             })
             .catch(e => {
               pingFinished = true;
               log('ping error', url, e);
-              return null;
+              throw e;
             }),
-          new Promise(r =>
+          new Promise((_, reject) =>
             setTimeout(() => {
-              r(null);
+              reject(new Error('Ping timeout'));
               if (!pingFinished) {
                 log('ping timeout', url);
               }
-            }, 2000),
+            }, 5000),
           ),
         ]);
       };
@@ -77,10 +77,14 @@ export const testUrls = async (urls?: string[]) => {
   if (!urls?.length) {
     return null;
   }
-  const ret = await promiseAny(urls.map(ping));
-  if (ret) {
-    return ret;
-  }
+
+  try {
+    const ret = await promiseAny(urls.map(ping));
+    if (ret) {
+      log('ping success, use url:', ret);
+      return ret;
+    }
+  } catch {}
   log('all ping failed, use first url:', urls[0]);
   return urls[0];
 };

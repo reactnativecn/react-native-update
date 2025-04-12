@@ -26,6 +26,7 @@ import {
   setLocalHashInfo,
   isFirstTime,
   isRolledBack,
+  getCurrentVersionInfo,
 } from './core';
 
 const SERVER_PRESETS = {
@@ -60,6 +61,31 @@ const defaultClientOptions: ClientOptions = {
   throwError: false,
 };
 
+export const sharedState: {
+  progressHandlers: Record<string, EmitterSubscription>;
+  downloadedHash?: string;
+  apkStatus: 'downloading' | 'downloaded' | null;
+  marked: boolean;
+  applyingUpdate: boolean;
+} = {
+  progressHandlers: {},
+  downloadedHash: undefined,
+  apkStatus: null,
+  marked: false,
+  applyingUpdate: false,
+};
+
+const assertHash = (hash: string) => {
+  if (!sharedState.downloadedHash) {
+    return;
+  }
+  if (hash !== sharedState.downloadedHash) {
+    log(`use downloaded hash ${sharedState.downloadedHash} first`);
+    return;
+  }
+  return true;
+};
+
 // for China users
 export class Pushy {
   options = defaultClientOptions;
@@ -67,13 +93,6 @@ export class Pushy {
   lastChecking?: number;
   lastRespJson?: Promise<any>;
 
-  static progressHandlers: Record<string, EmitterSubscription> = {};
-  static downloadedHash?: string;
-
-  static apkStatus: 'downloading' | 'downloaded' | null = null;
-
-  static marked = false;
-  static applyingUpdate = false;
   version = cInfo.rnu;
   loggerPromise = (() => {
     let resolve: (value?: unknown) => void = () => {};
@@ -128,6 +147,7 @@ export class Pushy {
     log(type + ' ' + message);
     await this.loggerPromise.promise;
     const { logger = noop, appKey } = this.options;
+    const info = await getCurrentVersionInfo();
     logger({
       type,
       data: {
@@ -137,6 +157,7 @@ export class Pushy {
         packageVersion,
         buildTime,
         message,
+        ...info,
         ...data,
       },
     });
@@ -149,16 +170,6 @@ export class Pushy {
   getCheckUrl = (endpoint: string = this.options.server!.main) => {
     return `${endpoint}/checkUpdate/${this.options.appKey}`;
   };
-  static assertHash = (hash: string) => {
-    if (!this.downloadedHash) {
-      return;
-    }
-    if (hash !== this.downloadedHash) {
-      log(`use downloaded hash ${Pushy.downloadedHash} first`);
-      return;
-    }
-    return true;
-  };
   assertDebug = () => {
     if (__DEV__ && !this.options.debug) {
       console.info(
@@ -169,10 +180,10 @@ export class Pushy {
     return true;
   };
   markSuccess = () => {
-    if (Pushy.marked || __DEV__ || !isFirstTime) {
+    if (sharedState.marked || __DEV__ || !isFirstTime) {
       return;
     }
-    Pushy.marked = true;
+    sharedState.marked = true;
     PushyModule.markSuccess();
     this.report({ type: 'markSuccess' });
   };
@@ -180,9 +191,9 @@ export class Pushy {
     if (!assertDev('switchVersion()')) {
       return;
     }
-    if (Pushy.assertHash(hash) && !Pushy.applyingUpdate) {
+    if (assertHash(hash) && !sharedState.applyingUpdate) {
       log('switchVersion: ' + hash);
-      Pushy.applyingUpdate = true;
+      sharedState.applyingUpdate = true;
       return PushyModule.reloadUpdate({ hash });
     }
   };
@@ -191,7 +202,7 @@ export class Pushy {
     if (!assertDev('switchVersionLater()')) {
       return;
     }
-    if (Pushy.assertHash(hash)) {
+    if (assertHash(hash)) {
       log('switchVersionLater: ' + hash);
       return PushyModule.setNeedUpdate({ hash });
     }
@@ -346,18 +357,18 @@ export class Pushy {
       log(`rolledback hash ${rolledBackVersion}, ignored`);
       return;
     }
-    if (Pushy.downloadedHash === hash) {
-      log(`duplicated downloaded hash ${Pushy.downloadedHash}, ignored`);
-      return Pushy.downloadedHash;
+    if (sharedState.downloadedHash === hash) {
+      log(`duplicated downloaded hash ${sharedState.downloadedHash}, ignored`);
+      return sharedState.downloadedHash;
     }
-    if (Pushy.progressHandlers[hash]) {
+    if (sharedState.progressHandlers[hash]) {
       return;
     }
     const patchStartTime = Date.now();
     if (onDownloadProgress) {
       // @ts-expect-error harmony not in existing platforms
       if (Platform.OS === 'harmony') {
-        Pushy.progressHandlers[hash] = DeviceEventEmitter.addListener(
+        sharedState.progressHandlers[hash] = DeviceEventEmitter.addListener(
           'RCTPushyDownloadProgress',
           progressData => {
             if (progressData.hash === hash) {
@@ -366,14 +377,15 @@ export class Pushy {
           },
         );
       } else {
-        Pushy.progressHandlers[hash] = pushyNativeEventEmitter.addListener(
-          'RCTPushyDownloadProgress',
-          progressData => {
-            if (progressData.hash === hash) {
-              onDownloadProgress(progressData);
-            }
-          },
-        );
+        sharedState.progressHandlers[hash] =
+          pushyNativeEventEmitter.addListener(
+            'RCTPushyDownloadProgress',
+            progressData => {
+              if (progressData.hash === hash) {
+                onDownloadProgress(progressData);
+              }
+            },
+          );
       }
     }
     let succeeded = '';
@@ -441,9 +453,9 @@ export class Pushy {
         }
       }
     }
-    if (Pushy.progressHandlers[hash]) {
-      Pushy.progressHandlers[hash].remove();
-      delete Pushy.progressHandlers[hash];
+    if (sharedState.progressHandlers[hash]) {
+      sharedState.progressHandlers[hash].remove();
+      delete sharedState.progressHandlers[hash];
     }
     if (__DEV__) {
       return hash;
@@ -479,7 +491,7 @@ export class Pushy {
       description,
       metaInfo,
     });
-    Pushy.downloadedHash = hash;
+    sharedState.downloadedHash = hash;
     return hash;
   };
   downloadAndInstallApk = async (
@@ -489,10 +501,10 @@ export class Pushy {
     if (Platform.OS !== 'android') {
       return;
     }
-    if (Pushy.apkStatus === 'downloading') {
+    if (sharedState.apkStatus === 'downloading') {
       return;
     }
-    if (Pushy.apkStatus === 'downloaded') {
+    if (sharedState.apkStatus === 'downloaded') {
       this.report({ type: 'errorInstallApk' });
       this.throwIfEnabled(new Error('errorInstallApk'));
       return;
@@ -513,36 +525,40 @@ export class Pushy {
         return;
       }
     }
-    Pushy.apkStatus = 'downloading';
+    sharedState.apkStatus = 'downloading';
     this.report({ type: 'downloadingApk' });
     const progressKey = 'downloadingApk';
     if (onDownloadProgress) {
-      if (Pushy.progressHandlers[progressKey]) {
-        Pushy.progressHandlers[progressKey].remove();
+      if (sharedState.progressHandlers[progressKey]) {
+        sharedState.progressHandlers[progressKey].remove();
       }
-      Pushy.progressHandlers[progressKey] = pushyNativeEventEmitter.addListener(
-        'RCTPushyDownloadProgress',
-        (progressData: ProgressData) => {
-          if (progressData.hash === progressKey) {
-            onDownloadProgress(progressData);
-          }
-        },
-      );
+      sharedState.progressHandlers[progressKey] =
+        pushyNativeEventEmitter.addListener(
+          'RCTPushyDownloadProgress',
+          (progressData: ProgressData) => {
+            if (progressData.hash === progressKey) {
+              onDownloadProgress(progressData);
+            }
+          },
+        );
     }
     await PushyModule.downloadAndInstallApk({
       url,
       target: 'update.apk',
       hash: progressKey,
     }).catch(() => {
-      Pushy.apkStatus = null;
+      sharedState.apkStatus = null;
       this.report({ type: 'errorDownloadAndInstallApk' });
       this.throwIfEnabled(new Error('errorDownloadAndInstallApk'));
     });
-    Pushy.apkStatus = 'downloaded';
-    if (Pushy.progressHandlers[progressKey]) {
-      Pushy.progressHandlers[progressKey].remove();
-      delete Pushy.progressHandlers[progressKey];
+    sharedState.apkStatus = 'downloaded';
+    if (sharedState.progressHandlers[progressKey]) {
+      sharedState.progressHandlers[progressKey].remove();
+      delete sharedState.progressHandlers[progressKey];
     }
+  };
+  restartApp = async () => {
+    return PushyModule.restartApp();
   };
 }
 

@@ -13,6 +13,7 @@ export const defaultContext = {
   dismissError: noop,
   downloadUpdate: asyncNoop,
   downloadAndInstallApk: asyncNoop,
+  restartApp: asyncNoop,
   getCurrentVersionInfo: () => Promise.resolve({}),
   parseTestQrCode: () => false,
   currentHash: '',
@@ -33,6 +34,7 @@ export const UpdateContext = createContext<{
     metaInfo?: string;
   }>;
   parseTestQrCode: (code: string) => boolean;
+  restartApp: () => Promise<void>;
   currentHash: string;
   packageVersion: string;
   client?: Pushy | Cresc;

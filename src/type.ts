@@ -54,6 +54,9 @@ export interface EventData {
   message?: string;
   rolledBackVersion?: string;
   newVersion?: string;
+  name?: string;
+  description?: string;
+  metaInfo?: string;
   [key: string]: any;
 }
 
@@ -89,6 +92,7 @@ export interface ClientOptions {
   beforeCheckUpdate?: () => Promise<boolean>;
   beforeDownloadUpdate?: (info: CheckResult) => Promise<boolean>;
   afterDownloadUpdate?: (info: CheckResult) => Promise<boolean>;
+  onPackageExpired?: (info: CheckResult) => Promise<boolean>;
 }
 
 export interface UpdateTestPayload {

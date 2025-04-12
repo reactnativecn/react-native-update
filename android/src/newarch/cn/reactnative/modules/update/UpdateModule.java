@@ -98,6 +98,11 @@ public class UpdateModule extends NativePushySpec {
     }
 
     @Override
+    public void restartApp(Promise promise) {
+        UpdateModuleImpl.restartApp(mContext, promise);
+    }
+
+    @Override
     public void setNeedUpdate(ReadableMap options,Promise promise) {
         UpdateModuleImpl.setNeedUpdate(updateContext, options,promise);
     }
