@@ -6,7 +6,8 @@
     "android": "react-native run-android",
     "ios": "react-native run-ios",
     "lint": "eslint .",
-    "start": "react-native start",
+    "start": "npm run codegen && hdc rport tcp:8081 tcp:8081 && react-native start",
+    "codegen": "react-native codegen-harmony --rnoh-module-path ./harmony/react_native_openharmony",
     "build": "pushy bundle --platform harmony",
     "test": "jest",
     "hdiffFromPPK": "pushy hdiffFromPPK .pushy/output/harmony.1735052610653.ppk .pushy/output/harmony.1735052678646.ppk .pushy/output/hdiff.ppk-patch",
@@ -14,10 +15,10 @@
     "hash": "pushy hash /Users/yanbo.he/Desktop/HarmonyOS/react-native-pushy/Example/harmony_use_pushy/.pushy/output/harmony.1735048297258.ppk"
   },
   "dependencies": {
+    "@react-native-oh/react-native-harmony": "^0.72.43",
     "react": "18.2.0",
     "react-native": "0.72.5",
-    "react-native-update": "file:../../",
-    "@react-native-oh/react-native-harmony": "^0.72.43"
+    "react-native-update": "^10.26.4"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0",

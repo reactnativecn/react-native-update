@@ -41,7 +41,7 @@ function App() {
   return (
     <View style={styles.container}>
       <Text style={styles.welcome}>欢迎使用Pushy热更新服务</Text>
-      {/* <Text style={styles.welcome}>😁hdiffFromAPP更新成功！！！</Text> */}
+      {/* <Text style={styles.welcome}>😁hdiffFromAPP更新成功！！！</Text>
       {/* <Text style={styles.welcome}>😁hdiffFromPPk更新成功！！！</Text> */}
       <View style={{flexDirection: 'row'}}>
         <TouchableOpacity
