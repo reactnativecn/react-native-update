@@ -9,6 +9,7 @@ bun install
 ```
 bun run start
 ```
+![image](./debug.png)
 
 ### 3. release 模式: 在项目根目录执行下面命令生成bundle包文件。
 ```
