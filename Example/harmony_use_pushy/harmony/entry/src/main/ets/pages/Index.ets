@@ -1,5 +1,6 @@
 import { FileJSBundleProvider } from 'pushy/src/main/ets/FileJSBundleProvider';
-import { ComponentBuilderContext, RNOHCoreContext,RNAbility } from '@rnoh/react-native-openharmony';
+import { ComponentBuilderContext, RNOHCoreContext,RNAbility,
+  MetroJSBundleProvider } from '@rnoh/react-native-openharmony';
 import {
   RNApp,
   AnyJSBundleProvider,
@@ -61,8 +62,9 @@ struct Index {
           },
           jsBundleProvider: new TraceJSBundleProviderDecorator(
             new AnyJSBundleProvider([
-              // MetroJSBundleProvider.fromServerIp('127.0.0.1'),
-              // new ResourceJSBundleProvider(rnohCoreContext.uiAbilityContext.resourceManager, 'hermes_bundle.hbc'),
+              // local debug mode
+              new MetroJSBundleProvider(),
+              // release mode
               new FileJSBundleProvider(this.rnohCoreContext.uiAbilityContext),
               new ResourceJSBundleProvider(this.rnohCoreContext.uiAbilityContext.resourceManager, 'bundle.harmony.js')
             ]),
