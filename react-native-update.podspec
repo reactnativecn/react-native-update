@@ -97,7 +97,6 @@ Pod::Spec.new do |s|
       if supports_bundle_url_final
         ss.pod_target_xcconfig = { 'SWIFT_ACTIVE_COMPILATION_CONDITIONS' => 'EXPO_SUPPORTS_BUNDLEURL' }
       end
-      ss.dependency 'ExpoModulesCore'
     end
   end
 

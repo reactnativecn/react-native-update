@@ -1,6 +1,6 @@
 {
   "name": "react-native-update",
-  "version": "10.28.2",
+  "version": "10.28.3",
   "description": "react-native hot update",
   "main": "src/index",
   "scripts": {
@@ -74,5 +74,6 @@
     "react-native": "0.73",
     "ts-jest": "^29.2.5",
     "typescript": "^5.6.3"
-  }
+  },
+  "packageManager": "yarn@1.22.21+sha1.1959a18351b811cdeedbd484a8f86c3cc3bbaf72"
 }
