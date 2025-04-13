@@ -24,7 +24,7 @@ public class UpdateModuleImpl {
 
     public static final String NAME = "Pushy";
 
-    public static void downloadFullUpdate(UpdateContext updateContext, ReadableMap options, Promise promise) {
+    public static void downloadFullUpdate(UpdateContext updateContext, final ReadableMap options, final Promise promise) {
         String url = options.getString("updateUrl");
         String hash = options.getString("hash");
         updateContext.downloadFullUpdate(url, hash, new UpdateContext.DownloadFileListener() {
@@ -40,7 +40,7 @@ public class UpdateModuleImpl {
         });
     }
 
-    public static void downloadAndInstallApk(UpdateContext updateContext, ReadableMap options, Promise promise) {
+    public static void downloadAndInstallApk(UpdateContext updateContext, final ReadableMap options, final Promise promise) {
         String url = options.getString("url");
         String hash = options.getString("hash");
         String target = options.getString("target");
@@ -63,7 +63,7 @@ public class UpdateModuleImpl {
         UpdateModule.installApk(toInstall);
     }
 
-    public static void downloadPatchFromPackage(UpdateContext updateContext, ReadableMap options, Promise promise) {
+    public static void downloadPatchFromPackage(UpdateContext updateContext, final ReadableMap options, final Promise promise) {
         String url = options.getString("updateUrl");
         String hash = options.getString("hash");
         updateContext.downloadPatchFromApk(url, hash, new UpdateContext.DownloadFileListener() {
@@ -79,7 +79,7 @@ public class UpdateModuleImpl {
         });
     }
 
-    public static void downloadPatchFromPpk(UpdateContext updateContext, ReadableMap options, Promise promise) {
+    public static void downloadPatchFromPpk(UpdateContext updateContext, final ReadableMap options, final Promise promise) {
         try {
             String url = options.getString("updateUrl");
             String hash = options.getString("hash");
@@ -102,7 +102,7 @@ public class UpdateModuleImpl {
         }
     }
 
-    public static void reloadUpdate(UpdateContext updateContext, ReactApplicationContext mContext, ReadableMap options, Promise promise) {
+    public static void reloadUpdate(UpdateContext updateContext, ReactApplicationContext mContext, final ReadableMap options, final Promise promise) {
         final String hash = options.getString("hash");
         UiThreadUtil.runOnUiThread(new Runnable() {
             @Override
@@ -176,7 +176,7 @@ public class UpdateModuleImpl {
         });
     }
 
-    public static void restartApp(final ReactApplicationContext mContext, Promise promise) {
+    public static void restartApp(final ReactApplicationContext mContext, final Promise promise) {
           UiThreadUtil.runOnUiThread(new Runnable() {
               @Override
               public void run() {
@@ -206,7 +206,7 @@ public class UpdateModuleImpl {
           });
       }
 
-    public static void setNeedUpdate(UpdateContext updateContext, ReadableMap options, Promise promise) {
+    public static void setNeedUpdate(UpdateContext updateContext, final ReadableMap options, final Promise promise) {
         final String hash = options.getString("hash");
         UiThreadUtil.runOnUiThread(new Runnable() {
             @Override
@@ -222,7 +222,7 @@ public class UpdateModuleImpl {
         });
     }
 
-    public static void markSuccess(UpdateContext updateContext, Promise promise) {
+    public static void markSuccess(UpdateContext updateContext, final Promise promise) {
         UiThreadUtil.runOnUiThread(new Runnable() {
             @Override
             public void run() {
@@ -232,7 +232,7 @@ public class UpdateModuleImpl {
         });
     }
 
-    public static void setUuid(UpdateContext updateContext, String uuid, Promise promise) {
+    public static void setUuid(UpdateContext updateContext, final String uuid, final Promise promise) {
         UiThreadUtil.runOnUiThread(new Runnable() {
             @Override
             public void run() {
@@ -253,7 +253,7 @@ public class UpdateModuleImpl {
     }
 
 
-    public static void setLocalHashInfo(UpdateContext updateContext, final String hash, final String info, Promise promise) {
+    public static void setLocalHashInfo(UpdateContext updateContext, final String hash, final String info, final Promise promise) {
         UiThreadUtil.runOnUiThread(new Runnable() {
             @Override
             public void run() {
@@ -268,7 +268,7 @@ public class UpdateModuleImpl {
         });
     }
 
-    public static void getLocalHashInfo(UpdateContext updateContext, final String hash, Promise promise) {
+    public static void getLocalHashInfo(UpdateContext updateContext, final String hash, final Promise promise) {
         String value = updateContext.getKv("hash_" + hash);
         if (check(value)) {
             promise.resolve(value);

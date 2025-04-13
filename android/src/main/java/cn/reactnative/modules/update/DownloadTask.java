@@ -120,14 +120,13 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
     }
 
     @Override
-    protected void onProgressUpdate(long[]... values) {
+    protected void onProgressUpdate(final long[]... values) {
         super.onProgressUpdate(values);
         WritableMap params = Arguments.createMap();
         params.putDouble("received", (values[0][0]));
         params.putDouble("total", (values[0][1]));
         params.putString("hash", this.hash);
         sendEvent("RCTPushyDownloadProgress", params);
-
     }
 
     byte[] buffer = new byte[1024*4];
@@ -452,7 +451,7 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
     }
 
     @Override
-    protected Void doInBackground(DownloadTaskParams... params) {
+    protected Void doInBackground(final DownloadTaskParams... params) {
         int taskType = params[0].type;
         try {
             switch (taskType) {
