@@ -1,4 +1,5 @@
 require 'json'
+require 'rubygems' # Required for version comparison
 
 new_arch_enabled = ENV['RCT_NEW_ARCH_ENABLED'] == '1'
 
@@ -33,17 +34,45 @@ Pod::Spec.new do |s|
   s.dependency "React-Core"
   s.dependency 'SSZipArchive'
 
-  project_root = File.expand_path('../../', __dir__)
-  project_package_json = File.join(project_root, 'package.json')
   is_expo_project = false
+  expo_dependency_added = false
+  supports_bundle_url_final = false
 
-  if (File.exist?(project_package_json))
-    package_json = JSON.parse(File.read(project_package_json))
-    has_expo_dependency = package_json['dependencies'] && package_json['dependencies']['expo']
-    has_expo_modules_core = Dir.exist?('node_modules/expo-modules-core')
-    is_expo_project = has_expo_dependency || has_expo_modules_core
-    if is_expo_project
-      s.dependency 'ExpoModulesCore'
+  # Use CocoaPods mechanism to find Podfile
+  begin
+    podfile_path = File.join(Pod::Config.instance.installation_root, 'Podfile')
+    if File.exist?(podfile_path)
+      podfile_content = File.read(podfile_path)
+      is_expo_project = podfile_content.include?('use_expo_modules!')
+    end
+  rescue
+    # Silently skip if CocoaPods config is not available
+  end
+
+  if is_expo_project
+    s.dependency 'ExpoModulesCore'
+    expo_dependency_added = true
+
+    # Current directory is in node_modules/react-native-update, so parent is node_modules
+    expo_core_package_json_path = File.join(__dir__, '..', 'expo-modules-core', 'package.json')
+
+    if File.exist?(expo_core_package_json_path)
+      begin
+        core_package_json = JSON.parse(File.read(expo_core_package_json_path))
+        installed_version_str = core_package_json['version']
+
+        if installed_version_str
+          begin
+            installed_version = Gem::Version.new(installed_version_str)
+            target_version = Gem::Version.new('1.12.0')
+            supports_bundle_url_final = installed_version >= target_version
+          rescue ArgumentError
+            # Silently skip version parsing errors
+          end
+        end
+      rescue JSON::ParserError, StandardError
+        # Silently skip file reading and parsing errors
+      end
     end
   end
 
@@ -62,9 +91,13 @@ Pod::Spec.new do |s|
     ss.public_header_files = 'ios/RCTPushy/HDiffPatch/**/*.h'
   end
 
-  if is_expo_project
+  if expo_dependency_added
     s.subspec 'Expo' do |ss|
       ss.source_files = 'ios/Expo/**/*.{h,m,mm,swift}'
+      if supports_bundle_url_final
+        ss.pod_target_xcconfig = { 'SWIFT_ACTIVE_COMPILATION_CONDITIONS' => 'EXPO_SUPPORTS_BUNDLEURL' }
+      end
+      ss.dependency 'ExpoModulesCore'
     end
   end
 
@@ -79,7 +112,7 @@ Pod::Spec.new do |s|
       s.pod_target_xcconfig = {
           "HEADER_SEARCH_PATHS" => "\"$(PODS_ROOT)/boost\"",
           "CLANG_CXX_LANGUAGE_STANDARD" => "c++17"
-      }
+      }.merge(s.pod_target_xcconfig)
       s.dependency "React-Codegen"
       s.dependency "RCT-Folly"
       s.dependency "RCTRequired"
