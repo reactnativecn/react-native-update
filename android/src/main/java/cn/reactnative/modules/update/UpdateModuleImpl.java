@@ -102,7 +102,7 @@ public class UpdateModuleImpl {
         }
     }
 
-    public static void reloadUpdate(UpdateContext updateContext, ReactApplicationContext mContext, final ReadableMap options, final Promise promise) {
+    public static void reloadUpdate(final UpdateContext updateContext,final ReactApplicationContext mContext, final ReadableMap options, final Promise promise) {
         final String hash = options.getString("hash");
         UiThreadUtil.runOnUiThread(new Runnable() {
             @Override
@@ -206,7 +206,7 @@ public class UpdateModuleImpl {
           });
       }
 
-    public static void setNeedUpdate(UpdateContext updateContext, final ReadableMap options, final Promise promise) {
+    public static void setNeedUpdate(final UpdateContext updateContext, final ReadableMap options, final Promise promise) {
         final String hash = options.getString("hash");
         UiThreadUtil.runOnUiThread(new Runnable() {
             @Override
@@ -222,7 +222,7 @@ public class UpdateModuleImpl {
         });
     }
 
-    public static void markSuccess(UpdateContext updateContext, final Promise promise) {
+    public static void markSuccess(final UpdateContext updateContext, final Promise promise) {
         UiThreadUtil.runOnUiThread(new Runnable() {
             @Override
             public void run() {
@@ -232,7 +232,7 @@ public class UpdateModuleImpl {
         });
     }
 
-    public static void setUuid(UpdateContext updateContext, final String uuid, final Promise promise) {
+    public static void setUuid(final UpdateContext updateContext, final String uuid, final Promise promise) {
         UiThreadUtil.runOnUiThread(new Runnable() {
             @Override
             public void run() {
@@ -253,7 +253,7 @@ public class UpdateModuleImpl {
     }
 
 
-    public static void setLocalHashInfo(UpdateContext updateContext, final String hash, final String info, final Promise promise) {
+    public static void setLocalHashInfo(final UpdateContext updateContext, final String hash, final String info, final Promise promise) {
         UiThreadUtil.runOnUiThread(new Runnable() {
             @Override
             public void run() {
