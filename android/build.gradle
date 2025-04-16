@@ -22,21 +22,49 @@ def supportsNamespace() {
   return major >= 8
 }
 
-def isExpoProject() {
+def checkProjectInfo() {
     def hasExpoModulesCore = rootProject.subprojects.any { it.name == 'expo-modules-core' }
-
     def packageJsonFile = new File(rootProject.projectDir.parentFile, 'package.json')
+    
     def hasExpoDependency = false
+    def projectVersion = '1.0.0' // Default version
+
     if (packageJsonFile.exists()) {
         def packageJson = new groovy.json.JsonSlurper().parseText(packageJsonFile.text)
-        hasExpoDependency = (packageJson.dependencies?.expo != null) || 
-                           (packageJson.devDependencies?.expo != null)
+        projectVersion = packageJson.version ?: '1.0.0' // Get project version
+
+        // Check for expo dependency and version >= 50
+        String expoVersionString = packageJson.dependencies?.expo ?: packageJson.devDependencies?.expo
+        boolean expoVersionIsHighEnough = false
+        if (expoVersionString) {
+            try {
+                // Extract the first number sequence as the major version
+                def matcher = (expoVersionString =~ /(\d+)/)
+                if (matcher.find()) {
+                    int majorVersion = matcher[0][0].toInteger()
+                    if (majorVersion >= 50) {
+                        expoVersionIsHighEnough = true
+                    }
+                }
+            } catch (NumberFormatException e) {
+                // Handle error if version parsing fails, maybe log a warning
+                println "Warning: Could not parse Expo version string: ${expoVersionString}"
+            }
+        }
+        hasExpoDependency = expoVersionIsHighEnough // Update based on version check
     }
     
-    return hasExpoModulesCore || hasExpoDependency
+    def isExpo = hasExpoModulesCore && hasExpoDependency
+    
+    // Return a map containing both pieces of information
+    return [isExpo: isExpo, version: projectVersion]
 }
 
-def expoProject = isExpoProject()
+// Get project info map
+def projectInfo = checkProjectInfo()
+// Extract info into variables
+def projectVersion = projectInfo.version
+def expoProject = projectInfo.isExpo
 
 apply plugin: 'com.android.library'
 if (isNewArchitectureEnabled()) {
@@ -45,16 +73,16 @@ if (isNewArchitectureEnabled()) {
 
 if (expoProject) {
     group = 'expo.modules.pushy'
-    version = '1.0.0'
+    version = projectVersion
 
     def expoModulesCorePlugin = new File(project(":expo-modules-core").projectDir.absolutePath, "ExpoModulesCorePlugin.gradle")
     apply from: expoModulesCorePlugin
     applyKotlinExpoModulesCorePlugin()
-    useCoreDependencies()
     useExpoPublishing()
+    useCoreDependencies()
 } else {
     group = 'cn.reactnative.modules.update'
-    version = '1.0.0'
+    version = projectVersion
 }
 
 android {

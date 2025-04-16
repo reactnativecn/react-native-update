@@ -1,9 +1,10 @@
 {
   "name": "react-native-update",
-  "version": "10.28.4",
+  "version": "10.28.5",
   "description": "react-native hot update",
   "main": "src/index",
   "scripts": {
+    "postinstall": "node scripts/check-expo-version.js",
     "prepack": "yarn submodule && yarn lint",
     "lint": "eslint \"src/*.@(ts|tsx|js|jsx)\" && tsc --noEmit",
     "submodule": "git submodule update --init --recursive",
