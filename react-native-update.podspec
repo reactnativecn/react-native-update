@@ -76,7 +76,7 @@ Pod::Spec.new do |s|
 
   s.subspec 'RCTPushy' do |ss|
     ss.source_files = 'ios/RCTPushy/*.{h,m,mm,swift}'
-    ss.public_header_files = ['ios/RCTPushy/RCTPushy.h']
+    ss.public_header_files = ['ios/RCTPushy/*.h']
   end
 
   s.subspec 'HDiffPatch' do |ss|
