@@ -6,6 +6,7 @@
 Example
 android/build
 .vscode
+.github/
 
 # OSX
 #
@@ -52,3 +53,5 @@ endpoints.json
 endpoints_cresc.json
 
 tea.yaml
+
+e2e/
