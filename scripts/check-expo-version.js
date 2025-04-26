@@ -1,3 +1,10 @@
+const ownPackageJson = require('../package.json');
+
+if (process.env.npm_package_name === ownPackageJson.name) {
+  console.log('Skipping postinstall during local development.');
+  process.exit(0);
+}
+
 const fs = require('fs');
 const path = require('path');
 
