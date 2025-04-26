@@ -1,29 +1,29 @@
 {
   "name": "react-native-update",
-  "version": "10.28.5",
+  "version": "10.28.6",
   "description": "react-native hot update",
   "main": "src/index",
   "scripts": {
     "postinstall": "node scripts/check-expo-version.js",
-    "prepack": "yarn submodule && yarn lint",
+    "prepack": "bun submodule && bun lint",
     "lint": "eslint \"src/*.@(ts|tsx|js|jsx)\" && tsc --noEmit",
     "submodule": "git submodule update --init --recursive",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build-lib": "yarn submodule && $ANDROID_HOME/ndk/20.1.5948944/ndk-build NDK_PROJECT_PATH=android APP_BUILD_SCRIPT=android/jni/Android.mk NDK_APPLICATION_MK=android/jni/Application.mk NDK_LIBS_OUT=android/lib",
-    "build:ios-debug": "cd Example/testHotUpdate && yarn && detox build --configuration ios.sim.debug",
-    "build:ios-release": "cd Example/testHotUpdate && yarn && detox build --configuration ios.sim.release",
+    "build-lib": "bun submodule && $ANDROID_HOME/ndk/20.1.5948944/ndk-build NDK_PROJECT_PATH=android APP_BUILD_SCRIPT=android/jni/Android.mk NDK_APPLICATION_MK=android/jni/Application.mk NDK_LIBS_OUT=android/lib",
+    "build:ios-debug": "cd Example/testHotUpdate && bun && detox build --configuration ios.sim.debug",
+    "build:ios-release": "cd Example/testHotUpdate && bun && detox build --configuration ios.sim.release",
     "test:ios-debug": "cd Example/testHotUpdate && detox test --configuration ios.sim.debug",
-    "test:ios-release": "cd Example/testHotUpdate && yarn detox test --configuration ios.sim.release",
-    "build:android-debug": "cd Example/testHotUpdate && yarn && detox build --configuration android.emu.debug",
-    "build:android-release": "cd Example/testHotUpdate && yarn && detox build --configuration android.emu.release",
-    "test:android-release": "cd Example/testHotUpdate && yarn detox test --configuration android.emu.release --headless --record-logs all",
+    "test:ios-release": "cd Example/testHotUpdate && bun detox test --configuration ios.sim.release",
+    "build:android-debug": "cd Example/testHotUpdate && bun && detox build --configuration android.emu.debug",
+    "build:android-release": "cd Example/testHotUpdate && bun && detox build --configuration android.emu.release",
+    "test:android-release": "cd Example/testHotUpdate && bun detox test --configuration android.emu.release --headless --record-logs all",
     "test:android-debug": "cd Example/testHotUpdate && detox test --configuration android.emu.debug --headless --record-logs all",
-    "e2e:ios": "npm run build:ios-release && npm run test:ios-release",
-    "e2e:android": "npm run build:android-release && npm run test:android-release",
-    "tests:emulator:prepare": "cd .github/workflows/scripts/functions && yarn && yarn build",
-    "tests:emulator:start-ci": "yarn tests:emulator:prepare && cd ./.github/workflows/scripts && ./start-firebase-emulator.sh",
+    "e2e:ios": "bun build:ios-release && bun test:ios-release",
+    "e2e:android": "bun build:android-release && bun test:android-release",
+    "tests:emulator:prepare": "cd .github/workflows/scripts/functions && bun && bun build",
+    "tests:emulator:start-ci": "bun tests:emulator:prepare && cd ./.github/workflows/scripts && ./start-firebase-emulator.sh",
     "tests:packager:jet-ci": "cd Example/testHotUpdate && cross-env TMPDIR=$HOME/.metro REACT_DEBUGGER=\"echo nope\" node_modules/.bin/react-native start --no-interactive",
-    "tests:ios:pod:install": "cd Example/testHotUpdate && yarn && yarn pod-install"
+    "tests:ios:pod:install": "cd Example/testHotUpdate && bun && bun pod-install"
   },
   "repository": {
     "type": "git",
@@ -75,6 +75,5 @@
     "react-native": "0.73",
     "ts-jest": "^29.2.5",
     "typescript": "^5.6.3"
-  },
-  "packageManager": "yarn@1.22.21+sha1.1959a18351b811cdeedbd484a8f86c3cc3bbaf72"
+  }
 }
