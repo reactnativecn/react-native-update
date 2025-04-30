@@ -78,7 +78,7 @@ if (expoProject) {
     def expoModulesCorePlugin = new File(project(":expo-modules-core").projectDir.absolutePath, "ExpoModulesCorePlugin.gradle")
     apply from: expoModulesCorePlugin
     applyKotlinExpoModulesCorePlugin()
-    useExpoPublishing()
+    // useExpoPublishing()
     useCoreDependencies()
 } else {
     group = 'cn.reactnative.modules.update'
@@ -148,7 +148,6 @@ repositories {
 dependencies {
     implementation 'com.facebook.react:react-native:+'
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.13.0'
-    implementation 'com.jakewharton:process-phoenix:3.0.0'
 }
 if (isNewArchitectureEnabled()) {
     react {
