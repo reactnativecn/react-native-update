@@ -3,7 +3,7 @@ import fileIo from '@ohos.file.fs';
 import common from '@ohos.app.ability.common';
 import { UpdateContext } from './UpdateContext';
 
-export class FileJSBundleProvider extends JSBundleProvider {
+export class PushyFileJSBundleProvider extends JSBundleProvider {
   private updateContext: UpdateContext;
   private filePath: string = ''
 

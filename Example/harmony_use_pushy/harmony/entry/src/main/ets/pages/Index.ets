@@ -1,4 +1,4 @@
-import { FileJSBundleProvider } from 'pushy/src/main/ets/FileJSBundleProvider';
+import { PushyFileJSBundleProvider  } from 'pushy/src/main/ets/PushyFileJSBundleProvider';
 import { ComponentBuilderContext, RNOHCoreContext,RNAbility,
   MetroJSBundleProvider } from '@rnoh/react-native-openharmony';
 import {
@@ -65,7 +65,7 @@ struct Index {
               // local debug mode
               new MetroJSBundleProvider(),
               // release mode
-              new FileJSBundleProvider(this.rnohCoreContext.uiAbilityContext),
+              new PushyFileJSBundleProvider(this.rnohCoreContext.uiAbilityContext),
               new ResourceJSBundleProvider(this.rnohCoreContext.uiAbilityContext.resourceManager, 'bundle.harmony.js')
             ]),
             this.rnohCoreContext.logger),
