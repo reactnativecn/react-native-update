@@ -6,7 +6,6 @@ import {
   AnyJSBundleProvider,
   ResourceJSBundleProvider,
   TraceJSBundleProviderDecorator,
-  FileJSBundleProvider
 } from '@rnoh/react-native-openharmony'
 import { createRNPackages } from '../RNPackagesFactory'
 import preferences from '@ohos.data.preferences';
