@@ -7,7 +7,7 @@
   "license": "",
   "dependencies": {
     "@rnoh/react-native-openharmony": "0.72.38",
-    "pushy": "file:../../node_modules/react-native-update/harmony"
+    "pushy": "file:../../node_modules/react-native-update/harmony/pushy.har",
   }
 }
 
