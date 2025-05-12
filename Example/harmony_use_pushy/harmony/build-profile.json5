@@ -36,10 +36,6 @@
           ]
         }
       ]
-    },
-    {
-      name: 'pushy',
-      srcPath: '../node_modules/react-native-update/harmony',
     }
   ]
 }
