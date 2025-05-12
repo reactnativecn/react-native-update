@@ -20,7 +20,6 @@ import com.facebook.react.bridge.UiThreadUtil;
 import com.facebook.react.bridge.JSBundleLoader;
 import com.facebook.react.bridge.WritableMap;
 import com.facebook.react.modules.core.DeviceEventManagerModule;
-import com.jakewharton.processphoenix.ProcessPhoenix;
 
 import java.io.File;
 import java.lang.reflect.Field;
