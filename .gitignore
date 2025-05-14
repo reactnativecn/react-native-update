@@ -44,3 +44,4 @@ npm-debug.log
 Example/**/update.json
 yarn-error.log
 Example/testHotUpdate/.pushy
+dist/

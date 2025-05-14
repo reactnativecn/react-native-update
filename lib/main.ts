@@ -154,7 +154,7 @@ export async function checkUpdate(APPKEY: string) {
   let resp;
   try {
     resp = await fetch(getCheckUrl(APPKEY), fetchPayload);
-  } catch (e) {
+  } catch (e: any) {
     report({
       type: 'errorChecking',
       message: '无法连接主更新服务器，尝试备用节点',
@@ -265,7 +265,7 @@ export async function downloadUpdate(
         originHash: currentVersion,
       });
       succeeded = true;
-    } catch (e) {
+    } catch (e: any) {
       logger(`diff error: ${e.message}, try pdiff`);
     }
   }
@@ -279,7 +279,7 @@ export async function downloadUpdate(
           hash: options.hash,
         });
         succeeded = true;
-      } catch (e) {
+      } catch (e: any) {
         logger(`pdiff error: ${e.message}, try full patch`);
       }
     }
@@ -294,7 +294,7 @@ export async function downloadUpdate(
           hash: options.hash,
         });
         succeeded = true;
-      } catch (e) {
+      } catch (e: any) {
         logger(`full patch error: ${e.message}`);
       }
     }
@@ -371,7 +371,7 @@ export async function downloadAndInstallApk({
       if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
         return report({ type: 'rejectStoragePermission' });
       }
-    } catch (err) {
+    } catch (err: any) {
       return report({ type: 'errorStoragePermission' });
     }
   }

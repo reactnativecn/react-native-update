@@ -34,7 +34,7 @@ export function simpleUpdate(
   return __DEV__
     ? WrappedComponent
     : class AppUpdate extends PureComponent {
-        stateListener: NativeEventSubscription;
+        stateListener: NativeEventSubscription | null = null;
         componentDidMount() {
           if (isRolledBack) {
             Alert.alert('抱歉', '刚刚更新遭遇错误，已为您恢复到更新前版本');
@@ -77,7 +77,7 @@ export function simpleUpdate(
                 },
               },
             ]);
-          } catch (err) {
+          } catch (err: any) {
             Alert.alert('更新失败', err.message);
           }
         };
@@ -86,7 +86,7 @@ export function simpleUpdate(
           let info;
           try {
             info = await checkUpdate(appKey!);
-          } catch (err) {
+          } catch (err: any) {
             Alert.alert('更新检查失败', err.message);
             return;
           }

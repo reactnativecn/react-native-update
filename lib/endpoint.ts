@@ -24,7 +24,7 @@ export async function updateBackupEndpoints() {
         logger('fetch remote endpoints:', remoteEndpoints);
         logger('merged backup endpoints:', backupEndpoints);
       }
-    } catch (e) {
+    } catch (e: any) {
       logger('fetch remote endpoints failed');
     }
   }

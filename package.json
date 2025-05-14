@@ -1,10 +1,13 @@
 {
   "name": "react-native-update",
-  "version": "8.5.4",
+  "version": "8.5.6",
   "description": "react-native hot update",
-  "main": "lib/index.ts",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "scripts": {
-    "prepublish": "yarn submodule",
+    "prepublishOnly": "yarn submodule && yarn build",
+    "build": "yarn clean && tsc",
+    "clean": "rm -rf dist",
     "submodule": "git submodule update --init --recursive",
     "test": "echo \"Error: no test specified\" && exit 1",
     "build-lib": "yarn submodule && $ANDROID_HOME/ndk/20.1.5948944/ndk-build NDK_PROJECT_PATH=android APP_BUILD_SCRIPT=android/jni/Android.mk NDK_APPLICATION_MK=android/jni/Application.mk NDK_LIBS_OUT=android/lib"
@@ -25,7 +28,7 @@
     "url": "https://github.com/reactnativecn/react-native-pushy/issues"
   },
   "peerDependencies": {
-    "react-native": ">=0.57.0"
+    "react-native": "*"
   },
   "homepage": "https://github.com/reactnativecn/react-native-pushy#readme",
   "dependencies": {
