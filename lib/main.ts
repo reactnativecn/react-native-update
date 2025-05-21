@@ -16,7 +16,7 @@ import {
   UpdateAvailableResult,
   UpdateEventsListener,
 } from './type';
-import { assertRelease, logger, promiseAny, testUrls } from './utils';
+import { assertRelease, enhancedFetch, logger, promiseAny, testUrls } from './utils';
 export { setCustomEndpoints };
 const {
   version: v,
@@ -153,7 +153,7 @@ export async function checkUpdate(APPKEY: string) {
   };
   let resp;
   try {
-    resp = await fetch(getCheckUrl(APPKEY), fetchPayload);
+    resp = await enhancedFetch(getCheckUrl(APPKEY), fetchPayload);
   } catch (e: any) {
     report({
       type: 'errorChecking',
@@ -164,7 +164,7 @@ export async function checkUpdate(APPKEY: string) {
       try {
         resp = await promiseAny(
           backupEndpoints.map((endpoint) =>
-            fetch(getCheckUrl(APPKEY, endpoint), fetchPayload),
+            enhancedFetch(getCheckUrl(APPKEY, endpoint), fetchPayload),
           ),
         );
       } catch {}

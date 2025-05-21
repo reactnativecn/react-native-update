@@ -1,6 +1,6 @@
 {
   "name": "react-native-update",
-  "version": "8.5.6",
+  "version": "8.5.7",
   "description": "react-native hot update",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
