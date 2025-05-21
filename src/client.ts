@@ -3,6 +3,7 @@ import {
   assertDev,
   assertWeb,
   emptyObj,
+  enhancedFetch,
   joinUrls,
   log,
   noop,
@@ -261,7 +262,7 @@ export class Pushy {
         type: 'checking',
         message: this.options.appKey + ': ' + stringifyBody,
       });
-      resp = await fetch(this.getCheckUrl(), fetchPayload);
+      resp = await enhancedFetch(this.getCheckUrl(), fetchPayload);
     } catch (e: any) {
       this.report({
         type: 'errorChecking',
@@ -272,7 +273,7 @@ export class Pushy {
         try {
           resp = await promiseAny(
             backupEndpoints.map(endpoint =>
-              fetch(this.getCheckUrl(endpoint), fetchPayload),
+              enhancedFetch(this.getCheckUrl(endpoint), fetchPayload),
             ),
           );
         } catch (err: any) {

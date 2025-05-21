@@ -40,13 +40,13 @@ const ping =
     : async (url: string) => {
         let pingFinished = false;
         return Promise.race([
-          fetch(url, {
+          enhancedFetch(url, {
             method: 'HEAD',
           })
-            .then(({ status, statusText }) => {
+            .then(({ status, statusText, url: finalUrl }) => {
               pingFinished = true;
               if (status === 200) {
-                return url;
+                return finalUrl;
               }
               log('ping failed', url, status, statusText);
               throw new Error('Ping failed');
@@ -69,7 +69,7 @@ const ping =
 
 export function joinUrls(paths: string[], fileName?: string) {
   if (fileName) {
-    return paths.map(path => 'https://' + path + '/' + fileName);
+    return paths.map(path => `https://${path}/${fileName}`);
   }
 }
 
@@ -107,4 +107,24 @@ export const assertDev = (matter: string) => {
     return false;
   }
   return true;
+};
+
+export const isAndroid70AndBelow = () => {
+  // android 7.0 and below devices do not support letsencrypt cert
+  // https://letsencrypt.org/2023/07/10/cross-sign-expiration/
+  return Platform.OS === 'android' && Platform.Version <= 24;
+};
+
+export const enhancedFetch = async (
+  url: string,
+  params: Parameters<typeof fetch>[1],
+) => {
+  return fetch(url, params).catch(e => {
+    log('fetch error', url, e);
+    if (isAndroid70AndBelow()) {
+      log(`try fallback to http because android version: ${Platform.Version}`);
+      return fetch(url.replace('https', 'http'), params);
+    }
+    throw e;
+  });
 };
