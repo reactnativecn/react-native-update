@@ -109,11 +109,11 @@ export const assertDev = (matter: string) => {
   return true;
 };
 
-export const isAndroid70AndBelow = () => {
-  // android 7.0 and below devices do not support letsencrypt cert
-  // https://letsencrypt.org/2023/07/10/cross-sign-expiration/
-  return Platform.OS === 'android' && Platform.Version <= 24;
-};
+// export const isAndroid70AndBelow = () => {
+//   // android 7.0 and below devices do not support letsencrypt cert
+//   // https://letsencrypt.org/2023/07/10/cross-sign-expiration/
+//   return Platform.OS === 'android' && Platform.Version <= 24;
+// };
 
 export const enhancedFetch = async (
   url: string,
@@ -121,10 +121,7 @@ export const enhancedFetch = async (
 ) => {
   return fetch(url, params).catch(e => {
     log('fetch error', url, e);
-    if (isAndroid70AndBelow()) {
-      log(`try fallback to http because android version: ${Platform.Version}`);
-      return fetch(url.replace('https', 'http'), params);
-    }
-    throw e;
+    log('trying fallback to http');
+    return fetch(url.replace('https', 'http'), params);
   });
 };
