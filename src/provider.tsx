@@ -251,7 +251,7 @@ export const UpdateProvider = ({
   const markSuccess = client.markSuccess;
 
   useEffect(() => {
-    if (!client.assertDebug()) {
+    if (!client.assertDebug('checkUpdate()')) {
       return;
     }
     const { checkStrategy, dismissErrorAfter, autoMarkSuccess } = options;

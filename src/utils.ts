@@ -99,16 +99,6 @@ export const assertWeb = () => {
   return true;
 };
 
-export const assertDev = (matter: string) => {
-  if (__DEV__) {
-    console.warn(
-      `${matter} is not supported in development environment; no action taken.`,
-    );
-    return false;
-  }
-  return true;
-};
-
 // export const isAndroid70AndBelow = () => {
 //   // android 7.0 and below devices do not support letsencrypt cert
 //   // https://letsencrypt.org/2023/07/10/cross-sign-expiration/

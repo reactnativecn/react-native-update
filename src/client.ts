@@ -1,6 +1,5 @@
 import { CheckResult, ClientOptions, ProgressData, EventType } from './type';
 import {
-  assertDev,
   assertWeb,
   emptyObj,
   enhancedFetch,
@@ -171,10 +170,12 @@ export class Pushy {
   getCheckUrl = (endpoint: string = this.options.server!.main) => {
     return `${endpoint}/checkUpdate/${this.options.appKey}`;
   };
-  assertDebug = () => {
+  assertDebug = (matter: string) => {
     if (__DEV__ && !this.options.debug) {
       console.info(
-        'You are currently in the development environment and have not enabled debug mode. The hot update check will not be performed. If you need to debug hot updates in the development environment, please set debug to true in the client.',
+        `You are currently in the development environment and have not enabled debug mode. 
+        ${matter} will not be performed. 
+        If you need to debug ${matter} in the development environment, please set debug to true in the client.`,
       );
       return false;
     }
@@ -189,7 +190,7 @@ export class Pushy {
     this.report({ type: 'markSuccess' });
   };
   switchVersion = async (hash: string) => {
-    if (!assertDev('switchVersion()')) {
+    if (!this.assertDebug('switchVersion()')) {
       return;
     }
     if (assertHash(hash) && !sharedState.applyingUpdate) {
@@ -200,7 +201,7 @@ export class Pushy {
   };
 
   switchVersionLater = async (hash: string) => {
-    if (!assertDev('switchVersionLater()')) {
+    if (!this.assertDebug('switchVersionLater()')) {
       return;
     }
     if (assertHash(hash)) {
@@ -209,7 +210,7 @@ export class Pushy {
     }
   };
   checkUpdate = async (extra?: Record<string, any>) => {
-    if (!this.assertDebug()) {
+    if (!this.assertDebug('checkUpdate()')) {
       return;
     }
     if (!assertWeb()) {
@@ -414,52 +415,54 @@ export class Pushy {
         }
       }
     }
-    const pdiffUrl = await testUrls(joinUrls(paths, pdiff));
-    if (!succeeded && pdiffUrl) {
-      log('downloading pdiff');
-      try {
-        await PushyModule.downloadPatchFromPackage({
-          updateUrl: pdiffUrl,
-          hash,
-        });
-        succeeded = 'pdiff';
-      } catch (e: any) {
-        const errorMessage = `pdiff error: ${e.message}`;
-        errorMessages.push(errorMessage);
-        lastError = new Error(errorMessage);
-        if (__DEV__) {
+    if (!succeeded) {
+      const pdiffUrl = await testUrls(joinUrls(paths, pdiff));
+      if (pdiffUrl) {
+        log('downloading pdiff');
+        try {
+          await PushyModule.downloadPatchFromPackage({
+            updateUrl: pdiffUrl,
+            hash,
+          });
           succeeded = 'pdiff';
-        } else {
-          log(errorMessage);
+        } catch (e: any) {
+          const errorMessage = `pdiff error: ${e.message}`;
+          errorMessages.push(errorMessage);
+          lastError = new Error(errorMessage);
+          if (__DEV__ && !full) {
+            succeeded = 'pdiff';
+            log('当前是开发环境，无法执行增量式热更新。如果需要在开发环境中测试全量热更新，请打开“忽略时间戳”开关再重试。');
+          } else {
+            log(errorMessage);
+          }
         }
       }
     }
-    const fullUrl = await testUrls(joinUrls(paths, full));
-    if (!succeeded && fullUrl) {
-      log('downloading full patch');
-      try {
-        await PushyModule.downloadFullUpdate({
-          updateUrl: fullUrl,
-          hash,
-        });
-        succeeded = 'full';
-      } catch (e: any) {
-        const errorMessage = `full patch error: ${e.message}`;
-        errorMessages.push(errorMessage);
-        lastError = new Error(errorMessage);
-        if (__DEV__) {
+    if (!succeeded) {
+      const fullUrl = await testUrls(joinUrls(paths, full));
+      if (fullUrl) {
+        log('downloading full patch');
+        try {
+          await PushyModule.downloadFullUpdate({
+            updateUrl: fullUrl,
+            hash,
+          });
           succeeded = 'full';
-        } else {
-          log(errorMessage);
+        } catch (e: any) {
+          const errorMessage = `full patch error: ${e.message}`;
+          errorMessages.push(errorMessage);
+          lastError = new Error(errorMessage);
+          if (__DEV__) {
+            succeeded = 'full';
+          } else {
+            log(errorMessage);
+          }
         }
       }
     }
     if (sharedState.progressHandlers[hash]) {
       sharedState.progressHandlers[hash].remove();
       delete sharedState.progressHandlers[hash];
-    }
-    if (__DEV__) {
-      return hash;
     }
     if (!succeeded) {
       this.report({
