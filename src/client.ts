@@ -1,4 +1,23 @@
-import { CheckResult, ClientOptions, ProgressData, EventType } from './type';
+import {
+  DeviceEventEmitter,
+  EmitterSubscription,
+  Platform,
+} from 'react-native';
+import {
+  PushyModule,
+  buildTime,
+  cInfo,
+  currentVersion,
+  getCurrentVersionInfo,
+  isFirstTime,
+  isRolledBack,
+  packageVersion,
+  pushyNativeEventEmitter,
+  rolledBackVersion,
+  setLocalHashInfo,
+} from './core';
+import { PermissionsAndroid } from './permissions';
+import { CheckResult, ClientOptions, EventType, ProgressData } from './type';
 import {
   assertWeb,
   emptyObj,
@@ -9,25 +28,6 @@ import {
   promiseAny,
   testUrls,
 } from './utils';
-import {
-  EmitterSubscription,
-  Platform,
-  DeviceEventEmitter,
-} from 'react-native';
-import { PermissionsAndroid } from './permissions';
-import {
-  PushyModule,
-  buildTime,
-  cInfo,
-  pushyNativeEventEmitter,
-  currentVersion,
-  packageVersion,
-  rolledBackVersion,
-  setLocalHashInfo,
-  isFirstTime,
-  isRolledBack,
-  getCurrentVersionInfo,
-} from './core';
 
 const SERVER_PRESETS = {
   // cn
@@ -395,7 +395,7 @@ export class Pushy {
     let lastError: any;
     let errorMessages: string[] = [];
     const diffUrl = await testUrls(joinUrls(paths, diff));
-    if (diffUrl) {
+    if (diffUrl && !__DEV__) {
       log('downloading diff');
       try {
         await PushyModule.downloadPatchFromPpk({
@@ -408,16 +408,12 @@ export class Pushy {
         const errorMessage = `diff error: ${e.message}`;
         errorMessages.push(errorMessage);
         lastError = new Error(errorMessage);
-        if (__DEV__) {
-          succeeded = 'diff';
-        } else {
-          log(errorMessage);
-        }
+        log(errorMessage);
       }
     }
     if (!succeeded) {
       const pdiffUrl = await testUrls(joinUrls(paths, pdiff));
-      if (pdiffUrl) {
+      if (pdiffUrl && !__DEV__) {
         log('downloading pdiff');
         try {
           await PushyModule.downloadPatchFromPackage({
@@ -429,12 +425,7 @@ export class Pushy {
           const errorMessage = `pdiff error: ${e.message}`;
           errorMessages.push(errorMessage);
           lastError = new Error(errorMessage);
-          if (__DEV__ && !full) {
-            succeeded = 'pdiff';
-            log('当前是开发环境，无法执行增量式热更新。如果需要在开发环境中测试全量热更新，请打开“忽略时间戳”开关再重试。');
-          } else {
-            log(errorMessage);
-          }
+          log(errorMessage);
         }
       }
     }
@@ -452,12 +443,15 @@ export class Pushy {
           const errorMessage = `full patch error: ${e.message}`;
           errorMessages.push(errorMessage);
           lastError = new Error(errorMessage);
-          if (__DEV__) {
-            succeeded = 'full';
-          } else {
-            log(errorMessage);
-          }
+          log(errorMessage);
         }
+      } else if (__DEV__) {
+        log(
+          `当前是开发环境，无法执行增量式热更新，重启不会生效。
+          如果需要在开发环境中测试可生效的全量热更新（但也会在再次重启后重新连接 metro），
+          请打开“忽略时间戳”开关再重试。`,
+        );
+        succeeded = 'full';
       }
     }
     if (sharedState.progressHandlers[hash]) {

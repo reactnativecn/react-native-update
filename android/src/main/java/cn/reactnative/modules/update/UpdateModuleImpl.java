@@ -152,8 +152,13 @@ public class UpdateModuleImpl {
                         reactHostDelegateField.setAccessible(true);
                         Object reactHostDelegate = reactHostDelegateField.get(reactHost);
 
+                        String bundleFieldName = "jsBundleLoader";
+                        if (reactHostDelegate.getClass().getCanonicalName().equals("expo.modules.ExpoReactHostFactory.ExpoReactHostDelegate")) {
+                            bundleFieldName = "_jsBundleLoader";
+                        }
+
                         // Modify the jsBundleLoader field
-                        Field jsBundleLoaderField = reactHostDelegate.getClass().getDeclaredField("jsBundleLoader");
+                        Field jsBundleLoaderField = reactHostDelegate.getClass().getDeclaredField(bundleFieldName);
                         jsBundleLoaderField.setAccessible(true);
                         jsBundleLoaderField.set(reactHostDelegate, loader);
                         
