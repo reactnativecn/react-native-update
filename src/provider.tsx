@@ -30,7 +30,7 @@ export const UpdateProvider = ({
   client = useRef(client).current;
   const { options } = client;
 
-  const stateListener = useRef<NativeEventSubscription>();
+  const stateListener = useRef<NativeEventSubscription|null>(null);
   const [updateInfo, setUpdateInfo] = useState<CheckResult>();
   const updateInfoRef = useRef(updateInfo);
   const [progress, setProgress] = useState<ProgressData>();
