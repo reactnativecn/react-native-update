@@ -147,6 +147,10 @@ public class UpdateModuleImpl {
                         reactHostField.setAccessible(true);
                         Object reactHost = reactHostField.get(reactDelegate);
 
+                        Field devSupport = reactHost.getClass().getDeclaredField("mUseDevSupport");
+                        devSupport.setAccessible(true);
+                        devSupport.set(reactHost, false);
+
                         // Access the mReactHostDelegate field
                         Field reactHostDelegateField = reactHost.getClass().getDeclaredField("mReactHostDelegate");
                         reactHostDelegateField.setAccessible(true);

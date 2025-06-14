@@ -169,17 +169,19 @@ public class UpdateContext {
     }
 
     public void markSuccess() {
-        SharedPreferences.Editor editor = sp.edit();
-        editor.putBoolean("firstTimeOk", true);
-        String lastVersion = sp.getString("lastVersion", null);
-        String curVersion = sp.getString("currentVersion", null);
-        if (lastVersion != null && !lastVersion.equals(curVersion)) {
-            editor.remove("lastVersion");
-            editor.remove("hash_" + lastVersion);
-        }
-        editor.apply();
+        if (!BuildConfig.DEBUG) {
+            SharedPreferences.Editor editor = sp.edit();
+            editor.putBoolean("firstTimeOk", true);
+            String lastVersion = sp.getString("lastVersion", null);
+            String curVersion = sp.getString("currentVersion", null);
+            if (lastVersion != null && !lastVersion.equals(curVersion)) {
+                editor.remove("lastVersion");
+                editor.remove("hash_" + lastVersion);
+            }
+            editor.apply();
 
-        this.cleanUp();
+            this.cleanUp();
+        }
     }
 
     public void clearFirstTime() {
