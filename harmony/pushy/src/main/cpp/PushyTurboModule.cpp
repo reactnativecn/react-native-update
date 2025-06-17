@@ -73,7 +73,7 @@ static jsi::Value _hostFunction_PushyTurboModule_downloadPatchFromPpk(
     const jsi::Value* args,
     size_t count)
     {
-        return jsi::Value(static_cast<ArkTSTurboModule &> (turboModule).call(rt,"downloadPatchFromPpk", args, count));
+        return jsi::Value(static_cast<ArkTSTurboModule &> (turboModule).callAsync(rt,"downloadPatchFromPpk", args, count));
     }
 
 static jsi::Value _hostFunction_PushyTurboModule_downloadPatchFromPackage(
@@ -82,7 +82,7 @@ static jsi::Value _hostFunction_PushyTurboModule_downloadPatchFromPackage(
     const jsi::Value* args,
     size_t count)
     {
-        return jsi::Value(static_cast<ArkTSTurboModule &> (turboModule).call(rt,"downloadPatchFromPackage", args, count));
+        return jsi::Value(static_cast<ArkTSTurboModule &> (turboModule).callAsync(rt,"downloadPatchFromPackage", args, count));
     }
 
 static jsi::Value _hostFunction_PushyTurboModule_downloadFullUpdate(
@@ -91,7 +91,7 @@ static jsi::Value _hostFunction_PushyTurboModule_downloadFullUpdate(
     const jsi::Value* args,
     size_t count)
     {
-        return jsi::Value(static_cast<ArkTSTurboModule &> (turboModule).call(rt,"downloadFullUpdate", args, count));
+        return jsi::Value(static_cast<ArkTSTurboModule &> (turboModule).callAsync(rt,"downloadFullUpdate", args, count));
     }
 
 static jsi::Value _hostFunction_PushyTurboModule_downloadAndInstallApk(
@@ -100,7 +100,7 @@ static jsi::Value _hostFunction_PushyTurboModule_downloadAndInstallApk(
     const jsi::Value* args,
     size_t count)
     {
-        return jsi::Value(static_cast<ArkTSTurboModule &> (turboModule).call(rt,"downloadAndInstallApk", args, count));
+        return jsi::Value(static_cast<ArkTSTurboModule &> (turboModule).callAsync(rt,"downloadAndInstallApk", args, count));
     }
 
 
