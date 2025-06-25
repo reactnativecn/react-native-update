@@ -12,7 +12,7 @@ export class PushyFileJSBundleProvider extends JSBundleProvider {
     this.updateContext = new UpdateContext(context);
   }
   getURL(): string {
-    return this.updateContext.getBundleUrl();
+    return this.updateContext.getBundleUrl().substring(1);
   }
 
   async getBundle(): Promise<ArrayBuffer> {
