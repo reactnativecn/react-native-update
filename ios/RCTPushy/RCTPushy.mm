@@ -93,8 +93,7 @@ RCT_EXPORT_MODULE(RCTPushy);
             BOOL needRollback = (!ignoreRollback && isFirstTime == NO && isFirstLoadOK == NO) || loadVersion.length<=0;
             if (needRollback) {
                 loadVersion = [self rollback];
-            }
-            else if (isFirstTime && !ignoreRollback){
+            } else if (isFirstTime && !ignoreRollback){
                 // bundleURL may be called many times, ignore rollbacks before process restarted again.
                 ignoreRollback = true;
 
@@ -302,34 +301,35 @@ RCT_EXPORT_METHOD(setNeedUpdate:(NSDictionary *)options
         
         
         resolve(@true);
-    }else{
+    } else {
         reject(@"执行报错", nil, nil);
     }
 }
 
 RCT_EXPORT_METHOD(reloadUpdate:(NSDictionary *)options
                   resolver:(RCTPromiseResolveBlock)resolve
-                                    rejecter:(RCTPromiseRejectBlock)reject)
+                  rejecter:(RCTPromiseRejectBlock)reject)
 {
     @try {
         NSString *hash = options[@"hash"];
         if (hash.length) {
-            [self setNeedUpdate:options resolver:resolve rejecter:reject];
-            
-            // reload in earlier version
-            dispatch_async(dispatch_get_main_queue(), ^{
-                [self.bridge setValue:[[self class] bundleURL] forKey:@"bundleURL"];
-                [self.bridge reload];
-            });
-            
-            #if __has_include("RCTReloadCommand.h")
-                // reload 0.62+
-                RCTReloadCommandSetBundleURL([[self class] bundleURL]);
-                RCTTriggerReloadCommandListeners(@"pushy reload");
-            #endif
-
-            resolve(@true);
-        }else{
+            // 只在 setNeedUpdate 成功后 resolve
+            [self setNeedUpdate:options resolver:^(id result) {
+                // reload in earlier version
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [self.bridge setValue:[[self class] bundleURL] forKey:@"bundleURL"];
+                    [self.bridge reload];
+                });
+                #if __has_include("RCTReloadCommand.h")
+                    // reload 0.62+
+                    RCTReloadCommandSetBundleURL([[self class] bundleURL]);
+                    RCTTriggerReloadCommandListeners(@"pushy reload");
+                #endif
+                resolve(@true);
+            } rejecter:^(NSString *code, NSString *message, NSError *error) {
+                reject(code, message, error);
+            }];
+        } else {
             reject(@"执行报错", nil, nil);
         }
     }
