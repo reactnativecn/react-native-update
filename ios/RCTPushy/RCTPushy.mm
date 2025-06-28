@@ -315,16 +315,15 @@ RCT_EXPORT_METHOD(reloadUpdate:(NSDictionary *)options
         if (hash.length) {
             // 只在 setNeedUpdate 成功后 resolve
             [self setNeedUpdate:options resolver:^(id result) {
-                // reload in earlier version
                 dispatch_async(dispatch_get_main_queue(), ^{
-                    [self.bridge setValue:[[self class] bundleURL] forKey:@"bundleURL"];
-                    [self.bridge reload];
+                    #if __has_include("RCTReloadCommand.h")
+                        // reload 0.62+
+                        RCTReloadCommandSetBundleURL([[self class] bundleURL]);
+                        RCTTriggerReloadCommandListeners(@"pushy reloadUpdate");
+                    #else
+                        [self.bridge reload];
+                    #endif
                 });
-                #if __has_include("RCTReloadCommand.h")
-                    // reload 0.62+
-                    RCTReloadCommandSetBundleURL([[self class] bundleURL]);
-                    RCTTriggerReloadCommandListeners(@"pushy reload");
-                #endif
                 resolve(@true);
             } rejecter:^(NSString *code, NSString *message, NSError *error) {
                 reject(code, message, error);
@@ -343,13 +342,14 @@ RCT_EXPORT_METHOD(restartApp:(RCTPromiseResolveBlock)resolve
 {
     @try {
         dispatch_async(dispatch_get_main_queue(), ^{
-            [self.bridge reload];
+            #if __has_include("RCTReloadCommand.h")
+                // reload 0.62+
+                RCTReloadCommandSetBundleURL([[self class] bundleURL]);
+                RCTTriggerReloadCommandListeners(@"pushy restartApp");
+            #else
+                [self.bridge reload];
+            #endif
         });
-        #if __has_include("RCTReloadCommand.h")
-            // reload 0.62+
-            RCTReloadCommandSetBundleURL([[self class] bundleURL]);
-            RCTTriggerReloadCommandListeners(@"pushy restartApp");
-        #endif
 
         resolve(@true);
     }
