@@ -542,7 +542,15 @@ RCT_EXPORT_METHOD(markSuccess:(RCTPromiseResolveBlock)resolve
             callback([self errorWithMessage:ERROR_HDIFFPATCH]);
         }
     };
-    [_fileManager hdiffFileAtPath:bundlePatch fromOrigin:bundleOrigin toDestination:destination completionHandler:completionHandler];
+    
+    @try {
+        [_fileManager hdiffFileAtPath:bundlePatch fromOrigin:bundleOrigin toDestination:destination completionHandler:completionHandler];
+    }
+    @catch (NSException *exception) {
+        NSLog(@"Pushy _dopatch error: exception occurred during hdiffFileAtPath: %@, reason: %@", 
+              exception.name, exception.reason);
+        callback([self errorWithMessage:ERROR_HDIFFPATCH]);
+    }
 }
 
 - (void)patch:(NSString *)hash fromBundle:(NSString *)bundleOrigin source:(NSString *)sourceOrigin callback:(void (^)(NSError *error))callback
