@@ -148,6 +148,7 @@ export class Pushy {
     await this.loggerPromise.promise;
     const { logger = noop, appKey } = this.options;
     const info = await getCurrentVersionInfo();
+    const overridePackageVersion = this.options.overridePackageVersion;
     logger({
       type,
       data: {
@@ -155,6 +156,7 @@ export class Pushy {
         currentVersion,
         cInfo,
         packageVersion,
+        overridePackageVersion,
         buildTime,
         message,
         ...info,
@@ -233,7 +235,7 @@ export class Pushy {
     }
     this.lastChecking = now;
     const fetchBody = {
-      packageVersion,
+      packageVersion: this.options.overridePackageVersion || packageVersion,
       hash: currentVersion,
       buildTime,
       cInfo,
