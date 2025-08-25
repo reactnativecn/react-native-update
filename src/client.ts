@@ -393,7 +393,12 @@ export class Pushy {
       }
     }
     let succeeded = '';
-    this.report({ type: 'downloading' });
+    this.report({
+      type: 'downloading',
+      data: {
+        newVersion: hash,
+      },
+    });
     let lastError: any;
     let errorMessages: string[] = [];
     const diffUrl = await testUrls(joinUrls(paths, diff));
