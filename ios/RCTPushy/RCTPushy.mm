@@ -16,6 +16,7 @@
 
 static NSString *const keyPushyInfo = @"REACTNATIVECN_PUSHY_INFO_KEY";
 static NSString *const paramPackageVersion = @"packageVersion";
+static NSString *const paramBuildTime = @"buildTime";
 static NSString *const paramLastVersion = @"lastVersion";
 static NSString *const paramCurrentVersion = @"currentVersion";
 static NSString *const paramIsFirstTime = @"isFirstTime";
@@ -70,20 +71,28 @@ RCT_EXPORT_MODULE(RCTPushy);
 {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     
+    // Check for version changes first 
+    NSString *curPackageVersion = [RCTPushy packageVersion];
+    NSString *curBuildTime = [RCTPushy buildTime];
+    NSString *storedPackageVersion = [defaults stringForKey:paramPackageVersion];
+    NSString *storedBuildTime = [defaults stringForKey:paramBuildTime];
+    
+    BOOL packageVersionChanged = ![curPackageVersion isEqualToString:storedPackageVersion];
+    BOOL buildTimeChanged = ![curBuildTime isEqualToString:storedBuildTime];
+    
+    if (packageVersionChanged || buildTimeChanged) {
+        // Clear all update data and store new versions
+        [defaults setObject:nil forKey:keyPushyInfo];
+        [defaults setObject:nil forKey:keyHashInfo];
+        [defaults setObject:@(YES) forKey:KeyPackageUpdatedMarked];
+        [defaults setObject:curPackageVersion forKey:paramPackageVersion];
+        [defaults setObject:curBuildTime forKey:paramBuildTime];
+        
+        // ...need clear files later
+    }
+    
     NSDictionary *pushyInfo = [defaults dictionaryForKey:keyPushyInfo];
     if (pushyInfo) {
-        NSString *curPackageVersion = [RCTPushy packageVersion];
-        NSString *packageVersion = [pushyInfo objectForKey:paramPackageVersion];
-        
-        BOOL needClearPushyInfo = ![curPackageVersion isEqualToString:packageVersion];
-        if (needClearPushyInfo) {
-            [defaults setObject:nil forKey:keyPushyInfo];
-            [defaults setObject:nil forKey:keyHashInfo];
-            [defaults setObject:@(YES) forKey:KeyPackageUpdatedMarked];
-            
-            // ...need clear files later
-        }
-        else {
             NSString *curVersion = pushyInfo[paramCurrentVersion];
             
             BOOL isFirstTime = [pushyInfo[paramIsFirstTime] boolValue];
@@ -127,13 +136,11 @@ RCT_EXPORT_MODULE(RCTPushy);
     NSDictionary *pushyInfo = [defaults dictionaryForKey:keyPushyInfo];
     NSString *lastVersion = pushyInfo[paramLastVersion];
     NSString *curVersion = pushyInfo[paramCurrentVersion]; 
-    NSString *curPackageVersion = [RCTPushy packageVersion];
     if (lastVersion.length) {
         // roll back to last version
         [defaults setObject:@{paramCurrentVersion:lastVersion,
                               paramIsFirstTime:@(NO),
-                              paramIsFirstLoadOk:@(YES),
-                              paramPackageVersion:curPackageVersion}
+                              paramIsFirstLoadOk:@(YES)}
                      forKey:keyPushyInfo];
     }
     else {
@@ -296,7 +303,6 @@ RCT_EXPORT_METHOD(setNeedUpdate:(NSDictionary *)options
         newInfo[paramLastVersion] = lastVersion;
         newInfo[paramIsFirstTime] = @(YES);
         newInfo[paramIsFirstLoadOk] = @(NO);
-        newInfo[paramPackageVersion] = [RCTPushy packageVersion];
         [defaults setObject:newInfo forKey:keyPushyInfo];
         
         

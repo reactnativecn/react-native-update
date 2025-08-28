@@ -36,10 +36,18 @@ public class UpdateContext {
         this.sp = context.getSharedPreferences("update", Context.MODE_PRIVATE);
 
         String packageVersion = getPackageVersion();
-        if (!packageVersion.equals(this.sp.getString("packageVersion", null))) {
+        String buildTime = getBuildTime();
+        String storedPackageVersion = this.sp.getString("packageVersion", null);
+        String storedBuildTime = this.sp.getString("buildTime", null);
+        
+        boolean packageVersionChanged = !packageVersion.equals(storedPackageVersion);
+        boolean buildTimeChanged = !buildTime.equals(storedBuildTime);
+        
+        if (packageVersionChanged || buildTimeChanged) {
             SharedPreferences.Editor editor = sp.edit();
             editor.clear();
             editor.putString("packageVersion", packageVersion);
+            editor.putString("buildTime", buildTime);
             editor.apply();
 
             this.cleanUp();
