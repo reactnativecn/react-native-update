@@ -361,6 +361,9 @@ RCT_EXPORT_METHOD(restartApp:(RCTPromiseResolveBlock)resolve
 RCT_EXPORT_METHOD(markSuccess:(RCTPromiseResolveBlock)resolve
                                     rejecter:(RCTPromiseRejectBlock)reject)
 {
+    #if DEBUG
+    resolve(@true);
+    #else
     
     @try {
         // up package info
@@ -384,6 +387,7 @@ RCT_EXPORT_METHOD(markSuccess:(RCTPromiseResolveBlock)resolve
     @catch (NSException *exception) {
         reject(@"执行报错", nil, nil);
     }
+    #endif
 }
 
 
