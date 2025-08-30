@@ -45,3 +45,4 @@ Example/**/update.json
 yarn-error.log
 Example/testHotUpdate/.pushy
 dist/
+.cursor/mcp.json

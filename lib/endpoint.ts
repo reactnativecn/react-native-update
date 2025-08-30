@@ -1,10 +1,7 @@
 import { logger, promiseAny } from './utils';
 
 let currentEndpoint = 'https://update.react-native.cn/api';
-let backupEndpoints: string[] = [
-  'https://pushy-koa-qgbgqmcpis.cn-beijing.fcapp.run',
-  'https://update.reactnative.cn/api',
-];
+let backupEndpoints: string[] = ['https://update.reactnative.cn/api'];
 let backupEndpointsQueryUrls = [
   'https://gitee.com/sunnylqm/react-native-pushy/raw/master/endpoints.json',
   'https://cdn.jsdelivr.net/gh/reactnativecn/react-native-pushy@master/endpoints.json',

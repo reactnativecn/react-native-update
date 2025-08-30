@@ -74,25 +74,30 @@ export const testUrls = async (urls?: string[]) => {
   return urls[0];
 };
 
-export const isAndroid70AndBelow = () => {
-  // android 7.0 and below devices do not support letsencrypt cert
-  // https://letsencrypt.org/2023/07/10/cross-sign-expiration/
-  return Platform.OS === 'android' && Platform.Version <= 24;
-};
+// export const isAndroid70AndBelow = () => {
+//   // android 7.0 and below devices do not support letsencrypt cert
+//   // https://letsencrypt.org/2023/07/10/cross-sign-expiration/
+//   return Platform.OS === 'android' && Platform.Version <= 24;
+// };
 
 export const enhancedFetch = async (
   url: string,
   params: Parameters<typeof fetch>[1],
+  isRetry = false,
 ) => {
-  return fetch(url, params).catch((e) => {
-    logger('fetch error', url, e);
-    if (isAndroid70AndBelow()) {
-      logger(
-        `try fallback to http because android version: ${Platform.Version}`,
-      );
-      return fetch(url.replace('https', 'http'), params);
-    } else {
-      throw e;
-    }
-  });
+  return fetch(url, params)
+    .then((r) => {
+      if (r.ok) {
+        return r;
+      }
+      throw new Error(`${r.status} ${r.statusText}`);
+    })
+    .catch((e) => {
+      logger('fetch error', url, e);
+      if (isRetry) {
+        throw e;
+      }
+      logger('trying fallback to http');
+      return enhancedFetch(url.replace('https', 'http'), params, true);
+    });
 };
