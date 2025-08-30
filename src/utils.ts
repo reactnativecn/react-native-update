@@ -109,9 +109,16 @@ export const enhancedFetch = async (
   url: string,
   params: Parameters<typeof fetch>[1],
 ) => {
-  return fetch(url, params).catch(e => {
-    log('fetch error', url, e);
-    log('trying fallback to http');
-    return fetch(url.replace('https', 'http'), params);
-  });
+  return fetch(url, params)
+    .then(r => {
+      if (r.ok) {
+        return r;
+      }
+      throw new Error(`${r.status} ${r.statusText}`);
+    })
+    .catch(e => {
+      log('fetch error', url, e);
+      log('trying fallback to http');
+      return fetch(url.replace('https', 'http'), params);
+    });
 };
