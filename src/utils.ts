@@ -108,7 +108,8 @@ export const assertWeb = () => {
 export const enhancedFetch = async (
   url: string,
   params: Parameters<typeof fetch>[1],
-) => {
+  isRetry = false,
+): Promise<Response> => {
   return fetch(url, params)
     .then(r => {
       if (r.ok) {
@@ -118,7 +119,10 @@ export const enhancedFetch = async (
     })
     .catch(e => {
       log('fetch error', url, e);
+      if (isRetry) {
+        throw e;
+      }
       log('trying fallback to http');
-      return fetch(url.replace('https', 'http'), params);
+      return enhancedFetch(url.replace('https', 'http'), params, true);
     });
 };
