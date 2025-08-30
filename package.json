@@ -1,6 +1,6 @@
 {
   "name": "react-native-update",
-  "version": "9.2.5",
+  "version": "9.2.6",
   "description": "react-native hot update",
   "main": "lib/index.ts",
   "scripts": {

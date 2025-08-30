@@ -46,3 +46,4 @@ Example/**/.pushy
 Example/testHotUpdate/artifacts
 
 yarn-error.log
+.cursor/mcp.json
