@@ -124,7 +124,6 @@ RCT_EXPORT_MODULE(RCTPushy);
                     loadVersion = [self rollback];
                 }
             }
-        }
     }
     
     return [RCTPushy binaryBundleURL];
