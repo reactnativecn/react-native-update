@@ -40,6 +40,16 @@ public class UpdateContext {
         String storedPackageVersion = this.sp.getString("packageVersion", null);
         String storedBuildTime = this.sp.getString("buildTime", null);
         
+        // If stored versions don't exist, write current versions first
+        if (storedPackageVersion == null || storedBuildTime == null) {
+            SharedPreferences.Editor editor = sp.edit();
+            editor.putString("packageVersion", packageVersion);
+            editor.putString("buildTime", buildTime);
+            editor.apply();
+            storedPackageVersion = packageVersion;
+            storedBuildTime = buildTime;
+        }
+        
         boolean packageVersionChanged = !packageVersion.equals(storedPackageVersion);
         boolean buildTimeChanged = !buildTime.equals(storedBuildTime);
         

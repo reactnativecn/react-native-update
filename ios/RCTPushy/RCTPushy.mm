@@ -77,6 +77,14 @@ RCT_EXPORT_MODULE(RCTPushy);
     NSString *storedPackageVersion = [defaults stringForKey:paramPackageVersion];
     NSString *storedBuildTime = [defaults stringForKey:paramBuildTime];
     
+    // If stored versions don't exist, write current versions first
+    if (!storedPackageVersion || !storedBuildTime) {
+        [defaults setObject:curPackageVersion forKey:paramPackageVersion];
+        [defaults setObject:curBuildTime forKey:paramBuildTime];
+        storedPackageVersion = curPackageVersion;
+        storedBuildTime = curBuildTime;
+    }
+    
     BOOL packageVersionChanged = ![curPackageVersion isEqualToString:storedPackageVersion];
     BOOL buildTimeChanged = ![curBuildTime isEqualToString:storedBuildTime];
     
