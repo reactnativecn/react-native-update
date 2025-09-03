@@ -91,7 +91,8 @@ export class Pushy {
   options = defaultClientOptions;
   clientType: 'Pushy' | 'Cresc' = 'Pushy';
   lastChecking?: number;
-  lastRespJson?: Promise<any>;
+  lastRespJson?: Promise<CheckResult>;
+  lastRespText?: Promise<string>;
 
   version = cInfo.rnu;
   loggerPromise = (() => {
@@ -294,19 +295,22 @@ export class Pushy {
       this.throwIfEnabled(new Error('errorChecking'));
       return this.lastRespJson ? await this.lastRespJson : emptyObj;
     }
+
+    if (resp.status !== 200) {
+      const errorMessage = `${resp.status}: ${resp.statusText}`;
+      this.report({
+        type: 'errorChecking',
+        message: errorMessage,
+      });
+      this.throwIfEnabled(new Error(errorMessage));
+      log('error checking response:', resp.status, await resp.text());
+      return this.lastRespJson ? await this.lastRespJson : emptyObj;
+    }
     this.lastRespJson = resp.json();
 
     const result: CheckResult = await this.lastRespJson;
 
     log('checking result:', result);
-
-    if (resp.status !== 200) {
-      this.report({
-        type: 'errorChecking',
-        message: result.message,
-      });
-      this.throwIfEnabled(new Error(result.message));
-    }
 
     return result;
   };
