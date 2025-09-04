@@ -28,6 +28,7 @@ import {
   promiseAny,
   testUrls,
 } from './utils';
+import i18n from './i18n';
 
 const SERVER_PRESETS = {
   // cn
@@ -107,13 +108,18 @@ export class Pushy {
   })();
 
   constructor(options: ClientOptions, clientType?: 'Pushy' | 'Cresc') {
-    if (Platform.OS === 'ios' || Platform.OS === 'android') {
-      if (!options.appKey) {
-        throw new Error('appKey is required');
-      }
-    }
     this.clientType = clientType || 'Pushy';
     this.options.server = SERVER_PRESETS[this.clientType];
+
+    // Initialize i18n based on clientType
+    i18n.setLocale(this.clientType === 'Pushy' ? 'zh' : 'en');
+
+    if (Platform.OS === 'ios' || Platform.OS === 'android') {
+      if (!options.appKey) {
+        throw new Error(i18n.t('error_appkey_required'));
+      }
+    }
+
     this.setOptions(options);
     if (isRolledBack) {
       this.report({
@@ -134,6 +140,16 @@ export class Pushy {
         }
       }
     }
+  };
+
+  /**
+   * Get translated text based on current clientType
+   * @param key - Translation key
+   * @param values - Values for interpolation (optional)
+   * @returns Translated string
+   */
+  t = (key: string, values?: Record<string, string | number>) => {
+    return i18n.t(key as any, values);
   };
 
   report = async ({
@@ -175,11 +191,7 @@ export class Pushy {
   };
   assertDebug = (matter: string) => {
     if (__DEV__ && !this.options.debug) {
-      console.info(
-        `You are currently in the development environment and have not enabled debug mode. 
-        ${matter} will not be performed. 
-        If you need to debug ${matter} in the development environment, please set debug to true in the client.`,
-      );
+      console.info(this.t('dev_debug_disabled', { matter }));
       return false;
     }
     return true;
@@ -270,7 +282,7 @@ export class Pushy {
     } catch (e: any) {
       this.report({
         type: 'errorChecking',
-        message: `Can not connect to update server: ${e.message}. Trying backup endpoints.`,
+        message: this.t('error_cannot_connect_backup', { message: e.message }),
       });
       const backupEndpoints = await this.getBackupEndpoints();
       if (backupEndpoints) {
@@ -290,14 +302,17 @@ export class Pushy {
     if (!resp) {
       this.report({
         type: 'errorChecking',
-        message: 'Can not connect to update server. Please check your network.',
+        message: this.t('error_cannot_connect_server'),
       });
       this.throwIfEnabled(new Error('errorChecking'));
       return this.lastRespJson ? await this.lastRespJson : emptyObj;
     }
 
     if (resp.status !== 200) {
-      const errorMessage = `${resp.status}: ${resp.statusText}`;
+      const errorMessage = this.t('error_http_status', {
+        status: resp.status,
+        statusText: resp.statusText,
+      });
       this.report({
         type: 'errorChecking',
         message: errorMessage,
@@ -416,7 +431,9 @@ export class Pushy {
         });
         succeeded = 'diff';
       } catch (e: any) {
-        const errorMessage = `diff error: ${e.message}`;
+        const errorMessage = this.t('error_diff_failed', {
+          message: e.message,
+        });
         errorMessages.push(errorMessage);
         lastError = new Error(errorMessage);
         log(errorMessage);
@@ -433,7 +450,9 @@ export class Pushy {
           });
           succeeded = 'pdiff';
         } catch (e: any) {
-          const errorMessage = `pdiff error: ${e.message}`;
+          const errorMessage = this.t('error_pdiff_failed', {
+            message: e.message,
+          });
           errorMessages.push(errorMessage);
           lastError = new Error(errorMessage);
           log(errorMessage);
@@ -451,7 +470,9 @@ export class Pushy {
           });
           succeeded = 'full';
         } catch (e: any) {
-          const errorMessage = `full patch error: ${e.message}`;
+          const errorMessage = this.t('error_full_patch_failed', {
+            message: e.message,
+          });
           errorMessages.push(errorMessage);
           lastError = new Error(errorMessage);
           log(errorMessage);

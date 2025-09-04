@@ -22,7 +22,7 @@
     "react-native-paper": "^5.14.5",
     "react-native-safe-area-context": "^5.5.0",
     "react-native-svg": "^15.12.0",
-    "react-native-update": "^10.29.4",
+    "react-native-update": "^10.31.0-beta.0",
     "react-native-vector-icons": "^10.2.0"
   },
   "devDependencies": {
