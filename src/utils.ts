@@ -5,6 +5,8 @@ export function log(...args: any[]) {
   console.log(i18n.t('dev_log_prefix'), ...args);
 }
 
+export const isWeb = Platform.OS === 'web';
+
 export function promiseAny<T>(promises: Promise<T>[]) {
   return new Promise<T>((resolve, reject) => {
     let count = 0;
@@ -35,38 +37,37 @@ class EmptyModule {
 }
 export const emptyModule = new EmptyModule();
 
-const ping =
-  Platform.OS === 'web'
-    ? Promise.resolve
-    : async (url: string) => {
-        let pingFinished = false;
-        return Promise.race([
-          enhancedFetch(url, {
-            method: 'HEAD',
+const ping = isWeb
+  ? Promise.resolve
+  : async (url: string) => {
+      let pingFinished = false;
+      return Promise.race([
+        enhancedFetch(url, {
+          method: 'HEAD',
+        })
+          .then(({ status, statusText, url: finalUrl }) => {
+            pingFinished = true;
+            if (status === 200) {
+              return finalUrl;
+            }
+            log('ping failed', url, status, statusText);
+            throw new Error(i18n.t('error_ping_failed'));
           })
-            .then(({ status, statusText, url: finalUrl }) => {
-              pingFinished = true;
-              if (status === 200) {
-                return finalUrl;
-              }
-              log('ping failed', url, status, statusText);
-              throw new Error(i18n.t('error_ping_failed'));
-            })
-            .catch(e => {
-              pingFinished = true;
-              log('ping error', url, e);
-              throw e;
-            }),
-          new Promise((_, reject) =>
-            setTimeout(() => {
-              reject(new Error(i18n.t('error_ping_timeout')));
-              if (!pingFinished) {
-                log('ping timeout', url);
-              }
-            }, 5000),
-          ),
-        ]);
-      };
+          .catch(e => {
+            pingFinished = true;
+            log('ping error', url, e);
+            throw e;
+          }),
+        new Promise((_, reject) =>
+          setTimeout(() => {
+            reject(new Error(i18n.t('error_ping_timeout')));
+            if (!pingFinished) {
+              log('ping timeout', url);
+            }
+          }, 5000),
+        ),
+      ]);
+    };
 
 export function joinUrls(paths: string[], fileName?: string) {
   if (fileName) {
@@ -91,7 +92,7 @@ export const testUrls = async (urls?: string[]) => {
 };
 
 export const assertWeb = () => {
-  if (Platform.OS === 'web') {
+  if (isWeb) {
     console.warn(i18n.t('dev_web_not_supported'));
     return false;
   }

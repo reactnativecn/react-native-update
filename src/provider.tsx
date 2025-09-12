@@ -23,7 +23,7 @@ import {
 import { UpdateContext } from './context';
 import { URL } from 'react-native-url-polyfill';
 import { isInRollout } from './isInRollout';
-import { log } from './utils';
+import { assertWeb, log } from './utils';
 
 export const UpdateProvider = ({
   client,
@@ -277,6 +277,9 @@ export const UpdateProvider = ({
     if (!client.assertDebug('checkUpdate()')) {
       return;
     }
+    if (!assertWeb()) {
+      return;
+    }
     const { checkStrategy, dismissErrorAfter, autoMarkSuccess } = options;
     if (autoMarkSuccess) {
       setTimeout(() => {
@@ -351,6 +354,9 @@ export const UpdateProvider = ({
   }, [client]);
 
   useEffect(() => {
+    if (!assertWeb()) {
+      return;
+    }
     const parseLinking = (url: string | null) => {
       if (!url) {
         return;
