@@ -1332,7 +1332,7 @@ PODS:
     - React-jsiexecutor
     - React-RCTFBReactNativeSpec
     - ReactCommon/turbomodule/core
-  - react-native-safe-area-context (5.4.1):
+  - react-native-safe-area-context (5.5.0):
     - DoubleConversion
     - glog
     - hermes-engine
@@ -1347,8 +1347,8 @@ PODS:
     - React-hermes
     - React-ImageManager
     - React-jsi
-    - react-native-safe-area-context/common (= 5.4.1)
-    - react-native-safe-area-context/fabric (= 5.4.1)
+    - react-native-safe-area-context/common (= 5.5.0)
+    - react-native-safe-area-context/fabric (= 5.5.0)
     - React-NativeModulesApple
     - React-RCTFabric
     - React-renderercss
@@ -1358,7 +1358,7 @@ PODS:
     - ReactCommon/turbomodule/bridging
     - ReactCommon/turbomodule/core
     - Yoga
-  - react-native-safe-area-context/common (5.4.1):
+  - react-native-safe-area-context/common (5.5.0):
     - DoubleConversion
     - glog
     - hermes-engine
@@ -1382,7 +1382,7 @@ PODS:
     - ReactCommon/turbomodule/bridging
     - ReactCommon/turbomodule/core
     - Yoga
-  - react-native-safe-area-context/fabric (5.4.1):
+  - react-native-safe-area-context/fabric (5.5.0):
     - DoubleConversion
     - glog
     - hermes-engine
@@ -1407,7 +1407,7 @@ PODS:
     - ReactCommon/turbomodule/bridging
     - ReactCommon/turbomodule/core
     - Yoga
-  - react-native-update (10.28.11):
+  - react-native-update (10.31.0-beta.0):
     - DoubleConversion
     - glog
     - hermes-engine
@@ -1423,8 +1423,7 @@ PODS:
     - React-hermes
     - React-ImageManager
     - React-jsi
-    - react-native-update/HDiffPatch (= 10.28.11)
-    - react-native-update/RCTPushy (= 10.28.11)
+    - react-native-update/RCTPushy (= 10.31.0-beta.0)
     - React-NativeModulesApple
     - React-RCTFabric
     - React-renderercss
@@ -1435,33 +1434,7 @@ PODS:
     - ReactCommon/turbomodule/core
     - SSZipArchive
     - Yoga
-  - react-native-update/HDiffPatch (10.28.11):
-    - DoubleConversion
-    - glog
-    - hermes-engine
-    - RCT-Folly (= 2024.11.18.00)
-    - RCTRequired
-    - RCTTypeSafety
-    - React
-    - React-Core
-    - React-debug
-    - React-Fabric
-    - React-featureflags
-    - React-graphics
-    - React-hermes
-    - React-ImageManager
-    - React-jsi
-    - React-NativeModulesApple
-    - React-RCTFabric
-    - React-renderercss
-    - React-rendererdebug
-    - React-utils
-    - ReactCodegen
-    - ReactCommon/turbomodule/bridging
-    - ReactCommon/turbomodule/core
-    - SSZipArchive
-    - Yoga
-  - react-native-update/RCTPushy (10.28.11):
+  - react-native-update/RCTPushy (10.31.0-beta.0):
     - DoubleConversion
     - glog
     - hermes-engine
@@ -1809,7 +1782,7 @@ PODS:
     - React-logger (= 0.79.2)
     - React-perflogger (= 0.79.2)
     - React-utils (= 0.79.2)
-  - ReactNativeCameraKit (15.0.1):
+  - ReactNativeCameraKit (15.1.0):
     - DoubleConversion
     - glog
     - hermes-engine
@@ -2186,8 +2159,8 @@ SPEC CHECKSUMS:
   React-logger: 8edfcedc100544791cd82692ca5a574240a16219
   React-Mapbuffer: c3f4b608e4a59dd2f6a416ef4d47a14400194468
   React-microtasksnativemodule: 054f34e9b82f02bd40f09cebd4083828b5b2beb6
-  react-native-safe-area-context: 5594ec631ede9c311c5c0efa244228eff845ce88
-  react-native-update: b4a6653129ac98d9cf5295d40b43ffb927114237
+  react-native-safe-area-context: 11d29ae675265669f498d7d9de2341087e8fe162
+  react-native-update: 25c349c4edf9dc895beeb1281cccc9d93f1cb3be
   React-NativeModulesApple: 2c4377e139522c3d73f5df582e4f051a838ff25e
   React-oscompat: ef5df1c734f19b8003e149317d041b8ce1f7d29c
   React-perflogger: 9a151e0b4c933c9205fd648c246506a83f31395d
@@ -2219,7 +2192,7 @@ SPEC CHECKSUMS:
   ReactAppDependencyProvider: 04d5eb15eb46be6720e17a4a7fa92940a776e584
   ReactCodegen: c63eda03ba1d94353fb97b031fc84f75a0d125ba
   ReactCommon: 76d2dc87136d0a667678668b86f0fca0c16fdeb0
-  ReactNativeCameraKit: caf4175d93930ac5267fb98c462f5f1b8d543830
+  ReactNativeCameraKit: e542035174335357fd7d747089f0e09a4ed27365
   RNSVG: 8a1054afe490b5d63b9792d7ae3c1fde8c05cdd0
   RNVectorIcons: 941a39b5d3b9d8cf8ac2e2fc09b07bfafbcf9796
   SocketRocket: d4aabe649be1e368d1318fdf28a022d714d65748

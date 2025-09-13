@@ -1,8 +1,11 @@
 import { Platform } from 'react-native';
+import i18n from './i18n';
 
 export function log(...args: any[]) {
-  console.log('react-native-update: ', ...args);
+  console.log(i18n.t('dev_log_prefix'), ...args);
 }
+
+export const isWeb = Platform.OS === 'web';
 
 export function promiseAny<T>(promises: Promise<T>[]) {
   return new Promise<T>((resolve, reject) => {
@@ -14,7 +17,7 @@ export function promiseAny<T>(promises: Promise<T>[]) {
         .catch(() => {
           count++;
           if (count === promises.length) {
-            reject(new Error('All promises were rejected'));
+            reject(new Error(i18n.t('error_all_promises_rejected')));
           }
         });
     });
@@ -34,38 +37,37 @@ class EmptyModule {
 }
 export const emptyModule = new EmptyModule();
 
-const ping =
-  Platform.OS === 'web'
-    ? Promise.resolve
-    : async (url: string) => {
-        let pingFinished = false;
-        return Promise.race([
-          enhancedFetch(url, {
-            method: 'HEAD',
+const ping = isWeb
+  ? Promise.resolve
+  : async (url: string) => {
+      let pingFinished = false;
+      return Promise.race([
+        enhancedFetch(url, {
+          method: 'HEAD',
+        })
+          .then(({ status, statusText, url: finalUrl }) => {
+            pingFinished = true;
+            if (status === 200) {
+              return finalUrl;
+            }
+            log('ping failed', url, status, statusText);
+            throw new Error(i18n.t('error_ping_failed'));
           })
-            .then(({ status, statusText, url: finalUrl }) => {
-              pingFinished = true;
-              if (status === 200) {
-                return finalUrl;
-              }
-              log('ping failed', url, status, statusText);
-              throw new Error('Ping failed');
-            })
-            .catch(e => {
-              pingFinished = true;
-              log('ping error', url, e);
-              throw e;
-            }),
-          new Promise((_, reject) =>
-            setTimeout(() => {
-              reject(new Error('Ping timeout'));
-              if (!pingFinished) {
-                log('ping timeout', url);
-              }
-            }, 5000),
-          ),
-        ]);
-      };
+          .catch(e => {
+            pingFinished = true;
+            log('ping error', url, e);
+            throw e;
+          }),
+        new Promise((_, reject) =>
+          setTimeout(() => {
+            reject(new Error(i18n.t('error_ping_timeout')));
+            if (!pingFinished) {
+              log('ping timeout', url);
+            }
+          }, 5000),
+        ),
+      ]);
+    };
 
 export function joinUrls(paths: string[], fileName?: string) {
   if (fileName) {
@@ -90,10 +92,8 @@ export const testUrls = async (urls?: string[]) => {
 };
 
 export const assertWeb = () => {
-  if (Platform.OS === 'web') {
-    console.warn(
-      'react-native-update does not support the Web platform and will not perform any operations',
-    );
+  if (isWeb) {
+    console.warn(i18n.t('dev_web_not_supported'));
     return false;
   }
   return true;
@@ -108,10 +108,26 @@ export const assertWeb = () => {
 export const enhancedFetch = async (
   url: string,
   params: Parameters<typeof fetch>[1],
-) => {
-  return fetch(url, params).catch(e => {
-    log('fetch error', url, e);
-    log('trying fallback to http');
-    return fetch(url.replace('https', 'http'), params);
-  });
+  isRetry = false,
+): Promise<Response> => {
+  return fetch(url, params)
+    .then(r => {
+      if (r.ok) {
+        return r;
+      }
+      throw new Error(
+        i18n.t('error_http_status', {
+          status: r.status,
+          statusText: r.statusText,
+        }),
+      );
+    })
+    .catch(e => {
+      log('fetch error', url, e);
+      if (isRetry) {
+        throw e;
+      }
+      log('trying fallback to http');
+      return enhancedFetch(url.replace('https', 'http'), params, true);
+    });
 };

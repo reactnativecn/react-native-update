@@ -14,11 +14,16 @@ import {
 } from 'react-native';
 import { Pushy, Cresc, sharedState } from './client';
 import { currentVersion, packageVersion, getCurrentVersionInfo } from './core';
-import { CheckResult, ProgressData, UpdateTestPayload } from './type';
+import {
+  CheckResult,
+  MixedCheckResult,
+  ProgressData,
+  UpdateTestPayload,
+} from './type';
 import { UpdateContext } from './context';
 import { URL } from 'react-native-url-polyfill';
 import { isInRollout } from './isInRollout';
-import { log } from './utils';
+import { assertWeb, log } from './utils';
 
 export const UpdateProvider = ({
   client,
@@ -30,7 +35,7 @@ export const UpdateProvider = ({
   client = useRef(client).current;
   const { options } = client;
 
-  const stateListener = useRef<NativeEventSubscription>();
+  const stateListener = useRef<NativeEventSubscription>(undefined);
   const [updateInfo, setUpdateInfo] = useState<CheckResult>();
   const updateInfoRef = useRef(updateInfo);
   const [progress, setProgress] = useState<ProgressData>();
@@ -115,16 +120,16 @@ export const UpdateProvider = ({
           client.switchVersionLater(hash);
           return true;
         }
-        alertUpdate('提示', '下载完毕，是否立即更新?', [
+        alertUpdate(client.t('alert_title'), client.t('alert_update_ready'), [
           {
-            text: '下次再说',
+            text: client.t('alert_next_time'),
             style: 'cancel',
             onPress: () => {
               client.switchVersionLater(hash);
             },
           },
           {
-            text: '立即更新',
+            text: client.t('alert_update_now'),
             style: 'default',
             onPress: () => {
               client.switchVersion(hash);
@@ -134,7 +139,7 @@ export const UpdateProvider = ({
         return true;
       } catch (e: any) {
         setLastError(e);
-        alertError('更新失败', e.message);
+        alertError(client.t('update_failed'), e.message);
         throwErrorIfEnabled(e);
         return false;
       }
@@ -158,84 +163,102 @@ export const UpdateProvider = ({
         return;
       }
       lastChecking.current = now;
-      let info: CheckResult;
+      let rootInfo: MixedCheckResult | undefined;
       try {
-        info = await client.checkUpdate(extra);
+        rootInfo = await client.checkUpdate(extra);
       } catch (e: any) {
         setLastError(e);
-        alertError('更新检查失败', e.message);
+        alertError(client.t('error_update_check_failed'), e.message);
         throwErrorIfEnabled(e);
         return;
       }
-      if (!info) {
+      if (!rootInfo) {
         return;
       }
-      const rollout = info.config?.rollout?.[packageVersion];
-      if (info.update && rollout) {
-        if (!isInRollout(rollout)) {
-          log(`not in ${rollout}% rollout, ignored`);
-          return;
+      const versions = rootInfo.versions || [rootInfo as CheckResult];
+      delete rootInfo.versions;
+      for (const versionInfo of versions) {
+        const info: CheckResult = {
+          ...versionInfo,
+          ...rootInfo,
+        };
+        const rollout = info.config?.rollout?.[packageVersion];
+        if (info.update && rollout) {
+          if (!isInRollout(rollout)) {
+            log(`${info.name} not in ${rollout}% rollout, ignored`);
+            continue;
+          }
+          log(`${info.name} in ${rollout}% rollout, continue`);
         }
-        log(`in ${rollout}% rollout, continue`);
-      }
-      info.description = info.description ?? '';
-      updateInfoRef.current = info;
-      setUpdateInfo(info);
-      if (info.expired) {
-        if (
-          options.onPackageExpired &&
-          (await options.onPackageExpired(info)) === false
-        ) {
-          log('onPackageExpired returned false, skipping');
-          return;
-        }
-        const { downloadUrl } = info;
-        if (downloadUrl && sharedState.apkStatus === null) {
-          if (options.updateStrategy === 'silentAndNow') {
-            if (Platform.OS === 'android' && downloadUrl.endsWith('.apk')) {
-              downloadAndInstallApk(downloadUrl);
-            } else {
-              Linking.openURL(downloadUrl);
+        info.description = info.description ?? '';
+        updateInfoRef.current = info;
+        setUpdateInfo(info);
+        if (info.expired) {
+          if (
+            options.onPackageExpired &&
+            (await options.onPackageExpired(info)) === false
+          ) {
+            log('onPackageExpired returned false, skipping');
+            return;
+          }
+          const { downloadUrl } = info;
+          if (downloadUrl && sharedState.apkStatus === null) {
+            if (options.updateStrategy === 'silentAndNow') {
+              if (Platform.OS === 'android' && downloadUrl.endsWith('.apk')) {
+                downloadAndInstallApk(downloadUrl);
+              } else {
+                Linking.openURL(downloadUrl);
+              }
+              return info;
             }
+            alertUpdate(
+              client.t('alert_title'),
+              client.t('alert_app_updated'),
+              [
+                {
+                  text: client.t('alert_update_button'),
+                  onPress: () => {
+                    if (
+                      Platform.OS === 'android' &&
+                      downloadUrl.endsWith('.apk')
+                    ) {
+                      downloadAndInstallApk(downloadUrl);
+                    } else {
+                      Linking.openURL(downloadUrl);
+                    }
+                  },
+                },
+              ],
+            );
+          }
+        } else if (info.update) {
+          if (
+            options.updateStrategy === 'silentAndNow' ||
+            options.updateStrategy === 'silentAndLater'
+          ) {
+            downloadUpdate(info);
             return info;
           }
-          alertUpdate('提示', '您的应用版本已更新，点击更新下载安装新版本', [
-            {
-              text: '更新',
-              onPress: () => {
-                if (Platform.OS === 'android' && downloadUrl.endsWith('.apk')) {
-                  downloadAndInstallApk(downloadUrl);
-                } else {
-                  Linking.openURL(downloadUrl);
-                }
+          alertUpdate(
+            client.t('alert_title'),
+            client.t('alert_new_version_found', {
+              name: info.name,
+              description: info.description,
+            }),
+            [
+              { text: client.t('alert_cancel'), style: 'cancel' },
+              {
+                text: client.t('alert_confirm'),
+                style: 'default',
+                onPress: () => {
+                  downloadUpdate();
+                },
               },
-            },
-          ]);
+            ],
+          );
         }
-      } else if (info.update) {
-        if (
-          options.updateStrategy === 'silentAndNow' ||
-          options.updateStrategy === 'silentAndLater'
-        ) {
-          downloadUpdate(info);
-          return info;
-        }
-        alertUpdate(
-          '提示',
-          '检查到新的版本' + info.name + ',是否下载?\n' + info.description,
-          [
-            { text: '取消', style: 'cancel' },
-            {
-              text: '确定',
-              style: 'default',
-              onPress: () => {
-                downloadUpdate();
-              },
-            },
-          ],
-        );
+        return info;
       }
-      return info;
     },
     [
       client,
@@ -252,6 +275,9 @@ export const UpdateProvider = ({
 
   useEffect(() => {
     if (!client.assertDebug('checkUpdate()')) {
+      return;
+    }
+    if (!assertWeb()) {
       return;
     }
     const { checkStrategy, dismissErrorAfter, autoMarkSuccess } = options;
@@ -297,8 +323,8 @@ export const UpdateProvider = ({
           checkUpdate({ extra: { toHash: payload.data } }).then(() => {
             if (updateInfoRef.current && updateInfoRef.current.upToDate) {
               Alert.alert(
-                'Info',
-                'No update found, please wait 10s for the server to generate the patch package',
+                client.t('alert_info'),
+                client.t('alert_no_update_wait'),
               );
             }
             options.logger = logger;
@@ -308,7 +334,7 @@ export const UpdateProvider = ({
       }
       return false;
     },
-    [checkUpdate, options],
+    [checkUpdate, options, client],
   );
 
   const parseTestQrCode = useCallback(
@@ -328,6 +354,9 @@ export const UpdateProvider = ({
   }, [client]);
 
   useEffect(() => {
+    if (!assertWeb()) {
+      return;
+    }
     const parseLinking = (url: string | null) => {
       if (!url) {
         return;

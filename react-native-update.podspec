@@ -90,13 +90,6 @@ Pod::Spec.new do |s|
 
   s.source = { :git => 'https://github.com/reactnativecn/react-native-update.git', :tag => '#{s.version}' }
 
-  # Conditionally set source files
-  if valid_expo_project
-    s.source_files = Dir.glob("ios/**/*.{h,m,mm,swift}") # Include Expo files
-  else
-    s.source_files = Dir.glob("ios/**/*.{h,m,mm,swift}").reject { |f| f.start_with?("ios/Expo/") } # Exclude Expo files
-  end
-
   s.libraries = 'bz2', 'z'
   s.vendored_libraries = 'RCTPushy/libRCTPushy.a'
   s.pod_target_xcconfig = { 
@@ -112,22 +105,18 @@ Pod::Spec.new do |s|
 
   # Conditionally add Expo dependency
   if valid_expo_project
+    s.public_header_files = ['ios/ImportReact.h']
     s.dependency 'ExpoModulesCore'
   end
 
   s.subspec 'RCTPushy' do |ss|
-    ss.source_files = 'ios/RCTPushy/*.{h,m,mm,swift}'
-    ss.public_header_files = ['ios/RCTPushy/*.h']
-  end
-
-  s.subspec 'HDiffPatch' do |ss|
-    ss.source_files = ['ios/RCTPushy/HDiffPatch/**/*.{h,m,c}',
+    ss.source_files = ['ios/RCTPushy/**/*.{h,m,mm,c}',
                        'android/jni/hpatch.{h,c}',
                        'android/jni/HDiffPatch/libHDiffPatch/HPatch/*.{h,c}',
                        'android/jni/HDiffPatch/file_for_patch.{h,c}',
                        'android/jni/lzma/C/LzmaDec.{h,c}',
                        'android/jni/lzma/C/Lzma2Dec.{h,c}']
-    ss.public_header_files = 'ios/RCTPushy/HDiffPatch/**/*.h'
+    ss.public_header_files = ['ios/RCTPushy/**/*.h']
   end
 
   # Conditionally add Expo subspec and check ExpoModulesCore version

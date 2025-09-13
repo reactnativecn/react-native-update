@@ -1,14 +1,10 @@
-export interface CheckResult {
-  upToDate?: true;
-  expired?: true;
-  downloadUrl?: string;
-  update?: true;
-  name?: string; // version name
-  hash?: string;
-  description?: string;
-  metaInfo?: string;
-  config?: {
-    rollout?: {
+export interface VersionInfo {
+  name: string;
+  hash: string;
+  description: string;
+  metaInfo: string;
+  config: {
+    rollout: {
       [packageVersion: string]: number;
     };
     [key: string]: any;
@@ -16,10 +12,26 @@ export interface CheckResult {
   pdiff?: string;
   diff?: string;
   full?: string;
-  paths?: string[];
+}
+
+interface RootResult {
+  upToDate?: true;
+  expired?: true;
+  downloadUrl?: string;
+  update?: true;
   paused?: 'app' | 'package';
   message?: string;
+  paths?: string[];
 }
+
+export type CheckResult = RootResult & VersionInfo;
+
+export type CheckResultV2 = RootResult & {
+  versions?: VersionInfo[];
+};
+
+export type MixedCheckResult = CheckResult | CheckResultV2;
+
 
 export interface ProgressData {
   hash: string;
@@ -93,6 +105,7 @@ export interface ClientOptions {
   beforeDownloadUpdate?: (info: CheckResult) => Promise<boolean>;
   afterDownloadUpdate?: (info: CheckResult) => Promise<boolean>;
   onPackageExpired?: (info: CheckResult) => Promise<boolean>;
+  overridePackageVersion?: string;
 }
 
 export interface UpdateTestPayload {
