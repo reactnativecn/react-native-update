@@ -176,7 +176,9 @@ RCT_EXPORT_MODULE(RCTPushy);
     ret[@"isFirstTime"] = [defaults objectForKey:keyFirstLoadMarked];
     ret[@"uuid"] = [defaults objectForKey:keyUuid];
     NSDictionary *pushyInfo = [defaults dictionaryForKey:keyPushyInfo];
-    ret[@"currentVersion"] = [pushyInfo objectForKey:paramCurrentVersion];
+    NSString *currentVersion = [pushyInfo objectForKey:paramCurrentVersion];
+    ret[@"currentVersion"] = currentVersion;
+    ret[@"currentVersionInfo"] = [pushyInfo objectForKey:[keyHashInfo stringByAppendingString:currentVersion]];
     
     // clear isFirstTimemarked
     if (ret[@"isFirstTime"]) {

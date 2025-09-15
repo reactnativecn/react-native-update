@@ -50,8 +50,8 @@ export class UpdateContext {
          this.preferences.flush();
     }
 
-    public  getKv(key: string): string {
-        return  this.preferences.getSync(key, '') as string;
+    public getKv(key: string): string {
+        return this.preferences.getSync(key, '') as string;
     }
 
     public  isFirstTime(): boolean {

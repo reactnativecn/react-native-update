@@ -28,11 +28,17 @@ export const UpdateContext = createContext<{
   dismissError: () => void;
   downloadUpdate: () => Promise<boolean | void>;
   downloadAndInstallApk: (url: string) => Promise<void>;
+  // @deprecated use currentVersionInfo instead
   getCurrentVersionInfo: () => Promise<{
     name?: string;
     description?: string;
     metaInfo?: string;
   }>;
+  currentVersionInfo: {
+    name?: string;
+    description?: string;
+    metaInfo?: string;
+  } | null;
   parseTestQrCode: (code: string) => boolean;
   restartApp: () => Promise<void>;
   currentHash: string;

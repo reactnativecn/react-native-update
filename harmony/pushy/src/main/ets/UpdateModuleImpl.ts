@@ -171,27 +171,20 @@ export class UpdateModuleImpl {
     }
   }
 
-  static async setLocalHashInfo(
+  static setLocalHashInfo(
     updateContext: UpdateContext,
     hash: string,
     info: string
-  ): Promise<boolean> {
-    if (!this.checkJson(info)) {
-      await updateContext.setKv(`hash_${hash}`, info);
-      throw new Error('校验报错:json字符串格式错误');
-    }
-    await updateContext.setKv(`hash_${hash}`, info);
+  ): boolean {
+    updateContext.setKv(`hash_${hash}`, info);
     return true;
   }
 
-  static async getLocalHashInfo(
+  static getLocalHashInfo(
     updateContext: UpdateContext,
     hash: string
-  ): Promise<string> {
-    const value = await updateContext.getKv(`hash_${hash}`);
-    if (!this.checkJson(value)) {
-      throw new Error('校验报错:json字符串格式错误');
-    }
+  ): string {
+    const value = updateContext.getKv(`hash_${hash}`);
     return value;
   }
 }

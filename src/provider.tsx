@@ -13,7 +13,7 @@ import {
   Linking,
 } from 'react-native';
 import { Pushy, Cresc, sharedState } from './client';
-import { currentVersion, packageVersion, getCurrentVersionInfo } from './core';
+import { currentVersion, packageVersion, getCurrentVersionInfo, currentVersionInfo } from './core';
 import {
   CheckResult,
   MixedCheckResult,
@@ -400,6 +400,7 @@ export const UpdateProvider = ({
         progress,
         downloadAndInstallApk,
         getCurrentVersionInfo,
+        currentVersionInfo,
         parseTestQrCode,
         restartApp,
       }}>
