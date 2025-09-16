@@ -18,6 +18,7 @@ export const defaultContext = {
   parseTestQrCode: () => false,
   currentHash: '',
   packageVersion: '',
+  currentVersionInfo: {},
 };
 
 export const UpdateContext = createContext<{
