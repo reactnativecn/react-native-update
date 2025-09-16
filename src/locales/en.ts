@@ -67,4 +67,8 @@ export default {
   // More alert messages
   alert_new_version_found:
     'New version {{name}} found. Download now?\n{{description}}',
+
+  // Development environment messages
+  dev_incremental_update_disabled:
+    'Currently in development environment, incremental hot update cannot be executed and restart will not take effect. If you need to test effective full hot update in development environment (but will reconnect to metro after restart), please enable "ignore timestamp" switch and retry.',
 };

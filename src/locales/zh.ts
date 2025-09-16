@@ -64,4 +64,8 @@ export default {
   // More alert messages
   alert_new_version_found:
     '检查到新的版本{{name}}，是否下载？\n{{description}}',
+
+  // Development environment messages
+  dev_incremental_update_disabled:
+    '当前是开发环境，无法执行增量式热更新，重启不会生效。如果需要在开发环境中测试可生效的全量热更新（但也会在再次重启后重新连接 metro），请打开"忽略时间戳"开关再重试。',
 };

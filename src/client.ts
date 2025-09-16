@@ -478,11 +478,7 @@ export class Pushy {
           log(errorMessage);
         }
       } else if (__DEV__) {
-        log(
-          `当前是开发环境，无法执行增量式热更新，重启不会生效。
-          如果需要在开发环境中测试可生效的全量热更新（但也会在再次重启后重新连接 metro），
-          请打开“忽略时间戳”开关再重试。`,
-        );
+        log(this.t('dev_incremental_update_disabled'));
         succeeded = 'full';
       }
     }
