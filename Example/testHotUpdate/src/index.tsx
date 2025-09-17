@@ -40,7 +40,8 @@ function App() {
     packageVersion,
     currentHash,
     parseTestQrCode,
-    progress: {received, total} = {},
+    progress: { received, total } = {},
+    currentVersionInfo,
   } = useUpdate();
   const [useDefaultAlert, setUseDefaultAlert] = useState(true);
   const [showTestConsole, setShowTestConsole] = useState(false);
@@ -114,6 +115,7 @@ function App() {
         {'\n'}
         当前热更新版本Hash: {currentHash || '(空)'}
         {'\n'}
+        当前热更新版本信息: {JSON.stringify(currentVersionInfo) || '(空)'}
       </Text>
       <Text>
         下载进度：{received} / {total}
