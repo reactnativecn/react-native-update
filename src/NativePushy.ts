@@ -10,6 +10,7 @@ export interface Spec extends TurboModule {
     buildTime: string;
     uuid: string;
     isUsingBundleUrl: boolean;
+    currentVersionInfo: string;
   };
   setLocalHashInfo(hash: string, info: string): Promise<void>;
   getLocalHashInfo(hash: string): Promise<string>;

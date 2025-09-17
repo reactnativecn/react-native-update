@@ -22,6 +22,7 @@ import {
 import {Camera} from 'react-native-camera-kit';
 import {LocalSvg} from 'react-native-svg/css';
 
+
 import TestConsole from './TestConsole';
 
 import _updateConfig from '../update.json';
