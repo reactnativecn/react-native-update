@@ -1835,7 +1835,7 @@ PODS:
     - ReactCommon/turbomodule/core
     - SocketRocket
     - Yoga
-  - react-native-update (10.31.0-beta.4):
+  - react-native-update (10.31.1):
     - boost
     - DoubleConversion
     - fast_float
@@ -1854,7 +1854,7 @@ PODS:
     - React-graphics
     - React-ImageManager
     - React-jsi
-    - react-native-update/RCTPushy (= 10.31.0-beta.4)
+    - react-native-update/RCTPushy (= 10.31.1)
     - React-NativeModulesApple
     - React-RCTFabric
     - React-renderercss
@@ -1866,7 +1866,7 @@ PODS:
     - SocketRocket
     - SSZipArchive
     - Yoga
-  - react-native-update/RCTPushy (10.31.0-beta.4):
+  - react-native-update/RCTPushy (10.31.1):
     - boost
     - DoubleConversion
     - fast_float
@@ -2800,7 +2800,7 @@ SPEC CHECKSUMS:
   React-Mapbuffer: 9d2434a42701d6144ca18f0ca1c4507808ca7696
   React-microtasksnativemodule: 75b6604b667d297292345302cc5bfb6b6aeccc1b
   react-native-safe-area-context: c6e2edd1c1da07bdce287fa9d9e60c5f7b514616
-  react-native-update: 66be7f3c9572c483d6f43405097cdf8fd5c93d84
+  react-native-update: b952a1d61a44ad16247c676ece8c29fe4c57b17c
   React-NativeModulesApple: 879fbdc5dcff7136abceb7880fe8a2022a1bd7c3
   React-oscompat: 93b5535ea7f7dff46aaee4f78309a70979bdde9d
   React-perflogger: 5536d2df3d18fe0920263466f7b46a56351c0510
