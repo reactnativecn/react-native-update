@@ -10,28 +10,9 @@
 -keepnames class com.facebook.react.devsupport.** { *; }
 
 # Keep fields used in reflection
--keepclassmembers class com.facebook.react.ReactInstanceManager {
-    private JSBundleLoader mBundleLoader;
-    private String mJSBundleFile;
-}
+-keepclassmembers class com.facebook.react.ReactActivity { *; }
+-keepclassmembers class com.facebook.react.ReactInstanceManager { *; }
+-keepclassmembers class com.facebook.react.ReactDelegate { *; }
+-keepclassmembers class com.facebook.react.ReactHost { *; }
 
--keepclassmembers class com.facebook.react.ReactDelegate {
-    private ReactHost mReactHost;
-}
-
--keepclassmembers class com.facebook.react.ReactHost {
-    private boolean mUseDevSupport;
-    private ReactHostDelegate mReactHostDelegate;
-}
-
-# Keep Expo related classes
 -keepnames class expo.modules.ExpoReactHostFactory$ExpoReactHostDelegate { *; }
-
-# Keep methods used in reflection
--keepclassmembers class com.facebook.react.ReactActivity {
-    public ReactDelegate getReactDelegate();
-}
-
--keepclassmembers class com.facebook.react.ReactHost {
-    public void reload(java.lang.String);
-}
