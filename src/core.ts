@@ -18,7 +18,7 @@ export const PushyModule =
 export const UpdateModule = PushyModule;
 
 if (!PushyModule) {
-  throw new Error(
+  throw Error(
     'Failed to load react-native-update native module, please try to recompile',
   );
 }

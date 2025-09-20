@@ -17,7 +17,7 @@ export function promiseAny<T>(promises: Promise<T>[]) {
         .catch(() => {
           count++;
           if (count === promises.length) {
-            reject(new Error(i18n.t('error_all_promises_rejected')));
+            reject(Error(i18n.t('error_all_promises_rejected')));
           }
         });
     });
@@ -51,7 +51,7 @@ const ping = isWeb
               return finalUrl;
             }
             log('ping failed', url, status, statusText);
-            throw new Error(i18n.t('error_ping_failed'));
+            throw Error(i18n.t('error_ping_failed'));
           })
           .catch(e => {
             pingFinished = true;
@@ -60,7 +60,7 @@ const ping = isWeb
           }),
         new Promise((_, reject) =>
           setTimeout(() => {
-            reject(new Error(i18n.t('error_ping_timeout')));
+            reject(Error(i18n.t('error_ping_timeout')));
             if (!pingFinished) {
               log('ping timeout', url);
             }
@@ -115,7 +115,7 @@ export const enhancedFetch = async (
       if (r.ok) {
         return r;
       }
-      throw new Error(
+      throw Error(
         i18n.t('error_http_status', {
           status: r.status,
           statusText: r.statusText,

@@ -24,14 +24,10 @@ interface RootResult {
   paths?: string[];
 }
 
-export type CheckResult = RootResult & VersionInfo;
-
-export type CheckResultV2 = RootResult & {
-  versions?: VersionInfo[];
-};
-
-export type MixedCheckResult = CheckResult | CheckResultV2;
-
+export type CheckResult = RootResult &
+  Partial<VersionInfo> & {
+    expVersion?: VersionInfo;
+  };
 
 export interface ProgressData {
   hash: string;

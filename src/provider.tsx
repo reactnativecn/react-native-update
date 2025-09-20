@@ -16,9 +16,9 @@ import { Pushy, Cresc, sharedState } from './client';
 import { currentVersion, packageVersion, getCurrentVersionInfo, currentVersionInfo } from './core';
 import {
   CheckResult,
-  MixedCheckResult,
   ProgressData,
   UpdateTestPayload,
+  VersionInfo,
 } from './type';
 import { UpdateContext } from './context';
 import { URL } from 'react-native-url-polyfill';
@@ -163,7 +163,7 @@ export const UpdateProvider = ({
         return;
       }
       lastChecking.current = now;
-      let rootInfo: MixedCheckResult | undefined;
+      let rootInfo: CheckResult | undefined;
       try {
         rootInfo = await client.checkUpdate(extra);
       } catch (e: any) {
@@ -175,8 +175,8 @@ export const UpdateProvider = ({
       if (!rootInfo) {
         return;
       }
-      const versions = rootInfo.versions || [rootInfo as CheckResult];
-      delete rootInfo.versions;
+      const versions = [rootInfo.expVersion, rootInfo].filter(Boolean) as VersionInfo[];
+      delete rootInfo.expVersion;
       for (const versionInfo of versions) {
         const info: CheckResult = {
           ...versionInfo,
@@ -242,7 +242,7 @@ export const UpdateProvider = ({
           alertUpdate(
             client.t('alert_title'),
             client.t('alert_new_version_found', {
-              name: info.name,
+              name: info.name!,
               description: info.description,
             }),
             [

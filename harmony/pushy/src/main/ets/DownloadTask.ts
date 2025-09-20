@@ -60,13 +60,13 @@ export class DownloadTask {
         const exists = fileIo.accessSync(params.targetFile);
         if (exists) {
           await fileIo.unlink(params.targetFile);
-        }else{
+        } else {
           const targetDir = params.targetFile.substring(
             0,
             params.targetFile.lastIndexOf('/'),
           );
           const exists = fileIo.accessSync(targetDir);
-          if(!exists){
+          if (!exists) {
             await fileIo.mkdir(targetDir);
           }
         }
@@ -83,7 +83,7 @@ export class DownloadTask {
         },
       });
       if (response.responseCode > 299) {
-        throw new Error(`Server error: ${response.responseCode}`);
+        throw Error(`Server error: ${response.responseCode}`);
       }
 
       const contentLength = parseInt(response.header['content-length'] || '0');
@@ -108,9 +108,10 @@ export class DownloadTask {
       const stats = await fileIo.stat(params.targetFile);
       const fileSize = stats.size;
       if (fileSize !== contentLength) {
-        throw new Error(`Download incomplete: expected ${contentLength} bytes but got ${stats.size} bytes`);
+        throw Error(
+          `Download incomplete: expected ${contentLength} bytes but got ${stats.size} bytes`,
+        );
       }
-
     } catch (error) {
       console.error('Download failed:', error);
       throw error;
@@ -142,7 +143,7 @@ export class DownloadTask {
         bytesRead = await fileIo
           .read(reader.fd, arrayBuffer)
           .catch((err: BusinessError) => {
-            throw new Error(
+            throw Error(
               `Error reading file: ${err.message}, code: ${err.code}`,
             );
           });
@@ -154,7 +155,7 @@ export class DownloadTask {
               length: bytesRead,
             })
             .catch((err: BusinessError) => {
-              throw new Error(
+              throw Error(
                 `Error writing file: ${err.message}, code: ${err.code}`,
               );
             });
@@ -295,16 +296,16 @@ export class DownloadTask {
         }
       }
 
-      if(fn !== '.DS_Store'){
+      if (fn !== '.DS_Store') {
         await zip.decompressFile(fn, params.unzipDirectory);
       }
     }
 
     if (!foundDiff) {
-      throw new Error('diff.json not found');
+      throw Error('diff.json not found');
     }
     if (!foundBundlePatch) {
-      throw new Error('bundle patch not found');
+      throw Error('bundle patch not found');
     }
     await this.copyFromResource(copyList);
   }
@@ -366,12 +367,18 @@ export class DownloadTask {
               new Uint8Array(entry.content),
             );
             const outputFile = `${params.unzipDirectory}/bundle.harmony.js`;
-            const writer = await fileIo.open(outputFile, fileIo.OpenMode.CREATE | fileIo.OpenMode.WRITE_ONLY);
+            const writer = await fileIo.open(
+              outputFile,
+              fileIo.OpenMode.CREATE | fileIo.OpenMode.WRITE_ONLY,
+            );
             const chunkSize = 4096;
             let bytesWritten = 0;
             const totalLength = patched.byteLength;
             while (bytesWritten < totalLength) {
-              const chunk = patched.slice(bytesWritten, bytesWritten + chunkSize);
+              const chunk = patched.slice(
+                bytesWritten,
+                bytesWritten + chunkSize,
+              );
               await fileIo.write(writer.fd, chunk);
               bytesWritten += chunk.byteLength;
             }
@@ -387,10 +394,10 @@ export class DownloadTask {
     }
 
     if (!foundDiff) {
-      throw new Error('diff.json not found');
+      throw Error('diff.json not found');
     }
     if (!foundBundlePatch) {
-      throw new Error('bundle patch not found');
+      throw Error('bundle patch not found');
     }
     console.info('Patch from PPK completed');
   }
@@ -478,7 +485,7 @@ export class DownloadTask {
           await this.downloadFile(params);
           break;
         default:
-          throw new Error(`Unknown task type: ${params.type}`);
+          throw Error(`Unknown task type: ${params.type}`);
       }
 
       params.listener?.onDownloadCompleted(params);
