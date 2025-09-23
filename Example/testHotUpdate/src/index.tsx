@@ -1,6 +1,6 @@
 /* eslint-disable react/no-unstable-nested-components */
 /* eslint-disable react-native/no-inline-styles */
-import React, {useRef, useState} from 'react';
+import React, { useRef, useState } from 'react';
 import {
   StyleSheet,
   Platform,
@@ -19,14 +19,14 @@ import {
   Modal,
   Portal,
 } from 'react-native-paper';
-import {Camera} from 'react-native-camera-kit';
-import {LocalSvg} from 'react-native-svg/css';
+import { Camera } from 'react-native-camera-kit';
+import { LocalSvg } from 'react-native-svg/css';
 
 import TestConsole from './TestConsole';
 
 import _updateConfig from '../update.json';
-import {UpdateProvider, Pushy, Cresc, useUpdate} from 'react-native-update';
-const {appKey} = _updateConfig[Platform.OS];
+import { UpdateProvider, Pushy, Cresc, useUpdate } from 'react-native-update';
+const { appKey } = _updateConfig[Platform.OS];
 
 function App() {
   const {
@@ -39,7 +39,8 @@ function App() {
     packageVersion,
     currentHash,
     parseTestQrCode,
-    progress: {received, total} = {},
+    progress: { received, total } = {},
+    currentVersionInfo,
   } = useUpdate();
   const [useDefaultAlert, setUseDefaultAlert] = useState(true);
   const [showTestConsole, setShowTestConsole] = useState(false);
@@ -52,8 +53,8 @@ function App() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.welcome}>欢迎xxx使用Pushy热更新服务</Text>
-      <View style={{flexDirection: 'row'}}>
+      <Text style={styles.welcome}>欢迎22使用Pushy热更新服务</Text>
+      <View style={{ flexDirection: 'row' }}>
         <Text>
           {useDefaultAlert ? '当前使用' : '当前不使用'}默认的alert更新提示
         </Text>
@@ -72,9 +73,9 @@ function App() {
       <Portal>
         <Modal visible={showCamera} onDismiss={() => setShowCamera(false)}>
           <Camera
-            style={{minHeight: 320}}
+            style={{ minHeight: 320 }}
             scanBarcode={true}
-            onReadCode={({nativeEvent: {codeStringValue}}) => {
+            onReadCode={({ nativeEvent: { codeStringValue } }) => {
               // 防止重复扫码
               if (lastParsedCode.current === codeStringValue) {
                 return;
@@ -92,7 +93,7 @@ function App() {
           />
         </Modal>
       </Portal>
-      <View style={{flexDirection: 'row', alignItems: 'center', gap: 10}}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
         <Text>png:</Text>
         <Image
           resizeMode={'contain'}
@@ -100,11 +101,11 @@ function App() {
           style={styles.image}
         />
       </View>
-      <View style={{flexDirection: 'row', alignItems: 'center', gap: 10}}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
         <Text>svg:</Text>
         <LocalSvg
           asset={require('./assets/react-logo.svg')}
-          style={{width: 30, height: 30}}
+          style={{ width: 30, height: 30 }}
         />
       </View>
       <Text style={styles.instructions}>
@@ -113,6 +114,7 @@ function App() {
         {'\n'}
         当前热更新版本Hash: {currentHash || '(空)'}
         {'\n'}
+        当前热更新版本信息: {JSON.stringify(currentVersionInfo) || '(空)'}
       </Text>
       <Text>
         下载进度：{received} / {total}
@@ -121,16 +123,18 @@ function App() {
         onPress={() => {
           checkUpdate();
           setShowUpdateSnackbar(true);
-        }}>
+        }}
+      >
         <Text style={styles.instructions}>点击这里检查更新</Text>
       </TouchableOpacity>
 
       <TouchableOpacity
         testID="testcase"
-        style={{marginTop: 15}}
+        style={{ marginTop: 15 }}
         onLongPress={() => {
           setShowTestConsole(true);
-        }}>
+        }}
+      >
         <Text style={styles.instructions}>
           react-native-update版本：{client?.version}
         </Text>
@@ -152,14 +156,15 @@ function App() {
               await downloadUpdate();
               setShowUpdateBanner(true);
             },
-          }}>
-          <Text style={{color: 'white'}}>
+          }}
+        >
+          <Text style={{ color: 'white' }}>
             有新版本({updateInfo.name})可用，是否更新？
           </Text>
         </Snackbar>
       )}
       <Banner
-        style={{width: '100%', position: 'absolute', top: 0}}
+        style={{ width: '100%', position: 'absolute', top: 0 }}
         visible={showUpdateBanner}
         actions={[
           {
@@ -174,9 +179,10 @@ function App() {
             },
           },
         ]}
-        icon={({size}) => (
+        icon={({ size }) => (
           <Icon name="checkcircleo" size={size} color="#00f" />
-        )}>
+        )}
+      >
         更新已完成，是否立即重启？
       </Banner>
     </View>

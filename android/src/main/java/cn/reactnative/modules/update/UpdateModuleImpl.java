@@ -23,6 +23,38 @@ import java.util.Map;
 public class UpdateModuleImpl {
 
     public static final String NAME = "Pushy";
+    
+    /**
+     * 获取字段的兼容性方法，尝试带m前缀和不带m前缀的字段名
+     * @param clazz 目标类
+     * @param fieldName 基础字段名（不带m前缀）
+     * @return 找到的字段对象
+     * @throws NoSuchFieldException 如果两种命名都找不到字段
+     */
+    private static Field getCompatibleField(Class<?> clazz, String fieldName) throws NoSuchFieldException {
+        // 首先尝试带m前缀的字段名
+        try {
+            return clazz.getDeclaredField("m" + capitalize(fieldName));
+        } catch (NoSuchFieldException e) {
+            // 如果找不到带m前缀的，尝试不带m前缀的
+            try {
+                return clazz.getDeclaredField(fieldName);
+            } catch (NoSuchFieldException e2) {
+                // 如果都找不到，抛出异常并包含两种尝试的信息
+                throw new NoSuchFieldException("Field not found with either name: m" + capitalize(fieldName) + " or " + fieldName);
+            }
+        }
+    }
+    
+    /**
+     * 首字母大写的辅助方法
+     */
+    private static String capitalize(String str) {
+        if (str == null || str.length() == 0) {
+            return str;
+        }
+        return str.substring(0, 1).toUpperCase() + str.substring(1);
+    }
 
     public static void downloadFullUpdate(UpdateContext updateContext, final ReadableMap options, final Promise promise) {
         String url = options.getString("updateUrl");
@@ -143,16 +175,16 @@ public class UpdateModuleImpl {
                         ReactDelegate reactDelegate = (ReactDelegate) 
                             getReactDelegateMethod.invoke(currentActivity);
 
-                        Field reactHostField = ReactDelegate.class.getDeclaredField("mReactHost");
+                        Field reactHostField = getCompatibleField(ReactDelegate.class, "reactHost");
                         reactHostField.setAccessible(true);
                         Object reactHost = reactHostField.get(reactDelegate);
 
-                        Field devSupport = reactHost.getClass().getDeclaredField("mUseDevSupport");
+                        Field devSupport = getCompatibleField(reactHost.getClass(), "useDevSupport");
                         devSupport.setAccessible(true);
                         devSupport.set(reactHost, false);
 
-                        // Access the mReactHostDelegate field
-                        Field reactHostDelegateField = reactHost.getClass().getDeclaredField("mReactHostDelegate");
+                        // Access the ReactHostDelegate field (compatible with mReactHostDelegate/reactHostDelegate)
+                        Field reactHostDelegateField = getCompatibleField(reactHost.getClass(), "reactHostDelegate");
                         reactHostDelegateField.setAccessible(true);
                         Object reactHostDelegate = reactHostDelegateField.get(reactHost);
 

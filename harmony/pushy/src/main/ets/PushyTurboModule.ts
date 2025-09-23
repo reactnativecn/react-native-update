@@ -32,6 +32,7 @@ getConstants(): Object {
   const rolledBackVersion = preferencesManager.getSync("rolledBackVersion", "") as string;
   const uuid = preferencesManager.getSync("uuid", "") as string;
   const currentVersion = preferencesManager.getSync("currentVersion", "") as string;
+  const currentVersionInfo = this.context.getKv(`hash_${currentVersion}`);
   const buildTime = preferencesManager.getSync("buildTime", "") as string;
   const isUsingBundleUrl = this.context.getIsUsingBundleUrl();
   let bundleFlags = bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_REQUESTED_PERMISSION;
@@ -53,6 +54,7 @@ getConstants(): Object {
 
   return {
     downloadRootDir: `${context.filesDir}/_update`,
+    currentVersionInfo,
     packageVersion,
     currentVersion,
     buildTime,
@@ -64,13 +66,13 @@ getConstants(): Object {
 }
 
 
-  async setLocalHashInfo(hash: string, info: string): Promise<boolean>  {
+  setLocalHashInfo(hash: string, info: string): boolean  {
     logger.debug(TAG, ",call setLocalHashInfo");
-    return UpdateModuleImpl.setLocalHashInfo(this.context,hash,info);
+    return UpdateModuleImpl.setLocalHashInfo(this.context, hash, info);
   }
 
-  async getLocalHashInfo(hash: string): Promise<string> {
-    return UpdateModuleImpl.getLocalHashInfo(this.context,hash);
+  getLocalHashInfo(hash: string): string {
+    return UpdateModuleImpl.getLocalHashInfo(this.context, hash);
   }
 
   async setUuid(uuid: string): Promise<boolean>  {

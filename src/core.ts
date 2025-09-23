@@ -18,7 +18,7 @@ export const PushyModule =
 export const UpdateModule = PushyModule;
 
 if (!PushyModule) {
-  throw new Error(
+  throw Error(
     'Failed to load react-native-update native module, please try to recompile',
   );
 }
@@ -30,6 +30,21 @@ const PushyConstants = isTurboModuleEnabled
 export const downloadRootDir: string = PushyConstants.downloadRootDir;
 export const packageVersion: string = PushyConstants.packageVersion;
 export const currentVersion: string = PushyConstants.currentVersion;
+
+const currentVersionInfoString: string = PushyConstants.currentVersionInfo;
+let _currentVersionInfo = {};
+if (currentVersionInfoString) {
+  try {
+    _currentVersionInfo = JSON.parse(currentVersionInfoString);
+  } catch (error) {
+    console.error(
+      'Failed to parse currentVersionInfo:',
+      currentVersionInfoString,
+    );
+  }
+}
+export const currentVersionInfo = _currentVersionInfo;
+
 export const isFirstTime: boolean = PushyConstants.isFirstTime;
 export const rolledBackVersion: string = PushyConstants.rolledBackVersion;
 export const isRolledBack: boolean = typeof rolledBackVersion === 'string';
@@ -45,6 +60,7 @@ async function getLocalHashInfo(hash: string) {
   return JSON.parse(await PushyModule.getLocalHashInfo(hash));
 }
 
+// @deprecated use currentVersionInfo instead
 export async function getCurrentVersionInfo(): Promise<{
   name?: string;
   description?: string;

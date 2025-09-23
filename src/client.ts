@@ -93,7 +93,6 @@ export class Pushy {
   clientType: 'Pushy' | 'Cresc' = 'Pushy';
   lastChecking?: number;
   lastRespJson?: Promise<CheckResult>;
-  lastRespText?: Promise<string>;
 
   version = cInfo.rnu;
   loggerPromise = (() => {
@@ -116,7 +115,7 @@ export class Pushy {
 
     if (Platform.OS === 'ios' || Platform.OS === 'android') {
       if (!options.appKey) {
-        throw new Error(i18n.t('error_appkey_required'));
+        throw Error(i18n.t('error_appkey_required'));
       }
     }
 
@@ -293,10 +292,10 @@ export class Pushy {
             ),
           );
         } catch (err: any) {
-          this.throwIfEnabled(new Error('errorCheckingUseBackup'));
+          this.throwIfEnabled(Error('errorCheckingUseBackup'));
         }
       } else {
-        this.throwIfEnabled(new Error('errorCheckingGetBackup'));
+        this.throwIfEnabled(Error('errorCheckingGetBackup'));
       }
     }
     if (!resp) {
@@ -304,21 +303,21 @@ export class Pushy {
         type: 'errorChecking',
         message: this.t('error_cannot_connect_server'),
       });
-      this.throwIfEnabled(new Error('errorChecking'));
+      this.throwIfEnabled(Error('errorChecking'));
       return this.lastRespJson ? await this.lastRespJson : emptyObj;
     }
 
-    if (resp.status !== 200) {
+    if (!resp.ok) {
+      const respText = await resp.text();
       const errorMessage = this.t('error_http_status', {
         status: resp.status,
-        statusText: resp.statusText,
+        statusText: respText,
       });
       this.report({
         type: 'errorChecking',
         message: errorMessage,
       });
-      this.throwIfEnabled(new Error(errorMessage));
-      log('error checking response:', resp.status, await resp.text());
+      this.throwIfEnabled(Error(errorMessage));
       return this.lastRespJson ? await this.lastRespJson : emptyObj;
     }
     this.lastRespJson = resp.json();
@@ -435,7 +434,7 @@ export class Pushy {
           message: e.message,
         });
         errorMessages.push(errorMessage);
-        lastError = new Error(errorMessage);
+        lastError = Error(errorMessage);
         log(errorMessage);
       }
     }
@@ -454,7 +453,7 @@ export class Pushy {
             message: e.message,
           });
           errorMessages.push(errorMessage);
-          lastError = new Error(errorMessage);
+          lastError = Error(errorMessage);
           log(errorMessage);
         }
       }
@@ -474,15 +473,11 @@ export class Pushy {
             message: e.message,
           });
           errorMessages.push(errorMessage);
-          lastError = new Error(errorMessage);
+          lastError = Error(errorMessage);
           log(errorMessage);
         }
       } else if (__DEV__) {
-        log(
-          `当前是开发环境，无法执行增量式热更新，重启不会生效。
-          如果需要在开发环境中测试可生效的全量热更新（但也会在再次重启后重新连接 metro），
-          请打开“忽略时间戳”开关再重试。`,
-        );
+        log(this.t('dev_incremental_update_disabled'));
         succeeded = 'full';
       }
     }
@@ -536,7 +531,7 @@ export class Pushy {
     }
     if (sharedState.apkStatus === 'downloaded') {
       this.report({ type: 'errorInstallApk' });
-      this.throwIfEnabled(new Error('errorInstallApk'));
+      this.throwIfEnabled(Error('errorInstallApk'));
       return;
     }
     if (Platform.Version <= 23) {
@@ -546,7 +541,7 @@ export class Pushy {
         );
         if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
           this.report({ type: 'rejectStoragePermission' });
-          this.throwIfEnabled(new Error('rejectStoragePermission'));
+          this.throwIfEnabled(Error('rejectStoragePermission'));
           return;
         }
       } catch (e: any) {
@@ -579,7 +574,7 @@ export class Pushy {
     }).catch(() => {
       sharedState.apkStatus = null;
       this.report({ type: 'errorDownloadAndInstallApk' });
-      this.throwIfEnabled(new Error('errorDownloadAndInstallApk'));
+      this.throwIfEnabled(Error('errorDownloadAndInstallApk'));
     });
     sharedState.apkStatus = 'downloaded';
     if (sharedState.progressHandlers[progressKey]) {

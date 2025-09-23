@@ -48,7 +48,9 @@ public class UpdateModule extends ReactContextBaseJavaModule {
         final Map<String, Object> constants = new HashMap<>();
         constants.put("downloadRootDir", updateContext.getRootDir());
         constants.put("packageVersion", updateContext.getPackageVersion());
-        constants.put("currentVersion", updateContext.getCurrentVersion());
+        String currentVersion = updateContext.getCurrentVersion();
+        constants.put("currentVersion", currentVersion);
+        constants.put("currentVersionInfo", updateContext.getKv("hash_" + currentVersion));
         constants.put("buildTime", updateContext.getBuildTime());
         constants.put("isUsingBundleUrl", updateContext.getIsUsingBundleUrl());
         boolean isFirstTime = updateContext.isFirstTime();
