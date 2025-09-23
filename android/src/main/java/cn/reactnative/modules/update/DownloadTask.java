@@ -261,9 +261,9 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
             String fn = ze.getName();
             long zipCrc32 = ze.getCrc();
             String crc32Decimal = getCRC32AsDecimal(zipCrc32);
-            ArrayList<File> targets = resToCopy.get(fn);
+            ArrayList<File> targets = resToCopy2.get(crc32Decimal);
             if(targets==null || targets.isEmpty()){
-                targets = resToCopy2.get(crc32Decimal);
+                targets = resToCopy.get(fn);
             }
             if (targets != null) {
                 File lastTarget = null;
