@@ -69,7 +69,6 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
 
     private void downloadFile(DownloadTaskParams param) throws IOException {
         String url = param.url;
-        Log.d("😁downloadFile", url);
         File writePath = param.targetFile;
         this.hash = param.hash;
         OkHttpClient client = new OkHttpClient();
