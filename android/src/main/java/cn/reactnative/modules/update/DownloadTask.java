@@ -69,6 +69,7 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
 
     private void downloadFile(DownloadTaskParams param) throws IOException {
         String url = param.url;
+        Log.d("😁downloadFile", url);
         File writePath = param.targetFile;
         this.hash = param.hash;
         OkHttpClient client = new OkHttpClient();
@@ -252,19 +253,41 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
         }
     }
 
-    private void copyFromResource(HashMap<String, ArrayList<File> > resToCopy, HashMap<String, ArrayList<File>> resToCopy2) throws IOException {
+    private void copyFromResource(HashMap<String, ArrayList<File> > resToCopy) throws IOException {
         SafeZipFile zipFile = new SafeZipFile(new File(context.getPackageResourcePath()));
         Enumeration<? extends ZipEntry> entries = zipFile.entries();
         while (entries.hasMoreElements()) {
             ZipEntry ze = entries.nextElement();
 
             String fn = ze.getName();
+            ArrayList<File> targets = resToCopy.get(fn);
+            if (targets != null) {
+                File lastTarget = null;
+                for (File target: targets) {
+                    if (UpdateContext.DEBUG) {
+                        Log.d("react-native-update", "Copying from resource " + fn + " to " + target);
+                    }
+                    if (lastTarget != null) {
+                        copyFile(lastTarget, target);
+                    } else {
+                        zipFile.unzipToFile(ze, target);
+                        lastTarget = target;
+                    }
+                }
+            }
+        }
+        zipFile.close();
+    }
+
+    private void copyFromResourceV2(HashMap<String, ArrayList<File>> resToCopy2) throws IOException {
+        SafeZipFile zipFile = new SafeZipFile(new File(context.getPackageResourcePath()));
+        Enumeration<? extends ZipEntry> entries = zipFile.entries();
+        while (entries.hasMoreElements()) {
+            ZipEntry ze = entries.nextElement();
+            String fn = ze.getName();
             long zipCrc32 = ze.getCrc();
             String crc32Decimal = getCRC32AsDecimal(zipCrc32);
             ArrayList<File> targets = resToCopy2.get(crc32Decimal);
-            if(targets==null || targets.isEmpty()){
-                targets = resToCopy.get(fn);
-            }
             if (targets != null) {
                 File lastTarget = null;
                 for (File target: targets) {
@@ -290,6 +313,7 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
         param.unzipDirectory.mkdirs();
         HashMap<String, ArrayList<File>> copyList = new HashMap<String, ArrayList<File>>();
         HashMap<String, ArrayList<File>> copiesv2List = new HashMap<String, ArrayList<File>>();
+        Boolean isV2 = false;
 
         boolean foundDiff = false;
         boolean foundBundlePatch = false;
@@ -310,53 +334,56 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
                 JSONObject copies = obj.getJSONObject("copies");
                 JSONObject copiesv2 = obj.getJSONObject("copiesv2");
                 Iterator<?> keys = copies.keys();
-                Iterator<?> keys2 = copiesv2.keys();
-                while( keys.hasNext() ) {
-                    String to = (String)keys.next();
-                    String from = copies.getString(to);
-                    if (from.isEmpty()) {
-                        from = to;
-                    }
-                    ArrayList<File> target = null;
-                    if (!copyList.containsKey(from)) {
-                        target = new ArrayList<File>();
-                        copyList.put(from, target);
-                    } else {
-                        target = copyList.get((from));
-                    }
-                    File toFile = new File(param.unzipDirectory, to);
+                Iterator<?> keysV2 = copiesv2.keys();
+                if(keysV2.hasNext()){
+                    isV2 = true;
+                    while( keysV2.hasNext() ) {
+                        String from = (String)keysV2.next();
+                        String to = copiesv2.getString(from);
+                        if (from.isEmpty()) {
+                            from = to;
+                        }
+                        ArrayList<File> target = null;
+                        if (!copiesv2List.containsKey(from)) {
+                            target = new ArrayList<File>();
+                            copiesv2List.put(from, target);
+                        } else {
+                            target = copiesv2List.get((from));
+                        }
+                        File toFile = new File(param.unzipDirectory, to);
 
-                    // Fixing a Zip Path Traversal Vulnerability
-                    // https://support.google.com/faqs/answer/9294009
-                    String canonicalPath = toFile.getCanonicalPath();
-                    if (!canonicalPath.startsWith(param.unzipDirectory.getCanonicalPath() + File.separator)) {
-                        throw new SecurityException("Illegal name: " + to);
+                        // Fixing a Zip Path Traversal Vulnerability
+                        // https://support.google.com/faqs/answer/9294009
+                        String canonicalPath = toFile.getCanonicalPath();
+                        if (!canonicalPath.startsWith(param.unzipDirectory.getCanonicalPath() + File.separator)) {
+                            throw new SecurityException("Illegal name: " + to);
+                        }
+                        target.add(toFile);
                     }
-                    target.add(toFile);
-                }
+                }else{
+                    while( keys.hasNext() ) {
+                        String to = (String)keys.next();
+                        String from = copies.getString(to);
+                        if (from.isEmpty()) {
+                            from = to;
+                        }
+                        ArrayList<File> target = null;
+                        if (!copyList.containsKey(from)) {
+                            target = new ArrayList<File>();
+                            copyList.put(from, target);
+                        } else {
+                            target = copyList.get((from));
+                        }
+                        File toFile = new File(param.unzipDirectory, to);
 
-                while( keys2.hasNext() ) {
-                    String from = (String)keys2.next();
-                    String to = copiesv2.getString(from);
-                    if (from.isEmpty()) {
-                        from = to;
+                        // Fixing a Zip Path Traversal Vulnerability
+                        // https://support.google.com/faqs/answer/9294009
+                        String canonicalPath = toFile.getCanonicalPath();
+                        if (!canonicalPath.startsWith(param.unzipDirectory.getCanonicalPath() + File.separator)) {
+                            throw new SecurityException("Illegal name: " + to);
+                        }
+                        target.add(toFile);
                     }
-                    ArrayList<File> target = null;
-                    if (!copiesv2List.containsKey(from)) {
-                        target = new ArrayList<File>();
-                        copiesv2List.put(from, target);
-                    } else {
-                        target = copiesv2List.get((from));
-                    }
-                    File toFile = new File(param.unzipDirectory, to);
-
-                    // Fixing a Zip Path Traversal Vulnerability
-                    // https://support.google.com/faqs/answer/9294009
-                    String canonicalPath = toFile.getCanonicalPath();
-                    if (!canonicalPath.startsWith(param.unzipDirectory.getCanonicalPath() + File.separator)) {
-                        throw new SecurityException("Illegal name: " + to);
-                    }
-                    target.add(toFile);
                 }
                 continue;
             }
@@ -385,7 +412,11 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
             throw new Error("bundle patch not found");
         }
 
-        copyFromResource(copyList, copiesv2List);
+        if(isV2){
+            copyFromResourceV2(copiesv2List);
+        }else{
+            copyFromResource(copyList);
+        }
 
         if (UpdateContext.DEBUG) {
             Log.d("react-native-update", "Unzip finished");
