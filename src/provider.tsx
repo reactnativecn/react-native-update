@@ -179,8 +179,8 @@ export const UpdateProvider = ({
       delete rootInfo.expVersion;
       for (const versionInfo of versions) {
         const info: CheckResult = {
-          ...versionInfo,
           ...rootInfo,
+          ...versionInfo,
         };
         const rollout = info.config?.rollout?.[packageVersion];
         if (info.update && rollout) {
