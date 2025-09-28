@@ -8,7 +8,7 @@ import {
   buildTime,
   cInfo,
   currentVersion,
-  getCurrentVersionInfo,
+  currentVersionInfo,
   isFirstTime,
   isRolledBack,
   packageVersion,
@@ -163,7 +163,6 @@ export class Pushy {
     log(type + ' ' + message);
     await this.loggerPromise.promise;
     const { logger = noop, appKey } = this.options;
-    const info = await getCurrentVersionInfo();
     const overridePackageVersion = this.options.overridePackageVersion;
     logger({
       type,
@@ -175,7 +174,7 @@ export class Pushy {
         overridePackageVersion,
         buildTime,
         message,
-        ...info,
+        ...currentVersionInfo,
         ...data,
       },
     });
