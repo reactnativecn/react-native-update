@@ -110,8 +110,7 @@ export class Pushy {
     this.clientType = clientType || 'Pushy';
     this.options.server = SERVER_PRESETS[this.clientType];
 
-    // Initialize i18n based on clientType
-    i18n.setLocale(this.clientType === 'Pushy' ? 'zh' : 'en');
+    i18n.setLocale(options.locale ?? this.clientType === 'Pushy' ? 'zh' : 'en');
 
     if (Platform.OS === 'ios' || Platform.OS === 'android') {
       if (!options.appKey) {
