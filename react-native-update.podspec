@@ -105,6 +105,7 @@ Pod::Spec.new do |s|
 
   # Conditionally add Expo dependency
   if valid_expo_project
+    s.public_header_files = ['ios/ImportReact.h']
     s.dependency 'ExpoModulesCore'
   end
 
