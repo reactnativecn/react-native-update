@@ -37,13 +37,7 @@
     },
     {
       name: 'pushy',
-      srcPath: '../../../harmony/pushy',
-      targets: [
-        {
-          name: 'default',
-          applyToProducts: ['default'],
-        },
-      ],
+      srcPath: '../node_modules/react-native-update/harmony/pushy',
     },
   ],
 }
