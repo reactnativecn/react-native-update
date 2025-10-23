@@ -7,7 +7,7 @@ set(HDIFFPATCH_DIR ${ANDROID_JNI_DIR}/HDiffPatch)
 set(LZMA_DIR ${ANDROID_JNI_DIR}/lzma)
 set(HDP_SOURCES
      ${CMAKE_CURRENT_SOURCE_DIR}/pushy.c
-     ${CMAKE_CURRENT_SOURCE_DIR}/hpatch.c
+     ${ANDROID_JNI_DIR}/hpatch.c
      ${HDIFFPATCH_DIR}/libHDiffPatch/HPatch/patch.c
      ${HDIFFPATCH_DIR}/file_for_patch.c
      ${LZMA_DIR}/C/LzmaDec.c
@@ -22,6 +22,7 @@ add_library(rnupdate SHARED
 
 target_include_directories(rnupdate PRIVATE
      ${CMAKE_CURRENT_SOURCE_DIR}
+     ${ANDROID_JNI_DIR}
      ${HDIFFPATCH_DIR}
      ${HDIFFPATCH_DIR}/libHDiffPatch/HPatch
      ${LZMA_DIR}/C
