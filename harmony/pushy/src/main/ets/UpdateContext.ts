@@ -192,11 +192,11 @@ export class UpdateContext {
   public static getBundleUrl(
     context: common.UIAbilityContext,
     defaultAssetsUrl?: string,
-  ): string {
+  ) {
     return new UpdateContext(context).getBundleUrl(defaultAssetsUrl);
   }
 
-  public getBundleUrl(defaultAssetsUrl?: string): string {
+  public getBundleUrl(defaultAssetsUrl?: string) {
     UpdateContext.isUsingBundleUrl = true;
     const currentVersion = this.getCurrentVersion();
     if (!currentVersion) {
