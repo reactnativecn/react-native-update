@@ -47,7 +47,7 @@ export const currentVersionInfo = _currentVersionInfo;
 
 export const isFirstTime: boolean = PushyConstants.isFirstTime;
 export const rolledBackVersion: string = PushyConstants.rolledBackVersion;
-export const isRolledBack: boolean = typeof rolledBackVersion === 'string';
+export const isRolledBack: boolean = !!rolledBackVersion;
 
 export const buildTime: string = PushyConstants.buildTime;
 let uuid = PushyConstants.uuid;

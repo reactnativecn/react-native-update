@@ -59,3 +59,4 @@ harmony/package
 harmony/pushy/.preview
 Example/harmony_use_pushy/harmony/entry/src/main/resources/rawfile/meta.json
 **/.hvigor
+Example/harmony_use_pushy/harmony/entry/src/main/cpp/generated

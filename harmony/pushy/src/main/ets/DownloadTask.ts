@@ -57,7 +57,7 @@ export class DownloadTask {
 
     try {
       try {
-        const exists = fileIo.accessSync(params.targetFile);
+        let exists = fileIo.accessSync(params.targetFile);
         if (exists) {
           await fileIo.unlink(params.targetFile);
         } else {
@@ -65,7 +65,7 @@ export class DownloadTask {
             0,
             params.targetFile.lastIndexOf('/'),
           );
-          const exists = fileIo.accessSync(targetDir);
+          exists = fileIo.accessSync(targetDir);
           if (!exists) {
             await fileIo.mkdir(targetDir);
           }

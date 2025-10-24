@@ -101,6 +101,7 @@ export class UpdateContext {
       params.hash = hash;
       params.listener = listener;
       params.targetFile = `${this.rootDir}/${hash}.ppk`;
+      params.unzipDirectory = `${this.rootDir}/${hash}`;
       const downloadTask = new DownloadTask(this.context);
       await downloadTask.execute(params);
     } catch (e) {
@@ -162,8 +163,8 @@ export class UpdateContext {
       const downloadTask = new DownloadTask(this.context);
       return await downloadTask.execute(params);
     } catch (e) {
-      throw e;
       console.error('Failed to download APK patch:', e);
+      throw e;
     }
   }
 

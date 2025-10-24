@@ -17,7 +17,7 @@ export class PushyFileJSBundleProvider extends JSBundleProvider {
 
   async getBundle(): Promise<ArrayBuffer> {
     try {
-      this.filePath =  this.updateContext.getBundleUrl();
+      this.filePath = this.updateContext.getBundleUrl();
       const res = fileIo.accessSync(this.filePath);
       if (res) {
         const file = fileIo.openSync(this.filePath, fileIo.OpenMode.READ_ONLY);
