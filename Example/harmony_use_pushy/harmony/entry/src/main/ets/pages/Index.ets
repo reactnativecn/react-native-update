@@ -54,7 +54,6 @@ struct Index {
             enableCAPIArchitecture: true,
             arkTsComponentNames: arkTsComponentNames,
           },
-          initialProps: { "foo": "bar" } as Record<string, string>,
           appKey: "harmony_use_pushy",
           wrappedCustomRNComponentBuilder: wrappedCustomRNComponentBuilder,
           onSetUp: (rnInstance) => {

@@ -189,18 +189,11 @@ export class UpdateContext {
     }
   }
 
-  public static getBundleUrl(
-    context: common.UIAbilityContext,
-    defaultAssetsUrl?: string,
-  ) {
-    return new UpdateContext(context).getBundleUrl(defaultAssetsUrl);
-  }
-
-  public getBundleUrl(defaultAssetsUrl?: string) {
+  public getBundleUrl() {
     UpdateContext.isUsingBundleUrl = true;
     const currentVersion = this.getCurrentVersion();
     if (!currentVersion) {
-      return defaultAssetsUrl;
+      return '';
     }
     if (!this.isFirstTime()) {
       if (!this.preferences.getSync('firstTimeOk', true)) {
@@ -222,7 +215,7 @@ export class UpdateContext {
         version = this.rollBack();
       }
     }
-    return defaultAssetsUrl;
+    return '';
   }
 
   getPackageVersion(): string {

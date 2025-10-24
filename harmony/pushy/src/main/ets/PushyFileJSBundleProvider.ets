@@ -23,6 +23,11 @@ export class PushyFileJSBundleProvider extends JSBundleProvider {
   }
 
   async getBundle(): Promise<FileJSBundle> {
+    if (!this.path) {
+      throw new JSBundleProviderError({
+        whatHappened: 'No pushy bundle found. using default bundle',
+      })
+    }
     try {
       const status = await fs.access(this.path, fs.OpenMode.READ_ONLY);
       if (status) {
@@ -30,7 +35,6 @@ export class PushyFileJSBundleProvider extends JSBundleProvider {
           filePath: this.path
         }
       }
-      throw new Error('Update bundle not found');
     } catch (error) {
       throw new JSBundleProviderError({
         whatHappened: `Couldn't load JSBundle from ${this.path}`,

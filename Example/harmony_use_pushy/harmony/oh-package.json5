@@ -13,6 +13,6 @@
     },
   },
   overrides: {
-    '@rnoh/react-native-openharmony': '0.72.38',
+    '@rnoh/react-native-openharmony': '0.72.96',
   },
 }

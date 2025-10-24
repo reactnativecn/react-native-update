@@ -10,8 +10,9 @@
         buildOption: {
           strictMode: {
             caseSensitiveCheck: true,
-            useNormalizedOHMUrl: true,
+            useNormalizedOHMUrl: true
           },
+          "nativeCompiler": "BiSheng"
         },
       },
     ],
