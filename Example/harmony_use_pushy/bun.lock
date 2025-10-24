@@ -7,7 +7,7 @@
         "@react-native-oh/react-native-harmony": "^0.72.59",
         "react": "18.2.0",
         "react-native": "0.72.5",
-        "react-native-update": "^10.35.0",
+        "react-native-update": "^10.35.1",
       },
       "devDependencies": {
         "@babel/core": "^7.20.0",
@@ -1399,7 +1399,7 @@
 
     "react-native": ["react-native@0.72.5", "", { "dependencies": { "@jest/create-cache-key-function": "^29.2.1", "@react-native-community/cli": "11.3.7", "@react-native-community/cli-platform-android": "11.3.7", "@react-native-community/cli-platform-ios": "11.3.7", "@react-native/assets-registry": "^0.72.0", "@react-native/codegen": "^0.72.7", "@react-native/gradle-plugin": "^0.72.11", "@react-native/js-polyfills": "^0.72.1", "@react-native/normalize-colors": "^0.72.0", "@react-native/virtualized-lists": "^0.72.8", "abort-controller": "^3.0.0", "anser": "^1.4.9", "base64-js": "^1.1.2", "deprecated-react-native-prop-types": "4.1.0", "event-target-shim": "^5.0.1", "flow-enums-runtime": "^0.0.5", "invariant": "^2.2.4", "jest-environment-node": "^29.2.1", "jsc-android": "^250231.0.0", "memoize-one": "^5.0.0", "metro-runtime": "0.76.8", "metro-source-map": "0.76.8", "mkdirp": "^0.5.1", "nullthrows": "^1.1.1", "pretty-format": "^26.5.2", "promise": "^8.3.0", "react-devtools-core": "^4.27.2", "react-refresh": "^0.4.0", "react-shallow-renderer": "^16.15.0", "regenerator-runtime": "^0.13.2", "scheduler": "0.24.0-canary-efb381bbf-20230505", "stacktrace-parser": "^0.1.10", "use-sync-external-store": "^1.0.0", "whatwg-fetch": "^3.0.0", "ws": "^6.2.2", "yargs": "^17.6.2" }, "peerDependencies": { "react": "18.2.0" }, "bin": { "react-native": "cli.js" } }, "sha512-oIewslu5DBwOmo7x5rdzZlZXCqDIna0R4dUwVpfmVteORYLr4yaZo5wQnMeR+H7x54GaMhmgeqp0ZpULtulJFg=="],
 
-    "react-native-update": ["react-native-update@10.35.0", "", { "dependencies": { "nanoid": "^3.3.3", "react-native-url-polyfill": "^2.0.0" }, "peerDependencies": { "react": ">=16.8.0", "react-native": ">=0.59.0" } }, "sha512-jTFtTAmOec05Gf06ununz+bLFkLC7bu7GV2y5/VjEx3XDhk+/ohvpefIFYuaDub23+0Tbq85aIg9WlDa72tReQ=="],
+    "react-native-update": ["react-native-update@10.35.1", "", { "dependencies": { "nanoid": "^3.3.3", "react-native-url-polyfill": "^2.0.0" }, "peerDependencies": { "react": ">=16.8.0", "react-native": ">=0.59.0" } }, "sha512-xbFd7Z5dLXYd0MZw3NrZADU3uLTgwW77PdRzEBuc2uS8yH4jU5XrDjn8ArhaqA9sl7pZvJFAkPciffdQJGv3ug=="],
 
     "react-native-url-polyfill": ["react-native-url-polyfill@2.0.0", "", { "dependencies": { "whatwg-url-without-unicode": "8.0.0-3" }, "peerDependencies": { "react-native": "*" } }, "sha512-My330Do7/DvKnEvwQc0WdcBnFPploYKp9CYlefDXzIdEaA+PAhDYllkvGeEroEzvc4Kzzj2O4yVdz8v6fjRvhA=="],
 
