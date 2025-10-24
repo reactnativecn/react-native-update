@@ -26,14 +26,13 @@ export class PushyFileJSBundleProvider extends JSBundleProvider {
     if (!this.path) {
       throw new JSBundleProviderError({
         whatHappened: 'No pushy bundle found. using default bundle',
+        howCanItBeFixed: ['']
       })
     }
     try {
-      const status = await fs.access(this.path, fs.OpenMode.READ_ONLY);
-      if (status) {
-        return {
-          filePath: this.path
-        }
+      await fs.access(this.path, fs.OpenMode.READ_ONLY);
+      return {
+        filePath: this.path
       }
     } catch (error) {
       throw new JSBundleProviderError({

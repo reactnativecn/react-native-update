@@ -1,10 +1,8 @@
 import http from '@ohos.net.http';
 import fileIo from '@ohos.file.fs';
-import util from '@ohos.util';
 import common from '@ohos.app.ability.common';
-import { BusinessError } from '@kit.BasicServicesKit';
 import { buffer } from '@kit.ArkTS';
-import zip from '@ohos.zlib';
+import { zlib, BusinessError } from '@kit.BasicServicesKit';
 import { EventHub } from './EventHub';
 import { DownloadTaskParams } from './DownloadTaskParams';
 import Pushy from 'librnupdate.so';
@@ -37,7 +35,9 @@ export class DownloadTask {
         if (stat.isDirectory()) {
           const files = await fileIo.listFile(path);
           for (const file of files) {
-            if (file === '.' || file === '..') continue;
+            if (file === '.' || file === '..') {
+              continue;
+            }
             await this.removeDirectory(`${path}/${file}`);
           }
           await fileIo.rmdir(path);
@@ -180,12 +180,7 @@ export class DownloadTask {
     await this.removeDirectory(params.unzipDirectory);
     await fileIo.mkdir(params.unzipDirectory);
 
-    try {
-      await zip.decompressFile(params.targetFile, params.unzipDirectory);
-    } catch (error) {
-      console.error('Unzip failed:', error);
-      throw error;
-    }
+    await zlib.decompressFile(params.targetFile, params.unzipDirectory);
   }
 
   private async processUnzippedFiles(directory: string): Promise<ZipFile> {
@@ -193,7 +188,9 @@ export class DownloadTask {
     try {
       const files = await fileIo.listFile(directory);
       for (const file of files) {
-        if (file === '.' || file === '..') continue;
+        if (file === '.' || file === '..') {
+          continue;
+        }
 
         const filePath = `${directory}/${file}`;
         const stat = await fileIo.stat(filePath);
@@ -230,7 +227,7 @@ export class DownloadTask {
     let foundDiff = false;
     let foundBundlePatch = false;
     const copyList: Map<string, Array<any>> = new Map();
-    await zip.decompressFile(params.targetFile, params.unzipDirectory);
+    await zlib.decompressFile(params.targetFile, params.unzipDirectory);
     const zipFile = await this.processUnzippedFiles(params.unzipDirectory);
     for (const entry of zipFile.entries) {
       const fn = entry.filename;
@@ -295,10 +292,6 @@ export class DownloadTask {
           throw error;
         }
       }
-
-      if (fn !== '.DS_Store') {
-        await zip.decompressFile(fn, params.unzipDirectory);
-      }
     }
 
     if (!foundDiff) {
@@ -318,7 +311,7 @@ export class DownloadTask {
     let foundDiff = false;
     let foundBundlePatch = false;
     const copyList: Map<string, Array<any>> = new Map();
-    await zip.decompressFile(params.targetFile, params.unzipDirectory);
+    await zlib.decompressFile(params.targetFile, params.unzipDirectory);
     const zipFile = await this.processUnzippedFiles(params.unzipDirectory);
     for (const entry of zipFile.entries) {
       const fn = entry.filename;
@@ -389,8 +382,6 @@ export class DownloadTask {
           }
         }
       }
-
-      await zip.decompressFile(entry.filename, params.unzipDirectory);
     }
 
     if (!foundDiff) {
@@ -410,7 +401,9 @@ export class DownloadTask {
 
       const files = await fileIo.listFile(bundlePath);
       for (const file of files) {
-        if (file === '.' || file === '..') continue;
+        if (file === '.' || file === '..') {
+          continue;
+        }
 
         const targets = copyList.get(file);
         if (targets) {
@@ -443,7 +436,9 @@ export class DownloadTask {
     try {
       const files = await fileIo.listFile(params.unzipDirectory);
       for (const file of files) {
-        if (file.startsWith('.')) continue;
+        if (file.startsWith('.')) {
+          continue;
+        }
 
         const filePath = `${params.unzipDirectory}/${file}`;
         const stat = await fileIo.stat(filePath);
