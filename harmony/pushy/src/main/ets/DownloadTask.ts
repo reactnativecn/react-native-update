@@ -1,8 +1,7 @@
 import http from '@ohos.net.http';
 import fileIo from '@ohos.file.fs';
 import common from '@ohos.app.ability.common';
-import { buffer } from '@kit.ArkTS';
-import { zlib, BusinessError } from '@kit.BasicServicesKit';
+import { zlib } from '@kit.BasicServicesKit';
 import { EventHub } from './EventHub';
 import { DownloadTaskParams } from './DownloadTaskParams';
 import Pushy from 'librnupdate.so';
@@ -128,53 +127,6 @@ export class DownloadTask {
     });
   }
 
-  private async copyFile(from: string, to: string): Promise<void> {
-    let reader;
-    let writer;
-    try {
-      reader = fileIo.openSync(from, fileIo.OpenMode.READ_ONLY);
-      writer = fileIo.openSync(
-        to,
-        fileIo.OpenMode.CREATE | fileIo.OpenMode.WRITE_ONLY,
-      );
-      const arrayBuffer = new ArrayBuffer(4096);
-      let bytesRead: number;
-      do {
-        bytesRead = await fileIo
-          .read(reader.fd, arrayBuffer)
-          .catch((err: BusinessError) => {
-            throw Error(
-              `Error reading file: ${err.message}, code: ${err.code}`,
-            );
-          });
-        if (bytesRead > 0) {
-          const buf = buffer.from(arrayBuffer, 0, bytesRead);
-          await fileIo
-            .write(writer.fd, buf.buffer, {
-              offset: 0,
-              length: bytesRead,
-            })
-            .catch((err: BusinessError) => {
-              throw Error(
-                `Error writing file: ${err.message}, code: ${err.code}`,
-              );
-            });
-        }
-      } while (bytesRead > 0);
-      console.info('File copied successfully');
-    } catch (error) {
-      console.error('Copy file failed:', error);
-      throw error;
-    } finally {
-      if (reader !== undefined) {
-        fileIo.closeSync(reader);
-      }
-      if (writer !== undefined) {
-        fileIo.closeSync(writer);
-      }
-    }
-  }
-
   private async doFullPatch(params: DownloadTaskParams): Promise<void> {
     await this.downloadFile(params);
     await this.removeDirectory(params.unzipDirectory);
@@ -243,7 +195,7 @@ export class DownloadTask {
 
         const copies = obj.copies;
         for (const to in copies) {
-          let from = copies[to];
+          let from = copies[to].replace('resources/rawfile/', '');
           if (from === '') {
             from = to;
           }
@@ -397,29 +349,14 @@ export class DownloadTask {
     copyList: Map<string, Array<string>>,
   ): Promise<void> {
     try {
-      const bundlePath = this.context.bundleCodeDir;
+      const resourceManager = this.context.resourceManager;
 
-      const files = await fileIo.listFile(bundlePath);
-      for (const file of files) {
-        if (file === '.' || file === '..') {
-          continue;
-        }
-
-        const targets = copyList.get(file);
-        if (targets) {
-          let lastTarget: string | undefined;
-
-          for (const target of targets) {
-            console.info(`Copying from resource ${file} to ${target}`);
-
-            if (lastTarget) {
-              await this.copyFile(lastTarget, target);
-            } else {
-              const sourcePath = `${bundlePath}/${file}`;
-              await this.copyFile(sourcePath, target);
-              lastTarget = target;
-            }
-          }
+      for (const [from, targets] of copyList.entries()) {
+        const fromContent = await resourceManager.getRawFileContent(from);
+        for (const target of targets) {
+          const fileStream = fileIo.createStreamSync(target, 'w+');
+          fileStream.writeSync(fromContent.buffer);
+          fileStream.close();
         }
       }
     } catch (error) {
