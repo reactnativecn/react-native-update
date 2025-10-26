@@ -273,6 +273,7 @@ public class UpdateContext {
         if (lastVersion == null) {
             editor.remove("currentVersion");
         } else {
+            editor.remove("lastVersion");
             editor.putString("currentVersion", lastVersion);
         }
         editor.putBoolean("firstTimeOk", true);

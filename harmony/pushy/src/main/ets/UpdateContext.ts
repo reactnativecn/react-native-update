@@ -245,6 +245,7 @@ export class UpdateContext {
     if (!lastVersion) {
       this.preferences.deleteSync('currentVersion');
     } else {
+      this.preferences.deleteSync('lastVersion');
       this.preferences.putSync('currentVersion', lastVersion);
     }
     this.preferences.putSync('firstTimeOk', true);
