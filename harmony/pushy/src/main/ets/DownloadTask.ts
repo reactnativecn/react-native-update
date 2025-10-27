@@ -262,7 +262,6 @@ export class DownloadTask {
 
     let foundDiff = false;
     let foundBundlePatch = false;
-    const copyList: Map<string, Array<any>> = new Map();
     await zlib.decompressFile(params.targetFile, params.unzipDirectory);
     const zipFile = await this.processUnzippedFiles(params.unzipDirectory);
     for (const entry of zipFile.entries) {
@@ -270,6 +269,13 @@ export class DownloadTask {
 
       if (fn === '__diff.json') {
         foundDiff = true;
+
+        await fileIo
+          .copyDir(params.originDirectory + '/', params.unzipDirectory + '/')
+          .catch(error => {
+            console.error('copy error:', error);
+          });
+
         let jsonContent = '';
         const bufferArray = new Uint8Array(entry.content);
         for (let i = 0; i < bufferArray.length; i++) {
@@ -277,22 +283,23 @@ export class DownloadTask {
         }
         const obj = JSON.parse(jsonContent);
 
-        const copies = obj.copies;
-        for (const to in copies) {
-          let from = copies[to];
-          if (from === '') {
-            from = to;
-          }
-
-          if (!copyList.has(from)) {
-            copyList.set(from, []);
-          }
-
-          const target = copyList.get(from);
-          if (target) {
-            const toFile = `${params.unzipDirectory}/${to}`;
-            target.push(toFile);
-          }
+        const { copies, deletes } = obj;
+        for (const [to, from] of Object.entries(copies)) {
+          await fileIo
+            .copyFile(
+              `${params.originDirectory}/${from}`,
+              `${params.unzipDirectory}/${to}`,
+            )
+            .catch(error => {
+              console.error('copy error:', error);
+            });
+        }
+        for (const fileToDelete of Object.keys(deletes)) {
+          await fileIo
+            .unlink(`${params.unzipDirectory}/${fileToDelete}`)
+            .catch(error => {
+              console.error('delete error:', error);
+            });
         }
         continue;
       }
