@@ -43,7 +43,6 @@ hermesc.on('close', (code) => {
 });
 
 function processHBCFile(hbcFilePath) {
-  // hash 文件在项目根目录
   const hashFilePath = path.join(PROJECT_ROOT, 'bundle-hash.json');
 
   if (!fs.existsSync(hashFilePath)) {

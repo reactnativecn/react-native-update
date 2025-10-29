@@ -128,7 +128,6 @@ function setupHermescWrapper() {
 
   console.log('🔧 [Hermesc Setup] Starting hermesc wrapper setup...');
 
-  // 使用项目根目录来定位 hermesc
   const hermescLocations = [
     {
       path: path.join(PROJECT_ROOT, 'node_modules/react-native/sdks/hermesc/osx-bin/hermesc'),
@@ -163,8 +162,6 @@ function metadataSerializer(entryPoint, preModules, graph, options) {
   const contentHash = calculateContentHash(bundleCode);
   const metadataInjection = generateMetadataInjection(contentHash);
   const metadataComment = generateMetadataComment(contentHash);
-
-  // hash 文件保存在项目根目录
   const hashFilePath = path.join(PROJECT_ROOT, 'bundle-hash.json');
 
   try {
