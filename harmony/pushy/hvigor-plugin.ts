@@ -30,11 +30,9 @@ export function reactNativeUpdatePlugin() {
             versionName,
           };
 
-          fs.writeFileSync(metaFilePath, JSON.stringify(metaContent, null, 4));
+          fs.writeFileSync(metaFilePath, JSON.stringify(metaContent, null, 2));
           console.log(`Build time written to ${metaFilePath}`);
         },
-        dependencies: [],
-        postDependencies: ['default@BuildJS'],
       });
     },
   };

@@ -78,7 +78,7 @@ RCT_EXPORT_MODULE(RCTPushy);
     NSString *storedBuildTime = [defaults stringForKey:paramBuildTime];
     
     // If stored versions don't exist, write current versions first
-    if (!storedPackageVersion || !storedBuildTime) {
+    if (!storedPackageVersion && !storedBuildTime) {
         [defaults setObject:curPackageVersion forKey:paramPackageVersion];
         [defaults setObject:curBuildTime forKey:paramBuildTime];
         storedPackageVersion = curPackageVersion;
@@ -86,7 +86,7 @@ RCT_EXPORT_MODULE(RCTPushy);
     }
     
     BOOL packageVersionChanged = ![curPackageVersion isEqualToString:storedPackageVersion];
-    BOOL buildTimeChanged = ![curBuildTime isEqualToString:storedBuildTime];
+    BOOL buildTimeChanged = curBuildTime && ![curBuildTime isEqualToString:storedBuildTime];
     
     if (packageVersionChanged || buildTimeChanged) {
         // Clear all update data and store new versions
@@ -304,8 +304,8 @@ RCT_EXPORT_METHOD(setNeedUpdate:(NSDictionary *)options
     if (hash.length) {
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
         NSString *lastVersion = nil;
-        if ([defaults objectForKey:keyPushyInfo]) {
-            NSDictionary *pushyInfo = [defaults objectForKey:keyPushyInfo];
+        NSDictionary *pushyInfo = [defaults objectForKey:keyPushyInfo]
+        if (pushyInfo) {
             lastVersion = pushyInfo[paramCurrentVersion];
         }
         
