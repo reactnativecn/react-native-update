@@ -1,13 +1,12 @@
 {
-  "name": "entry",
-  "version": "1.0.0",
-  "description": "Please describe the basic information.",
-  "main": "",
-  "author": "",
-  "license": "",
-  "dependencies": {
-    "@rnoh/react-native-openharmony": "0.72.38",
-    "pushy": "file:../../node_modules/react-native-update/harmony/pushy.har",
-  }
+  name: 'entry',
+  version: '1.0.0',
+  description: 'Please describe the basic information.',
+  main: '',
+  author: '',
+  license: '',
+  dependencies: {
+    '@rnoh/react-native-openharmony': '0.72.96',
+    pushy: 'file:../../node_modules/react-native-update/harmony/pushy',
+  },
 }
-

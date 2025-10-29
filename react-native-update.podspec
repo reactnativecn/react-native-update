@@ -105,18 +105,17 @@ Pod::Spec.new do |s|
 
   # Conditionally add Expo dependency
   if valid_expo_project
-    s.public_header_files = ['ios/ImportReact.h']
     s.dependency 'ExpoModulesCore'
   end
 
   s.subspec 'RCTPushy' do |ss|
-    ss.source_files = ['ios/RCTPushy/**/*.{h,m,mm,c}',
+    ss.source_files = ['ios/**/*.{h,m,mm,c}',
                        'android/jni/hpatch.{h,c}',
                        'android/jni/HDiffPatch/libHDiffPatch/HPatch/*.{h,c}',
                        'android/jni/HDiffPatch/file_for_patch.{h,c}',
                        'android/jni/lzma/C/LzmaDec.{h,c}',
                        'android/jni/lzma/C/Lzma2Dec.{h,c}']
-    ss.public_header_files = ['ios/RCTPushy/**/*.h']
+    ss.public_header_files = ['ios/**/*.h']
   end
 
   # Conditionally add Expo subspec and check ExpoModulesCore version

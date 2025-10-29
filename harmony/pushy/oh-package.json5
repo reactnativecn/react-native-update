@@ -1,12 +1,13 @@
 {
-  "license": "ISC",
-  "types": "",
-  "devDependencies": {},
-  "name": "pushy",
-  "description": "",
-  "main": "index.ets",
-  "version": "3.1.0-0.0.7",
-  "dependencies": {
-    "@rnoh/react-native-openharmony":"^0.72.38"
-  }
+  license: 'MIT',
+  types: '',
+  devDependencies: {},
+  name: 'pushy',
+  description: '',
+  main: 'index.ets',
+  version: '10.35.1',
+  dependencies: {
+    '@rnoh/react-native-openharmony': '^0.72.96',
+  },
+  modelVersion: '5.0.0',
 }

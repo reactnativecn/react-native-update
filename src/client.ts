@@ -8,7 +8,7 @@ import {
   buildTime,
   cInfo,
   currentVersion,
-  getCurrentVersionInfo,
+  currentVersionInfo,
   isFirstTime,
   isRolledBack,
   packageVersion,
@@ -110,8 +110,7 @@ export class Pushy {
     this.clientType = clientType || 'Pushy';
     this.options.server = SERVER_PRESETS[this.clientType];
 
-    // Initialize i18n based on clientType
-    i18n.setLocale(this.clientType === 'Pushy' ? 'zh' : 'en');
+    i18n.setLocale(options.locale ?? this.clientType === 'Pushy' ? 'zh' : 'en');
 
     if (Platform.OS === 'ios' || Platform.OS === 'android') {
       if (!options.appKey) {
@@ -163,7 +162,6 @@ export class Pushy {
     log(type + ' ' + message);
     await this.loggerPromise.promise;
     const { logger = noop, appKey } = this.options;
-    const info = await getCurrentVersionInfo();
     const overridePackageVersion = this.options.overridePackageVersion;
     logger({
       type,
@@ -175,7 +173,7 @@ export class Pushy {
         overridePackageVersion,
         buildTime,
         message,
-        ...info,
+        ...currentVersionInfo,
         ...data,
       },
     });

@@ -4,9 +4,3 @@
 [submodule "android/jni/HDiffPatch"]
 	path = android/jni/HDiffPatch
 	url = https://github.com/sisong/HDiffPatch.git
-[submodule "harmony/src/main/cpp/HDiffPatch"]
-	path = harmony/src/main/cpp/HDiffPatch
-	url = https://github.com/sisong/HDiffPatch.git
-[submodule "harmony/src/main/cpp/lzma"]
-	path = harmony/src/main/cpp/lzma
-	url = https://github.com/sisong/lzma.git

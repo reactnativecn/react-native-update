@@ -86,6 +86,7 @@ export interface ClientOptions {
   appKey: string;
   server?: UpdateServerConfig;
   logger?: UpdateEventsLogger;
+  locale?: 'zh' | 'en';
   updateStrategy?:
     | 'alwaysAlert'
     | 'alertUpdateAndIgnoreError'

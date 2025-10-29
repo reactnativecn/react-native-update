@@ -101,6 +101,7 @@ export class UpdateContext {
       params.hash = hash;
       params.listener = listener;
       params.targetFile = `${this.rootDir}/${hash}.ppk`;
+      params.unzipDirectory = `${this.rootDir}/${hash}`;
       const downloadTask = new DownloadTask(this.context);
       await downloadTask.execute(params);
     } catch (e) {
@@ -162,8 +163,8 @@ export class UpdateContext {
       const downloadTask = new DownloadTask(this.context);
       return await downloadTask.execute(params);
     } catch (e) {
-      throw e;
       console.error('Failed to download APK patch:', e);
+      throw e;
     }
   }
 
@@ -188,18 +189,11 @@ export class UpdateContext {
     }
   }
 
-  public static getBundleUrl(
-    context: common.UIAbilityContext,
-    defaultAssetsUrl?: string,
-  ): string {
-    return new UpdateContext(context).getBundleUrl(defaultAssetsUrl);
-  }
-
-  public getBundleUrl(defaultAssetsUrl?: string): string {
+  public getBundleUrl() {
     UpdateContext.isUsingBundleUrl = true;
     const currentVersion = this.getCurrentVersion();
     if (!currentVersion) {
-      return defaultAssetsUrl;
+      return '';
     }
     if (!this.isFirstTime()) {
       if (!this.preferences.getSync('firstTimeOk', true)) {
@@ -221,7 +215,7 @@ export class UpdateContext {
         version = this.rollBack();
       }
     }
-    return defaultAssetsUrl;
+    return '';
   }
 
   getPackageVersion(): string {
@@ -251,6 +245,7 @@ export class UpdateContext {
     if (!lastVersion) {
       this.preferences.deleteSync('currentVersion');
     } else {
+      this.preferences.deleteSync('lastVersion');
       this.preferences.putSync('currentVersion', lastVersion);
     }
     this.preferences.putSync('firstTimeOk', true);

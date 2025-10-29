@@ -1,4 +1,3 @@
-/* eslint-disable react/no-unstable-nested-components */
 /* eslint-disable react-native/no-inline-styles */
 import React, {useState} from 'react';
 import {StyleSheet, Text, View, TouchableOpacity, Image} from 'react-native';
@@ -6,7 +5,7 @@ import {StyleSheet, Text, View, TouchableOpacity, Image} from 'react-native';
 import TestConsole from './TestConsole';
 
 import _updateConfig from './update.json';
-import {PushyProvider, Pushy, usePushy} from 'react-native-update';
+import {UpdateProvider, Pushy, useUpdate} from 'react-native-update';
 const {appKey} = _updateConfig.harmony;
 
 function App() {
@@ -20,7 +19,7 @@ function App() {
     packageVersion,
     currentHash,
     progress: {received, total} = {},
-  } = usePushy();
+  } = useUpdate();
   const [useDefaultAlert, setUseDefaultAlert] = useState(false);
   const [showTestConsole, setShowTestConsole] = useState(false);
   const [showUpdateBanner, setShowUpdateBanner] = useState(false);
@@ -41,6 +40,7 @@ function App() {
   return (
     <View style={styles.container}>
       <Text style={styles.welcome}>欢迎使用Pushy热更新服务</Text>
+      {/* <Image source={require('./gmail.png')} style={styles.image} /> */}
       {/* <Text style={styles.welcome}>😁hdiffFromAPP更新成功！！！</Text> */}
       {/* <Text style={styles.welcome}>😁hdiffFromPPk更新成功！！！</Text> */}
       <View style={{flexDirection: 'row'}}>
@@ -166,7 +166,7 @@ function App() {
                 style={{marginRight: 20}}>
                 <Text style={{color: '#2196F3'}}>下次再说</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={switchVersion}>
+              <TouchableOpacity onPress={() => switchVersion()}>
                 <Text style={{color: '#2196F3'}}>立即重启</Text>
               </TouchableOpacity>
             </View>
@@ -204,18 +204,22 @@ const styles = StyleSheet.create({
     color: '#333333',
     marginBottom: 5,
   },
-  image: {},
+  image: {
+    width: 109,
+    height: 40,
+  },
 });
 
 const pushyClient = new Pushy({
   appKey,
   debug: true,
+  updateStrategy: null,
 });
 
 export default function Root() {
   return (
-    <PushyProvider client={pushyClient}>
+    <UpdateProvider client={pushyClient}>
       <App />
-    </PushyProvider>
+    </UpdateProvider>
   );
 }

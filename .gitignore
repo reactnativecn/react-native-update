@@ -52,3 +52,11 @@ Example/testHotUpdate/harmony
 Example/testHotUpdate/android/app/.cxx
 Example/harmony_use_pushy/libs
 **/mcp.json
+
+
+harmony/package
+**/oh_modules
+harmony/pushy/.preview
+Example/harmony_use_pushy/harmony/entry/src/main/resources/rawfile/meta.json
+**/.hvigor
+Example/harmony_use_pushy/harmony/entry/src/main/cpp/generated
