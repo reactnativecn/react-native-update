@@ -138,7 +138,6 @@ function setupHermescWrapper() {
     }
   ];
 
-  console.log('😁hermescLocations', hermescLocations);
   let successCount = 0;
   let totalProcessed = 0;
 
@@ -154,7 +153,6 @@ function setupHermescWrapper() {
 }
 
 function metadataSerializer(entryPoint, preModules, graph, options) {
-  console.log('😁metadataSerializer - Starting bundle serialization');
   setupHermescWrapper();
   const baseJSBundle = require('metro/src/DeltaBundler/Serializers/baseJSBundle');
   const bundleToString = require('metro/src/lib/bundleToString');
