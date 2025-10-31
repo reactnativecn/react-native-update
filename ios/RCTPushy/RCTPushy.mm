@@ -304,7 +304,7 @@ RCT_EXPORT_METHOD(setNeedUpdate:(NSDictionary *)options
     if (hash.length) {
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
         NSString *lastVersion = nil;
-        NSDictionary *pushyInfo = [defaults objectForKey:keyPushyInfo]
+        NSDictionary *pushyInfo = [defaults objectForKey:keyPushyInfo];
         if (pushyInfo) {
             lastVersion = pushyInfo[paramCurrentVersion];
         }
