@@ -13,7 +13,12 @@ import {
   Linking,
 } from 'react-native';
 import { Pushy, Cresc, sharedState } from './client';
-import { currentVersion, packageVersion, getCurrentVersionInfo, currentVersionInfo } from './core';
+import {
+  currentVersion,
+  packageVersion,
+  getCurrentVersionInfo,
+  currentVersionInfo,
+} from './core';
 import {
   CheckResult,
   ProgressData,
@@ -165,7 +170,7 @@ export const UpdateProvider = ({
       lastChecking.current = now;
       let rootInfo: CheckResult | undefined;
       try {
-        rootInfo = await client.checkUpdate(extra);
+        rootInfo = { ...(await client.checkUpdate(extra)) };
       } catch (e: any) {
         setLastError(e);
         alertError(client.t('error_update_check_failed'), e.message);
@@ -175,7 +180,9 @@ export const UpdateProvider = ({
       if (!rootInfo) {
         return;
       }
-      const versions = [rootInfo.expVersion, rootInfo].filter(Boolean) as VersionInfo[];
+      const versions = [rootInfo.expVersion, rootInfo].filter(
+        Boolean,
+      ) as VersionInfo[];
       delete rootInfo.expVersion;
       for (const versionInfo of versions) {
         const info: CheckResult = {
