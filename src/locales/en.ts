@@ -71,4 +71,8 @@ export default {
   // Development environment messages
   dev_incremental_update_disabled:
     'Currently in development environment, incremental hot update cannot be executed and restart will not take effect. If you need to test effective full hot update in development environment (but will reconnect to metro after restart), please enable "ignore timestamp" switch and retry.',
+
+  // Context error messages
+  error_use_update_outside_provider:
+    'useUpdate must be used within an UpdateProvider. Please wrap your component tree with <UpdateProvider client={...}>.',
 };

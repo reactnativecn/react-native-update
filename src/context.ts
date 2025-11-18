@@ -1,6 +1,7 @@
 import { createContext, useContext } from 'react';
 import { CheckResult, ProgressData } from './type';
 import { Pushy, Cresc } from './client';
+import i18n from './i18n';
 
 const noop = () => {};
 const asyncNoop = () => Promise.resolve();
@@ -50,7 +51,16 @@ export const UpdateContext = createContext<{
   lastError?: Error;
 }>(defaultContext);
 
-export const useUpdate = () => useContext(UpdateContext);
+export const useUpdate = __DEV__ ? () => {
+  const context = useContext(UpdateContext);
+
+  // 检查是否在 UpdateProvider 内部使用
+  if (!context.client) {
+    throw new Error(i18n.t('error_use_update_outside_provider'));
+  }
+
+  return context;
+} : () => useContext(UpdateContext);
 
 /** @deprecated Please use `useUpdate` instead */
 export const usePushy = useUpdate;
