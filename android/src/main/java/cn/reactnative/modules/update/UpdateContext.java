@@ -22,6 +22,10 @@ public class UpdateContext {
     public static boolean DEBUG = false;
     private static ReactInstanceManager mReactInstanceManager;
     private static boolean isUsingBundleUrl = false;
+    
+    // Singleton instance
+    private static UpdateContext sInstance;
+    private static final Object sLock = new Object();
 
     public UpdateContext(Context context) {
         this.context = context;
@@ -54,13 +58,17 @@ public class UpdateContext {
         boolean buildTimeChanged = !buildTime.equals(storedBuildTime);
         
         if (packageVersionChanged || buildTimeChanged) {
+            // Execute cleanUp before clearing SharedPreferences to avoid race condition
+            this.cleanUp();
+            
             SharedPreferences.Editor editor = sp.edit();
             editor.clear();
             editor.putString("packageVersion", packageVersion);
             editor.putString("buildTime", buildTime);
-            editor.apply();
-
-            this.cleanUp();
+            // Use commit() instead of apply() to ensure synchronous write completion
+            // This prevents race condition where getBundleUrl() might read null values
+            // if called before apply() completes
+            editor.commit();
         }
     }
 
@@ -227,12 +235,26 @@ public class UpdateContext {
         return mReactInstanceManager;
     }
 
+    /**
+     * Get singleton instance of UpdateContext
+     */
+    public static UpdateContext getInstance(Context context) {
+        if (sInstance == null) {
+            synchronized (sLock) {
+                if (sInstance == null) {
+                    sInstance = new UpdateContext(context.getApplicationContext());
+                }
+            }
+        }
+        return sInstance;
+    }
+
     public static String getBundleUrl(Context context) {
-        return new UpdateContext(context.getApplicationContext()).getBundleUrl();
+        return getInstance(context).getBundleUrl();
     }
 
     public static String getBundleUrl(Context context, String defaultAssetsUrl) {
-        return new UpdateContext(context.getApplicationContext()).getBundleUrl(defaultAssetsUrl);
+        return getInstance(context).getBundleUrl(defaultAssetsUrl);
     }
 
     public String getBundleUrl() {

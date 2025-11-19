@@ -40,7 +40,7 @@ public class UpdateModule extends ReactContextBaseJavaModule {
     }
 
     public UpdateModule(ReactApplicationContext reactContext) {
-        this(reactContext, new UpdateContext(reactContext.getApplicationContext()));
+        this(reactContext, UpdateContext.getInstance(reactContext));
     }
 
     @Override

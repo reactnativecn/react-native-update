@@ -37,10 +37,10 @@ export class UpdateContext {
         this.preferences.putSync('packageVersion', packageVersion);
         this.preferences.flush();
       } else if (storedVersion && packageVersion !== storedVersion) {
+        this.cleanUp();
         this.preferences.clear();
         this.preferences.putSync('packageVersion', packageVersion);
         this.preferences.flush();
-        this.cleanUp();
       }
     } catch (e) {
       console.error('Failed to init preferences:', e);
