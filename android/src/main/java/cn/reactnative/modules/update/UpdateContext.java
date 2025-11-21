@@ -19,7 +19,7 @@ public class UpdateContext {
     private File rootDir;
     private Executor executor;
 
-    public static boolean DEBUG = false;
+    public static boolean DEBUG = true;
     private static ReactInstanceManager mReactInstanceManager;
     private static boolean isUsingBundleUrl = false;
     

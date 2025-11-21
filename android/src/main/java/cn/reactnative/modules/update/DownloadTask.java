@@ -1,7 +1,10 @@
 package cn.reactnative.modules.update;
 
 import android.content.Context;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
 import android.os.AsyncTask;
+import android.os.Build;
 import android.util.Log;
 import com.facebook.react.bridge.Arguments;
 import com.facebook.react.bridge.WritableMap;
@@ -25,7 +28,6 @@ import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.Iterator;
 import java.util.zip.ZipEntry;
-import java.util.zip.CRC32;
 import java.util.HashMap;
 
 import okio.BufferedSink;
@@ -98,9 +100,6 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
         while ((bytesRead = source.read(sink.buffer(), DOWNLOAD_CHUNK_SIZE)) != -1) {
             received += bytesRead;
             sink.emit();
-            if (UpdateContext.DEBUG) {
-                Log.d("react-native-update", "Progress " + received + "/" + contentLength);
-            }
 
             int percentage = (int)(received * 100.0 / contentLength + 0.5);
             if (percentage > currentPercentage) {
@@ -199,10 +198,6 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
         return fout.toByteArray();
     }
 
-    private String getCRC32AsDecimal(long crc32Value) {
-        return String.valueOf(crc32Value & 0xFFFFFFFFL);
-    }
-
     private void copyFilesWithBlacklist(String current, File from, File to, JSONObject blackList) throws IOException {
         File[] files = from.listFiles();
         for (File file : files) {
@@ -252,57 +247,209 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
         }
     }
 
-    private void copyFromResource(HashMap<String, ArrayList<File> > resToCopy) throws IOException {
-        SafeZipFile zipFile = new SafeZipFile(new File(context.getPackageResourcePath()));
-        Enumeration<? extends ZipEntry> entries = zipFile.entries();
-        while (entries.hasMoreElements()) {
-            ZipEntry ze = entries.nextElement();
+    private String findDrawableFallback(String originalToPath, HashMap<String, String> copiesMap, HashMap<String, ZipEntry> availableEntries) {
+        // 检查是否是 drawable 路径
+        if (!originalToPath.contains("drawable")) {
+            return null;
+        }
 
-            String fn = ze.getName();
-            ArrayList<File> targets = resToCopy.get(fn);
-            if (targets != null) {
-                File lastTarget = null;
-                for (File target: targets) {
+        // 提取文件名（路径的最后部分）
+        int lastSlash = originalToPath.lastIndexOf('/');
+        if (lastSlash == -1) {
+            return null;
+        }
+        String fileName = originalToPath.substring(lastSlash + 1);
+        
+        // 定义密度优先级（从高到低）
+        String[] densities = {"xxxhdpi", "xxhdpi", "xhdpi", "hdpi", "mdpi", "ldpi"};
+        
+        // 尝试找到相同文件名但不同密度的 key
+        for (String density : densities) {
+            // 构建可能的 key 路径（替换密度部分）
+            String fallbackToPath = originalToPath.replaceFirst("drawable-[^/]+", "drawable-" + density);
+            
+            // 检查这个 key 是否在 copies 映射中
+            if (copiesMap.containsKey(fallbackToPath)) {
+                String fallbackFromPath = copiesMap.get(fallbackToPath);
+                // 检查对应的 value 路径是否在 APK 中存在
+                if (availableEntries.containsKey(fallbackFromPath)) {
                     if (UpdateContext.DEBUG) {
-                        Log.d("react-native-update", "Copying from resource " + fn + " to " + target);
+                        Log.d("react-native-update", "Found fallback for " + originalToPath + ": " + fallbackToPath + " -> " + fallbackFromPath);
                     }
-                    if (lastTarget != null) {
-                        copyFile(lastTarget, target);
-                    } else {
-                        zipFile.unzipToFile(ze, target);
-                        lastTarget = target;
-                    }
+                    return fallbackFromPath;
                 }
             }
         }
-        zipFile.close();
+        
+        return null;
     }
 
-    private void copyFromResourceV2(HashMap<String, ArrayList<File>> resToCopy2) throws IOException {
-        SafeZipFile zipFile = new SafeZipFile(new File(context.getPackageResourcePath()));
-        Enumeration<? extends ZipEntry> entries = zipFile.entries();
-        while (entries.hasMoreElements()) {
-            ZipEntry ze = entries.nextElement();
-            String fn = ze.getName();
-            long zipCrc32 = ze.getCrc();
-            String crc32Decimal = getCRC32AsDecimal(zipCrc32);
-            ArrayList<File> targets = resToCopy2.get(crc32Decimal);
-            if (targets != null) {
-                File lastTarget = null;
-                for (File target: targets) {
+    private void copyFromResource(HashMap<String, ArrayList<File> > resToCopy, HashMap<String, String> copiesMap) throws IOException {
+        if (UpdateContext.DEBUG) {
+            Log.d("react-native-update", "copyFromResource called, resToCopy size: " + resToCopy.size());
+        }
+        
+        // 收集所有 APK 路径（包括基础 APK 和所有 split APK）
+        ArrayList<String> apkPaths = new ArrayList<>();
+        apkPaths.add(context.getPackageResourcePath());
+        
+        // 获取所有 split APK 路径（用于资源分割的情况）
+        try {
+            ApplicationInfo appInfo = context.getPackageManager().getApplicationInfo(
+                context.getPackageName(), 0);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP && appInfo.splitSourceDirs != null) {
+                for (String splitPath : appInfo.splitSourceDirs) {
+                    apkPaths.add(splitPath);
                     if (UpdateContext.DEBUG) {
-                        Log.d("react-native-update", "Copying from resource " + fn + " to " + target);
-                    }
-                    if (lastTarget != null) {
-                        copyFile(lastTarget, target);
-                    } else {
-                        zipFile.unzipToFile(ze, target);
-                        lastTarget = target;
+                        Log.d("react-native-update", "Found split APK: " + splitPath);
                     }
                 }
             }
+        } catch (PackageManager.NameNotFoundException e) {
+            if (UpdateContext.DEBUG) {
+                Log.w("react-native-update", "Failed to get application info: " + e.getMessage());
+            }
         }
-        zipFile.close();
+        
+        // 第一遍：从所有 APK 中收集所有可用的 zip 条目
+        HashMap<String, ZipEntry> availableEntries = new HashMap<>();
+        HashMap<String, SafeZipFile> zipFileMap = new HashMap<>(); // 保存每个路径对应的 ZipFile
+        HashMap<String, SafeZipFile> entryToZipFileMap = new HashMap<>(); // 保存每个条目对应的 ZipFile
+        
+        for (String apkPath : apkPaths) {
+            SafeZipFile zipFile = new SafeZipFile(new File(apkPath));
+            zipFileMap.put(apkPath, zipFile);
+            Enumeration<? extends ZipEntry> entries = zipFile.entries();
+            while (entries.hasMoreElements()) {
+                ZipEntry ze = entries.nextElement();
+                String entryName = ze.getName();
+                // 如果条目已存在，保留第一个（基础 APK 优先）
+                if (!availableEntries.containsKey(entryName)) {
+                    availableEntries.put(entryName, ze);
+                    entryToZipFileMap.put(entryName, zipFile);
+                }
+            }
+        }
+        
+        // 使用基础 APK 的 ZipFile 作为主要操作对象
+        SafeZipFile zipFile = zipFileMap.get(context.getPackageResourcePath());
+        
+        // 处理所有需要复制的文件
+        HashMap<String, ArrayList<File>> remainingFiles = new HashMap<>(resToCopy);
+        
+        for (String fromPath : new ArrayList<>(remainingFiles.keySet())) {
+            if (UpdateContext.DEBUG) {
+                Log.d("react-native-update", "Processing fromPath: " + fromPath);
+            }
+            ArrayList<File> targets = remainingFiles.get(fromPath);
+            if (targets == null || targets.isEmpty()) {
+                continue;
+            }
+            
+            ZipEntry ze = availableEntries.get(fromPath);
+            String actualSourcePath = fromPath;
+            
+            // 如果文件不存在，尝试 fallback
+            if (ze == null) {
+                if (UpdateContext.DEBUG) {
+                    Log.d("react-native-update", "File not found in APK: " + fromPath + ", trying fallback");
+                }
+                // 找到对应的 to 路径（从 copiesMap 的反向查找）
+                String toPath = null;
+                for (String to : copiesMap.keySet()) {
+                    if (copiesMap.get(to).equals(fromPath)) {
+                        toPath = to;
+                        break;
+                    }
+                }
+                
+                if (toPath != null) {
+                    if (UpdateContext.DEBUG) {
+                        Log.d("react-native-update", "Found toPath: " + toPath + " for fromPath: " + fromPath);
+                    }
+                    String fallbackFromPath = findDrawableFallback(toPath, copiesMap, availableEntries);
+                    if (fallbackFromPath != null) {
+                        ze = availableEntries.get(fallbackFromPath);
+                        actualSourcePath = fallbackFromPath;
+                        // 确保 fallback 路径也在 entryToZipFileMap 中
+                        if (!entryToZipFileMap.containsKey(fallbackFromPath)) {
+                            // 查找包含该 fallback 路径的 ZipFile
+                            for (String apkPath : apkPaths) {
+                                SafeZipFile testZipFile = zipFileMap.get(apkPath);
+                                if (testZipFile != null) {
+                                    try {
+                                        ZipEntry testEntry = testZipFile.getEntry(fallbackFromPath);
+                                        if (testEntry != null) {
+                                            entryToZipFileMap.put(fallbackFromPath, testZipFile);
+                                            break;
+                                        }
+                                    } catch (Exception e) {
+                                        // 继续查找
+                                    }
+                                }
+                            }
+                        }
+                        if (UpdateContext.DEBUG) {
+                            Log.w("react-native-update", "Using fallback: " + fallbackFromPath + " for " + fromPath);
+                        }
+                    } else {
+                        if (UpdateContext.DEBUG) {
+                            Log.w("react-native-update", "No fallback found for: " + fromPath + " (toPath: " + toPath + ")");
+                        }
+                    }
+                } else {
+                    if (UpdateContext.DEBUG) {
+                        Log.w("react-native-update", "No toPath found for fromPath: " + fromPath);
+                    }
+                }
+            }
+            
+            if (ze != null) {
+                File lastTarget = null;
+                for (File target: targets) {
+                    if (UpdateContext.DEBUG) {
+                        Log.d("react-native-update", "Copying from resource " + actualSourcePath + " to " + target);
+                    }
+                    try {
+                        // 确保目标文件的父目录存在
+                        File parentDir = target.getParentFile();
+                        if (parentDir != null && !parentDir.exists()) {
+                            parentDir.mkdirs();
+                        }
+                        
+                        if (lastTarget != null) {
+                            copyFile(lastTarget, target);
+                        } else {
+                            // 从保存的映射中获取包含该条目的 ZipFile
+                            SafeZipFile sourceZipFile = entryToZipFileMap.get(actualSourcePath);
+                            if (sourceZipFile == null) {
+                                sourceZipFile = zipFile; // 回退到基础 APK
+                            }
+                            sourceZipFile.unzipToFile(ze, target);
+                            lastTarget = target;
+                        }
+                    } catch (IOException e) {
+                        if (UpdateContext.DEBUG) {
+                            Log.w("react-native-update", "Failed to copy resource " + actualSourcePath + " to " + target + ": " + e.getMessage());
+                        }
+                        // 继续处理下一个目标
+                    }
+                }
+                remainingFiles.remove(fromPath);
+            }
+        }
+        
+        // 处理剩余的文件（如果还有的话）
+        if (!remainingFiles.isEmpty() && UpdateContext.DEBUG) {
+            for (String fromPath : remainingFiles.keySet()) {
+                Log.w("react-native-update", "Resource not found and no fallback available: " + fromPath);
+            }
+        }
+        
+        // 关闭所有 ZipFile
+        for (SafeZipFile zf : zipFileMap.values()) {
+            zf.close();
+        }
     }
 
     private void doPatchFromApk(DownloadTaskParams param) throws IOException, JSONException {
@@ -311,8 +458,7 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
         removeDirectory(param.unzipDirectory);
         param.unzipDirectory.mkdirs();
         HashMap<String, ArrayList<File>> copyList = new HashMap<String, ArrayList<File>>();
-        HashMap<String, ArrayList<File>> copiesv2List = new HashMap<String, ArrayList<File>>();
-        Boolean isV2 = false;
+        HashMap<String, String> copiesMap = new HashMap<String, String>(); // to -> from 映射
 
         boolean foundDiff = false;
         boolean foundBundlePatch = false;
@@ -331,58 +477,32 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
                 JSONObject obj = (JSONObject)new JSONTokener(json).nextValue();
 
                 JSONObject copies = obj.getJSONObject("copies");
-                JSONObject copiesv2 = obj.getJSONObject("copiesv2");
                 Iterator<?> keys = copies.keys();
-                Iterator<?> keysV2 = copiesv2.keys();
-                if(keysV2.hasNext()){
-                    isV2 = true;
-                    while( keysV2.hasNext() ) {
-                        String from = (String)keysV2.next();
-                        String to = copiesv2.getString(from);
-                        if (from.isEmpty()) {
-                            from = to;
-                        }
-                        ArrayList<File> target = null;
-                        if (!copiesv2List.containsKey(from)) {
-                            target = new ArrayList<File>();
-                            copiesv2List.put(from, target);
-                        } else {
-                            target = copiesv2List.get((from));
-                        }
-                        File toFile = new File(param.unzipDirectory, to);
-
-                        // Fixing a Zip Path Traversal Vulnerability
-                        // https://support.google.com/faqs/answer/9294009
-                        String canonicalPath = toFile.getCanonicalPath();
-                        if (!canonicalPath.startsWith(param.unzipDirectory.getCanonicalPath() + File.separator)) {
-                            throw new SecurityException("Illegal name: " + to);
-                        }
-                        target.add(toFile);
+                while( keys.hasNext() ) {
+                    String to = (String)keys.next();
+                    String from = copies.getString(to);
+                    if (from.isEmpty()) {
+                        from = to;
                     }
-                }else{
-                    while( keys.hasNext() ) {
-                        String to = (String)keys.next();
-                        String from = copies.getString(to);
-                        if (from.isEmpty()) {
-                            from = to;
-                        }
-                        ArrayList<File> target = null;
-                        if (!copyList.containsKey(from)) {
-                            target = new ArrayList<File>();
-                            copyList.put(from, target);
-                        } else {
-                            target = copyList.get((from));
-                        }
-                        File toFile = new File(param.unzipDirectory, to);
-
-                        // Fixing a Zip Path Traversal Vulnerability
-                        // https://support.google.com/faqs/answer/9294009
-                        String canonicalPath = toFile.getCanonicalPath();
-                        if (!canonicalPath.startsWith(param.unzipDirectory.getCanonicalPath() + File.separator)) {
-                            throw new SecurityException("Illegal name: " + to);
-                        }
-                        target.add(toFile);
+                    // 保存 copies 映射关系（to -> from）
+                    copiesMap.put(to, from);
+                    
+                    ArrayList<File> target = null;
+                    if (!copyList.containsKey(from)) {
+                        target = new ArrayList<File>();
+                        copyList.put(from, target);
+                    } else {
+                        target = copyList.get((from));
                     }
+                    File toFile = new File(param.unzipDirectory, to);
+
+                    // Fixing a Zip Path Traversal Vulnerability
+                    // https://support.google.com/faqs/answer/9294009
+                    String canonicalPath = toFile.getCanonicalPath();
+                    if (!canonicalPath.startsWith(param.unzipDirectory.getCanonicalPath() + File.separator)) {
+                        throw new SecurityException("Illegal name: " + to);
+                    }
+                    target.add(toFile);
                 }
                 continue;
             }
@@ -411,11 +531,14 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
             throw new Error("bundle patch not found");
         }
 
-        if(isV2){
-            copyFromResourceV2(copiesv2List);
-        }else{
-            copyFromResource(copyList);
+        if (UpdateContext.DEBUG) {
+            Log.d("react-native-update", "copyList size: " + copyList.size() + ", copiesMap size: " + copiesMap.size());
+            for (String from : copyList.keySet()) {
+                Log.d("react-native-update", "copyList entry: " + from + " -> " + copyList.get(from).size() + " targets");
+            }
         }
+
+        copyFromResource(copyList, copiesMap);
 
         if (UpdateContext.DEBUG) {
             Log.d("react-native-update", "Unzip finished");
