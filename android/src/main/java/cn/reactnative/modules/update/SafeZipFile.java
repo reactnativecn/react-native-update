@@ -66,9 +66,8 @@ public class SafeZipFile extends ZipFile {
             throw new SecurityException("Illegal name: " + name);
         }
 
-        if (UpdateContext.DEBUG) {
-            Log.d("RNUpdate", "Unzipping " + name);
-        }
+        
+        Log.d("react-native-update", "Unzipping " + name);
 
         if (ze.isDirectory()) {
             target.mkdirs();
