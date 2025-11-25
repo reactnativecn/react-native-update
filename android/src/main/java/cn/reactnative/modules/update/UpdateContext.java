@@ -44,13 +44,17 @@ public class UpdateContext {
         String storedPackageVersion = this.sp.getString("packageVersion", null);
         String storedBuildTime = this.sp.getString("buildTime", null);
         
-        // If stored versions don't exist, write current versions first
-        if (storedPackageVersion == null || storedBuildTime == null) {
-            SharedPreferences.Editor editor = sp.edit();
+
+        SharedPreferences.Editor editor = this.sp.edit();
+        if (storedPackageVersion == null) {
             editor.putString("packageVersion", packageVersion);
-            editor.putString("buildTime", buildTime);
             editor.apply();
             storedPackageVersion = packageVersion;
+        }
+
+        if (storedBuildTime == null) {
+            editor.putString("buildTime", buildTime);
+            editor.apply();
             storedBuildTime = buildTime;
         }
         
@@ -65,10 +69,7 @@ public class UpdateContext {
             editor.clear();
             editor.putString("packageVersion", packageVersion);
             editor.putString("buildTime", buildTime);
-            // Use commit() instead of apply() to ensure synchronous write completion
-            // This prevents race condition where getBundleUrl() might read null values
-            // if called before apply() completes
-            editor.commit();
+            editor.apply();
         }
     }
 
