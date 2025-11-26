@@ -64,8 +64,6 @@ public class UpdateContext {
         if (packageVersionChanged || buildTimeChanged) {
             // Execute cleanUp before clearing SharedPreferences to avoid race condition
             this.cleanUp();
-            
-            SharedPreferences.Editor editor = sp.edit();
             editor.clear();
             editor.putString("packageVersion", packageVersion);
             editor.putString("buildTime", buildTime);
