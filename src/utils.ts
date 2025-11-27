@@ -111,17 +111,6 @@ export const enhancedFetch = async (
   isRetry = false,
 ): Promise<Response> => {
   return fetch(url, params)
-    .then(r => {
-      if (r.ok) {
-        return r;
-      }
-      throw Error(
-        i18n.t('error_http_status', {
-          status: r.status,
-          statusText: r.statusText,
-        }),
-      );
-    })
     .catch(e => {
       log('fetch error', url, e);
       if (isRetry) {

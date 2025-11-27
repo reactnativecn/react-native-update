@@ -8,11 +8,11 @@ import {
   TextInput,
   Button,
   StyleSheet,
-  SafeAreaView,
   Text,
   View,
   TouchableOpacity,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {PushyModule} from 'react-native-update/src/core';
 const Hash = '9D5CE6EBA420717BE7E7D308B11F8207681B066C951D68F3994D19828F342474';
