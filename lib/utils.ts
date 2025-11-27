@@ -88,12 +88,6 @@ export const enhancedFetch = async (
   isRetry = false,
 ) => {
   return fetch(url, params)
-    .then((r) => {
-      if (r.ok) {
-        return r;
-      }
-      throw new Error(`${r.status} ${r.statusText}`);
-    })
     .catch((e) => {
       logger('fetch error', url, e);
       if (isRetry) {
