@@ -65,6 +65,7 @@ const defaultClientOptions: ClientOptions = {
 export const sharedState: {
   progressHandlers: Record<string, EmitterSubscription>;
   downloadedHash?: string;
+  toHash?: string;
   apkStatus: 'downloading' | 'downloaded' | null;
   marked: boolean;
   applyingUpdate: boolean;
@@ -509,11 +510,15 @@ export class Pushy {
       });
     }
     log(`downloaded ${succeeded} hash:`, hash);
-    setLocalHashInfo(hash, {
+    const hashInfo: Record<string, any> = {
       name,
       description,
       metaInfo,
-    });
+    };
+    if (sharedState.toHash === hash) {
+      hashInfo.debugChannel = true;
+    }
+    setLocalHashInfo(hash, hashInfo);
     sharedState.downloadedHash = hash;
     return hash;
   };

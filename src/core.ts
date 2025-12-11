@@ -31,11 +31,21 @@ export const downloadRootDir: string = PushyConstants.downloadRootDir;
 export const packageVersion: string = PushyConstants.packageVersion;
 export const currentVersion: string = PushyConstants.currentVersion;
 
+export function setLocalHashInfo(hash: string, info: Record<string, any>) {
+  PushyModule.setLocalHashInfo(hash, JSON.stringify(info));
+}
+
 const currentVersionInfoString: string = PushyConstants.currentVersionInfo;
-let _currentVersionInfo = {};
+let _currentVersionInfo: Record<string, any> = {};
+let isDebugChannel = false;
 if (currentVersionInfoString) {
   try {
     _currentVersionInfo = JSON.parse(currentVersionInfoString);
+    if (_currentVersionInfo.debugChannel) {
+      isDebugChannel = true;
+      delete _currentVersionInfo.debugChannel;
+      setLocalHashInfo(currentVersion, _currentVersionInfo);
+    }
   } catch (error) {
     console.error(
       'Failed to parse currentVersionInfo:',
@@ -46,15 +56,13 @@ if (currentVersionInfoString) {
 export const currentVersionInfo = _currentVersionInfo;
 
 export const isFirstTime: boolean = PushyConstants.isFirstTime;
+export const isFirstTimeDebug: boolean = isFirstTime && isDebugChannel;
 export const rolledBackVersion: string = PushyConstants.rolledBackVersion;
 export const isRolledBack: boolean = !!rolledBackVersion;
 
 export const buildTime: string = PushyConstants.buildTime;
 let uuid = PushyConstants.uuid;
 
-export function setLocalHashInfo(hash: string, info: Record<string, any>) {
-  PushyModule.setLocalHashInfo(hash, JSON.stringify(info));
-}
 
 async function getLocalHashInfo(hash: string) {
   return JSON.parse(await PushyModule.getLocalHashInfo(hash));

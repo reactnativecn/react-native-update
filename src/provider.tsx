@@ -327,7 +327,9 @@ export const UpdateProvider = ({
           Alert.alert(type, JSON.stringify(data));
         };
         if (payload.type === '__rnPushyVersionHash') {
-          checkUpdate({ extra: { toHash: payload.data } }).then(() => {
+          const toHash = payload.data;
+          sharedState.toHash = toHash;
+          checkUpdate({ extra: { toHash } }).then(() => {
             if (updateInfoRef.current && updateInfoRef.current.upToDate) {
               Alert.alert(
                 client.t('alert_info'),
