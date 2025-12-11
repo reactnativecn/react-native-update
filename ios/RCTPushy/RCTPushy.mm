@@ -77,41 +77,16 @@ RCT_EXPORT_MODULE(RCTPushy);
     NSString *storedPackageVersion = [defaults stringForKey:paramPackageVersion];
     NSString *storedBuildTime = [defaults stringForKey:paramBuildTime];
     
-    RCTLogInfo(@"RCTPushy -- Version check: curPackageVersion=%@, curBuildTime=%@, storedPackageVersion=%@, storedBuildTime=%@", 
-               curPackageVersion ?: @"nil", 
-               curBuildTime ?: @"nil", 
-               storedPackageVersion ?: @"nil", 
-               storedBuildTime ?: @"nil");
-    
-    // If stored versions don't exist, write current versions first
-    if (!storedPackageVersion) {
-        RCTLogInfo(@"RCTPushy -- No stored package version found, writing current version: %@", curPackageVersion);
-        [defaults setObject:curPackageVersion forKey:paramPackageVersion];
-        storedPackageVersion = curPackageVersion;
-    }
-
-    if (!storedBuildTime) {
-        RCTLogInfo(@"RCTPushy -- No stored build time found, writing current build time: %@", curBuildTime);
-        [defaults setObject:curBuildTime forKey:paramBuildTime];
-        storedBuildTime = curBuildTime;
-    }
-    
-    BOOL packageVersionChanged = ![curPackageVersion isEqualToString:storedPackageVersion];
-    BOOL buildTimeChanged = curBuildTime && ![curBuildTime isEqualToString:storedBuildTime];
-    
-    RCTLogInfo(@"RCTPushy -- Version change check: packageVersionChanged=%d, buildTimeChanged=%d", 
-               packageVersionChanged, buildTimeChanged);
+    BOOL packageVersionChanged = !storedPackageVersion || ![curPackageVersion isEqualToString:storedPackageVersion];
+    BOOL buildTimeChanged = !storedBuildTime || ![curBuildTime isEqualToString:storedBuildTime];
     
     if (packageVersionChanged || buildTimeChanged) {
-        RCTLogInfo(@"RCTPushy -- Version or build time changed, clearing update data. packageVersionChanged=%d, buildTimeChanged=%d", 
-                   packageVersionChanged, buildTimeChanged);
         // Clear all update data and store new versions
         [defaults setObject:nil forKey:keyPushyInfo];
         [defaults setObject:nil forKey:keyHashInfo];
         [defaults setObject:@(YES) forKey:KeyPackageUpdatedMarked];
         [defaults setObject:curPackageVersion forKey:paramPackageVersion];
         [defaults setObject:curBuildTime forKey:paramBuildTime];
-        
     }
     
     NSDictionary *pushyInfo = [defaults dictionaryForKey:keyPushyInfo];
