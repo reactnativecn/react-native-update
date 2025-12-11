@@ -46,20 +46,9 @@ public class UpdateContext {
         
 
         SharedPreferences.Editor editor = this.sp.edit();
-        if (storedPackageVersion == null) {
-            editor.putString("packageVersion", packageVersion);
-            editor.apply();
-            storedPackageVersion = packageVersion;
-        }
-
-        if (storedBuildTime == null) {
-            editor.putString("buildTime", buildTime);
-            editor.apply();
-            storedBuildTime = buildTime;
-        }
         
-        boolean packageVersionChanged = !packageVersion.equals(storedPackageVersion);
-        boolean buildTimeChanged = !buildTime.equals(storedBuildTime);
+        boolean packageVersionChanged = storedPackageVersion == null || !packageVersion.equals(storedPackageVersion);
+        boolean buildTimeChanged = storedBuildTime == null || !buildTime.equals(storedBuildTime);
         
         if (packageVersionChanged || buildTimeChanged) {
             // Execute cleanUp before clearing SharedPreferences to avoid race condition
