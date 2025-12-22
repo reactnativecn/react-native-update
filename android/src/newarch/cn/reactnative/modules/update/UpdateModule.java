@@ -104,27 +104,27 @@ public class UpdateModule extends NativePushySpec {
 
     @Override
     public void downloadPatchFromPpk(ReadableMap options, final Promise promise) {
-        UpdateModuleImpl.downloadPatchFromPpk(updateContext,options,promise);
+        UpdateModuleImpl.downloadPatchFromPpk(updateContext, options, promise);
     }
 
     @Override
     public void reloadUpdate(ReadableMap options,Promise promise) {
-        UpdateModuleImpl.reloadUpdate(updateContext, mContext, options,promise);
+        UpdateModuleImpl.reloadUpdate(updateContext, mContext, options, promise);
     }
 
     @Override
     public void restartApp(Promise promise) {
-        UpdateModuleImpl.restartApp(mContext, promise);
+        UpdateModuleImpl.restartApp(updateContext, mContext, null, promise);
     }
 
     @Override
     public void setNeedUpdate(ReadableMap options,Promise promise) {
-        UpdateModuleImpl.setNeedUpdate(updateContext, options,promise);
+        UpdateModuleImpl.setNeedUpdate(updateContext, options, promise);
     }
 
     @Override
     public void markSuccess(Promise promise) {
-        UpdateModuleImpl.markSuccess(updateContext,promise);
+        UpdateModuleImpl.markSuccess(updateContext, promise);
     }
 
     @Override

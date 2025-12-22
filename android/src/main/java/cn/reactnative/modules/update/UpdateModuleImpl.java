@@ -134,13 +134,21 @@ public class UpdateModuleImpl {
         }
     }
 
-    public static void reloadUpdate(final UpdateContext updateContext,final ReactApplicationContext mContext, final ReadableMap options, final Promise promise) {
+    public static void reloadUpdate(final UpdateContext updateContext, final ReactApplicationContext mContext, final ReadableMap options, final Promise promise) {
         final String hash = options.getString("hash");
+        restartApp(updateContext, mContext, hash, promise);
+    }
+
+
+    public static void restartApp(final UpdateContext updateContext, final ReactApplicationContext mContext, final String hash, final Promise promise) {
         UiThreadUtil.runOnUiThread(new Runnable() {
             @Override
             public void run() {
-
-                updateContext.switchVersion(hash);
+                // 如果提供了 hash，则切换版本
+                if (hash != null && updateContext != null) {
+                    updateContext.switchVersion(hash);
+                }
+                
                 final Context application = mContext.getApplicationContext();
                 JSBundleLoader loader = JSBundleLoader.createFileLoader(UpdateContext.getBundleUrl(application));
                 try {
@@ -166,6 +174,7 @@ public class UpdateModuleImpl {
                 } catch (Throwable err) {
                     final Activity currentActivity = mContext.getCurrentActivity();
                     if (currentActivity == null) {
+                        promise.reject(err);
                         return;
                     }
                     try {
@@ -203,6 +212,7 @@ public class UpdateModuleImpl {
 
                         // Invoke the reload method with a reason
                         reloadMethod.invoke(reactHost, "react-native-update");
+                        promise.resolve(true);
                     } catch (Throwable e) {
                         currentActivity.runOnUiThread(new Runnable() {
                             @Override
@@ -210,42 +220,17 @@ public class UpdateModuleImpl {
                                 currentActivity.recreate();
                             }
                         });
+                        promise.resolve(true);
                     }
                 }
-                promise.resolve(true);
             }
         });
     }
 
+
     public static void restartApp(final ReactApplicationContext mContext, final Promise promise) {
-          UiThreadUtil.runOnUiThread(new Runnable() {
-              @Override
-              public void run() {
-                  try {
-                      final Context application = mContext.getApplicationContext();
-                      ReactInstanceManager instanceManager = ((ReactApplication) application).getReactNativeHost().getReactInstanceManager();
-
-                      instanceManager.recreateReactContextInBackground();
-                      promise.resolve(true);
-
-                  } catch (Throwable err) {
-                      promise.reject("restartApp failed: "+err.getMessage());
-                      Log.e("pushy", "restartApp failed", err);
-
-                      final Activity currentActivity = mContext.getCurrentActivity();
-                      if (currentActivity == null) {
-                          return;
-                      }
-                      currentActivity.runOnUiThread(new Runnable() {
-                          @Override
-                          public void run() {
-                              currentActivity.recreate();
-                          }
-                      });
-                  }
-              }
-          });
-      }
+        restartApp(null, mContext, null, promise);
+    }
 
     public static void setNeedUpdate(final UpdateContext updateContext, final ReadableMap options, final Promise promise) {
         final String hash = options.getString("hash");
@@ -320,3 +305,4 @@ public class UpdateModuleImpl {
     }
 
 }
+
