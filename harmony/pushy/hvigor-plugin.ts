@@ -23,7 +23,7 @@ export function reactNativeUpdatePlugin() {
       }
 
       const metaContent = {
-        pushy_build_time: new Date().toISOString(),
+        pushy_build_time: Date.now(),
         versionName,
       };
 
