@@ -98,10 +98,10 @@ export interface ClientOptions {
   dismissErrorAfter?: number;
   debug?: boolean;
   throwError?: boolean;
-  beforeCheckUpdate?: () => Promise<boolean>;
-  beforeDownloadUpdate?: (info: CheckResult) => Promise<boolean>;
-  afterDownloadUpdate?: (info: CheckResult) => Promise<boolean>;
-  onPackageExpired?: (info: CheckResult) => Promise<boolean>;
+  beforeCheckUpdate?: () => Promise<boolean> | boolean;
+  beforeDownloadUpdate?: (info: CheckResult) => Promise<boolean> | boolean;
+  afterDownloadUpdate?: (info: CheckResult) => Promise<boolean> | boolean;
+  onPackageExpired?: (info: CheckResult) => Promise<boolean> | boolean;
   overridePackageVersion?: string;
 }
 
