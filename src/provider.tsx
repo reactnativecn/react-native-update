@@ -252,7 +252,7 @@ export const UpdateProvider = ({
             client.t('alert_title'),
             client.t('alert_new_version_found', {
               name: info.name!,
-              description: info.description,
+              description: info.description!,
             }),
             [
               { text: client.t('alert_cancel'), style: 'cancel' },
