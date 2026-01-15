@@ -197,7 +197,9 @@ export const UpdateProvider = ({
           }
           log(`${info.name} in ${rollout}% rollout, continue`);
         }
-        info.description = info.description ?? '';
+        if (info.update) {
+          info.description = info.description ?? '';
+        }
         updateInfoRef.current = info;
         setUpdateInfo(info);
         if (info.expired) {
