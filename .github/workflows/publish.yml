@@ -10,9 +10,6 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
@@ -22,7 +19,4 @@ jobs:
           node-version: 24
           registry-url: 'https://registry.npmjs.org'
       - run: bun install --frozen-lockfile
-      # Ensure npm 11.5.1 or later is installed
-      - name: Update npm
-        run: npm install -g npm@latest
       - run: npm publish --provenance --access public
