@@ -66,3 +66,6 @@ buck-out/
 # react-native-update
 .update
 .pushy
+# react-native-update
+.cresc.token
+.cresc.temp

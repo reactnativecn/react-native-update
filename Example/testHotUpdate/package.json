@@ -10,7 +10,8 @@
     "test:e2e": "detox test --configuration android.emu.debug",
     "lint": "eslint .",
     "postinstall": "patch-package",
-    "apk": "cd android && ./gradlew assembleRelease"
+    "apk": "cd android && ./gradlew assembleRelease",
+    "aab": "cd android && ./gradlew bundleRelease"
   },
   "dependencies": {
     "form-data": "^4.0.5",
