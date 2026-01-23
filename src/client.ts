@@ -282,19 +282,23 @@ export class Pushy {
         type: 'errorChecking',
         message: this.t('error_cannot_connect_backup', { message: e.message }),
       });
-      const backupEndpoints = await this.getBackupEndpoints();
+      const backupEndpoints = await this.getBackupEndpoints().catch();
       if (backupEndpoints) {
-        try {
-          resp = await promiseAny(
-            backupEndpoints.map(endpoint =>
-              enhancedFetch(this.getCheckUrl(endpoint), fetchPayload),
-            ),
-          );
-        } catch (err: any) {
-          this.throwIfEnabled(Error('errorCheckingUseBackup'));
-        }
+        resp = await promiseAny(
+          backupEndpoints.map(endpoint =>
+            enhancedFetch(this.getCheckUrl(endpoint), fetchPayload),
+          ),
+        ).catch(() => {
+          this.report({
+            type: 'errorChecking',
+            message: this.t('errorCheckingUseBackup'),
+          });
+        });
       } else {
-        this.throwIfEnabled(Error('errorCheckingGetBackup'));
+        this.report({
+          type: 'errorChecking',
+          message: this.t('errorCheckingGetBackup'),
+        });
       }
     }
     if (!resp) {
@@ -316,7 +320,7 @@ export class Pushy {
         type: 'errorChecking',
         message: errorMessage,
       });
-      this.throwIfEnabled(Error(errorMessage));
+      this.throwIfEnabled(Error('errorChecking: ' + errorMessage));
       return this.lastRespJson ? await this.lastRespJson : emptyObj;
     }
     this.lastRespJson = resp.json();

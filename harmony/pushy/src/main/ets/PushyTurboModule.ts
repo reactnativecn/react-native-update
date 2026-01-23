@@ -86,7 +86,7 @@ export class PushyTurboModule extends TurboModule {
     return UpdateModuleImpl.getLocalHashInfo(this.context, hash);
   }
 
-  async setUuid(uuid: string): Promise<boolean> {
+  async setUuid(uuid: string): Promise<void> {
     logger.debug(TAG, ',call setUuid');
     return UpdateModuleImpl.setUuid(this.context, uuid);
   }
@@ -129,15 +129,6 @@ export class PushyTurboModule extends TurboModule {
   }): Promise<void> {
     logger.debug(TAG, ',call downloadFullUpdate');
     return UpdateModuleImpl.downloadFullUpdate(this.context, options);
-  }
-
-  async downloadAndInstallApk(options: {
-    url: string;
-    target: string;
-    hash: string;
-  }): Promise<void> {
-    logger.debug(TAG, ',call downloadAndInstallApk');
-    return UpdateModuleImpl.downloadAndInstallApk(this.mUiCtx, options);
   }
 
   addListener(_eventName: string): void {
