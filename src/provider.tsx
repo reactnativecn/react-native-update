@@ -162,7 +162,7 @@ export const UpdateProvider = ({
   );
 
   const checkUpdate = useCallback(
-    async ({ extra }: { extra?: Record<string, any> } | undefined = {}) => {
+    async ({ extra }: { extra?: Partial<{ toHash: string }> } = {}) => {
       const now = Date.now();
       if (lastChecking.current && now - lastChecking.current < 1000) {
         return;
