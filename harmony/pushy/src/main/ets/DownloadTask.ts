@@ -193,9 +193,13 @@ export class DownloadTask {
         }
         const obj = JSON.parse(jsonContent);
 
-        const copies = obj.copies;
-        for (const to in copies) {
-          let from = copies[to].replace('resources/rawfile/', '');
+        const copies = obj.copies as Record<string, string>;
+        for (const [to, rawPath] of Object.entries(copies)) {
+          if (!rawPath.startsWith('resources/rawfile/')) {
+            // skip other resource
+            continue;
+          }
+          let from = rawPath.replace('resources/rawfile/', '');
           if (from === '') {
             from = to;
           }
@@ -355,10 +359,12 @@ export class DownloadTask {
   private async copyFromResource(
     copyList: Map<string, Array<string>>,
   ): Promise<void> {
+    let currentFrom = '';
     try {
       const resourceManager = this.context.resourceManager;
 
       for (const [from, targets] of copyList.entries()) {
+        currentFrom = from;
         const fromContent = await resourceManager.getRawFileContent(from);
         for (const target of targets) {
           const fileStream = fileIo.createStreamSync(target, 'w+');
@@ -367,7 +373,7 @@ export class DownloadTask {
         }
       }
     } catch (error) {
-      console.error('Copy from resource failed:', error);
+      console.error('Copy from resource failed:', currentFrom, error.message);
       throw error;
     }
   }
@@ -429,7 +435,7 @@ export class DownloadTask {
 
       params.listener?.onDownloadCompleted(params);
     } catch (error) {
-      console.error('Task execution failed:', error);
+      console.error('Task execution failed:', error.message);
       if (params.type !== DownloadTaskParams.TASK_TYPE_CLEANUP) {
         try {
           if (params.type === DownloadTaskParams.TASK_TYPE_PLAIN_DOWNLOAD) {
@@ -438,7 +444,7 @@ export class DownloadTask {
             await this.removeDirectory(params.unzipDirectory);
           }
         } catch (cleanupError) {
-          console.error('Cleanup after error failed:', cleanupError);
+          console.error('Cleanup after error failed:', cleanupError.message);
         }
       }
       params.listener?.onDownloadFailed(error);
