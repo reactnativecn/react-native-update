@@ -70,7 +70,7 @@ export default {
 
   // Development environment messages
   dev_incremental_update_disabled:
-    'Currently in development environment, incremental hot update cannot be executed and restart will not take effect. If you need to test effective full hot update in development environment (but will reconnect to metro after restart), please enable "ignore timestamp" switch and retry.',
+    'Currently in development environment, incremental hot update cannot be executed and restart will not take effect. If you need to test effective full hot update in development environment (but will reconnect to metro after restart), please enable "ignore timestamp" in app settings in admin dashboard and retry.',
 
   // Context error messages
   error_use_update_outside_provider:
