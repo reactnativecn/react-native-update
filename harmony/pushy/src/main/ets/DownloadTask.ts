@@ -433,7 +433,6 @@ export class DownloadTask {
           throw Error(`Unknown task type: ${params.type}`);
       }
 
-      params.listener?.onDownloadCompleted(params);
     } catch (error) {
       console.error('Task execution failed:', error.message);
       if (params.type !== DownloadTaskParams.TASK_TYPE_CLEANUP) {
@@ -447,7 +446,7 @@ export class DownloadTask {
           console.error('Cleanup after error failed:', cleanupError.message);
         }
       }
-      params.listener?.onDownloadFailed(error);
+      throw error;
     }
   }
 }

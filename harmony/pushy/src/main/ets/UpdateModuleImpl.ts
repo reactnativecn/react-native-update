@@ -1,7 +1,6 @@
 import bundleManager from '@ohos.bundle.bundleManager';
 import common from '@ohos.app.ability.common';
 import { UpdateContext } from './UpdateContext';
-import { DownloadTaskParams } from './DownloadTaskParams';
 import logger from './Logger';
 
 const TAG = 'UpdateModuleImpl';
@@ -13,89 +12,28 @@ export class UpdateModuleImpl {
     updateContext: UpdateContext,
     options: { updateUrl: string; hash: string },
   ): Promise<void> {
-    try {
-      await updateContext.downloadFullUpdate(options.updateUrl, options.hash, {
-        onDownloadCompleted: (params: DownloadTaskParams) => {
-          return Promise.resolve();
-        },
-        onDownloadFailed: (error: Error) => {
-          return Promise.reject(error);
-        },
-      });
-    } catch (error) {
-      logger.error(TAG, `downloadFullUpdate failed: ${error}`);
-      throw error;
-    }
-  }
-
-  static async downloadAndInstallApk(
-    context: common.UIAbilityContext,
-    options: { url: string; hash: string; target: string },
-  ): Promise<void> {
-    try {
-      const want = {
-        action: 'action.system.home',
-        parameters: {
-          uri: 'appmarket://details',
-        },
-      };
-
-      if (!context) {
-        throw Error('获取context失败');
-      }
-
-      await context.startAbility(want);
-    } catch (error) {
-      logger.error(TAG, `installApk failed: ${error}`);
-      throw error;
-    }
+    return updateContext.downloadFullUpdate(options.updateUrl, options.hash);
   }
 
   static async downloadPatchFromPackage(
     updateContext: UpdateContext,
     options: { updateUrl: string; hash: string },
   ): Promise<void> {
-    try {
-      return await updateContext.downloadPatchFromPackage(
-        options.updateUrl,
-        options.hash,
-        {
-          onDownloadCompleted: (params: DownloadTaskParams) => {
-            return Promise.resolve();
-          },
-          onDownloadFailed: (error: Error) => {
-            return Promise.reject(error);
-          },
-        },
-      );
-    } catch (error) {
-      logger.error(TAG, `downloadPatchFromPackage failed: ${error}`);
-      throw error;
-    }
+    return updateContext.downloadPatchFromPackage(
+      options.updateUrl,
+      options.hash,
+    );
   }
 
   static async downloadPatchFromPpk(
     updateContext: UpdateContext,
     options: { updateUrl: string; hash: string; originHash: string },
   ): Promise<void> {
-    try {
-      await updateContext.downloadPatchFromPpk(
-        options.updateUrl,
-        options.hash,
-        options.originHash,
-        {
-          onDownloadCompleted: (params: DownloadTaskParams) => {
-            return Promise.resolve();
-          },
-          onDownloadFailed: (error: Error) => {
-            return Promise.reject(error);
-          },
-        },
-      );
-    } catch (error) {
-      logger.error(TAG, `downloadPatchFromPpk failed: ${error}`);
-      throw Error(`执行报错: ${error.message}`);
-    }
+    return updateContext.downloadPatchFromPpk(
+      options.updateUrl,
+      options.hash,
+      options.originHash,
+    );
   }
 
   static async reloadUpdate(
@@ -121,7 +59,7 @@ export class UpdateModuleImpl {
       await context.startAbility(want);
     } catch (error) {
       logger.error(TAG, `reloadUpdate failed: ${error}`);
-      throw Error(`pushy:switchVersion failed ${error.message}`);
+      throw Error(`switchVersion failed ${error.message}`);
     }
   }
 
@@ -156,14 +94,8 @@ export class UpdateModuleImpl {
   static async setUuid(
     updateContext: UpdateContext,
     uuid: string,
-  ): Promise<boolean> {
-    try {
-      await updateContext.setKv('uuid', uuid);
-      return true;
-    } catch (error) {
-      logger.error(TAG, `setUuid failed: ${error}`);
-      throw Error(`执行报错: ${error.message}`);
-    }
+  ): Promise<void> {
+    return updateContext.setKv('uuid', uuid);
   }
 
   static checkJson(json: string): boolean {

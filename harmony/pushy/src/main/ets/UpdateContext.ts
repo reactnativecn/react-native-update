@@ -89,23 +89,19 @@ export class UpdateContext {
     this.cleanUp();
   }
 
-  public async downloadFullUpdate(
-    url: string,
-    hash: string,
-    listener: DownloadFileListener,
-  ): Promise<void> {
+  public async downloadFullUpdate(url: string, hash: string): Promise<void> {
     try {
       const params = new DownloadTaskParams();
       params.type = DownloadTaskParams.TASK_TYPE_PATCH_FULL;
       params.url = url;
       params.hash = hash;
-      params.listener = listener;
       params.targetFile = `${this.rootDir}/${hash}.ppk`;
       params.unzipDirectory = `${this.rootDir}/${hash}`;
       const downloadTask = new DownloadTask(this.context);
       await downloadTask.execute(params);
     } catch (e) {
       console.error('Failed to download full update:', e);
+      throw e;
     }
   }
 
@@ -113,13 +109,11 @@ export class UpdateContext {
     url: string,
     hash: string,
     fileName: string,
-    listener: DownloadFileListener,
   ): Promise<void> {
     const params = new DownloadTaskParams();
     params.type = DownloadTaskParams.TASK_TYPE_PLAIN_DOWNLOAD;
     params.url = url;
     params.hash = hash;
-    params.listener = listener;
     params.targetFile = this.rootDir + '/' + fileName;
 
     const downloadTask = new DownloadTask(this.context);
@@ -130,14 +124,12 @@ export class UpdateContext {
     url: string,
     hash: string,
     originHash: string,
-    listener: DownloadFileListener,
   ): Promise<void> {
     const params = new DownloadTaskParams();
     params.type = DownloadTaskParams.TASK_TYPE_PATCH_FROM_PPK;
     params.url = url;
     params.hash = hash;
     params.originHash = originHash;
-    params.listener = listener;
     params.targetFile = `${this.rootDir}/${originHash}_${hash}.ppk.patch`;
     params.unzipDirectory = `${this.rootDir}/${hash}`;
     params.originDirectory = `${this.rootDir}/${params.originHash}`;
@@ -149,21 +141,19 @@ export class UpdateContext {
   public async downloadPatchFromPackage(
     url: string,
     hash: string,
-    listener: DownloadFileListener,
   ): Promise<void> {
     try {
       const params = new DownloadTaskParams();
       params.type = DownloadTaskParams.TASK_TYPE_PATCH_FROM_APP;
       params.url = url;
       params.hash = hash;
-      params.listener = listener;
       params.targetFile = `${this.rootDir}/${hash}.app.patch`;
       params.unzipDirectory = `${this.rootDir}/${hash}`;
 
       const downloadTask = new DownloadTask(this.context);
       return await downloadTask.execute(params);
     } catch (e) {
-      console.error('Failed to download APK patch:', e);
+      console.error('Failed to download package patch:', e);
       throw e;
     }
   }
@@ -186,6 +176,7 @@ export class UpdateContext {
       this.setKv('rolledBackVersion', '');
     } catch (e) {
       console.error('Failed to switch version:', e);
+      throw e;
     }
   }
 
@@ -268,9 +259,4 @@ export class UpdateContext {
   public getIsUsingBundleUrl(): boolean {
     return UpdateContext.isUsingBundleUrl;
   }
-}
-
-export interface DownloadFileListener {
-  onDownloadCompleted(params: DownloadTaskParams): void;
-  onDownloadFailed(error: Error): void;
 }
