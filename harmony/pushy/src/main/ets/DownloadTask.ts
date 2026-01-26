@@ -18,7 +18,6 @@ interface ZipFile {
 export class DownloadTask {
   private context: common.Context;
   private hash: string;
-  private readonly DOWNLOAD_CHUNK_SIZE = 4096;
   private eventHub: EventHub;
 
   constructor(context: common.Context) {
@@ -53,6 +52,35 @@ export class DownloadTask {
   private async downloadFile(params: DownloadTaskParams): Promise<void> {
     const httpRequest = http.createHttp();
     this.hash = params.hash;
+    let writer: fileIo.File | null = null;
+    let contentLength = 0;
+    let received = 0;
+    let writeError: Error | null = null;
+    let writeQueue = Promise.resolve();
+
+    const closeWriter = async () => {
+      if (writer) {
+        await fileIo.close(writer);
+        writer = null;
+      }
+    };
+
+    const dataEndPromise = new Promise<void>((resolve, reject) => {
+      httpRequest.on('dataEnd', () => {
+        writeQueue
+          .then(async () => {
+            if (writeError) {
+              throw writeError;
+            }
+            await closeWriter();
+            resolve();
+          })
+          .catch(async error => {
+            await closeWriter();
+            reject(error);
+          });
+      });
+    });
 
     try {
       let exists = fileIo.accessSync(params.targetFile);
@@ -69,7 +97,59 @@ export class DownloadTask {
         }
       }
 
-      const response = await httpRequest.request(params.url, {
+      writer = await fileIo.open(
+        params.targetFile,
+        fileIo.OpenMode.CREATE | fileIo.OpenMode.READ_WRITE,
+      );
+
+      httpRequest.on('headersReceive', (header: Record<string, string>) => {
+        if (!header) {
+          return;
+        }
+        const lengthKey = Object.keys(header).find(
+          key => key.toLowerCase() === 'content-length',
+        );
+        if (!lengthKey) {
+          return;
+        }
+        const length = parseInt(header[lengthKey], 10);
+        if (!Number.isNaN(length)) {
+          contentLength = length;
+        }
+      });
+
+      httpRequest.on('dataReceive', (data: ArrayBuffer) => {
+        if (writeError) {
+          return;
+        }
+        received += data.byteLength;
+        writeQueue = writeQueue.then(async () => {
+          if (!writer || writeError) {
+            return;
+          }
+          try {
+            await fileIo.write(writer.fd, data);
+          } catch (error) {
+            writeError = error as Error;
+          }
+        });
+        this.onProgressUpdate(received, contentLength);
+      });
+
+      httpRequest.on(
+        'dataReceiveProgress',
+        (data: http.DataReceiveProgressInfo) => {
+          if (data.totalSize > 0) {
+            contentLength = data.totalSize;
+          }
+          if (data.receiveSize > received) {
+            received = data.receiveSize;
+          }
+          this.onProgressUpdate(received, contentLength);
+        },
+      );
+
+      const responseCode = await httpRequest.requestInStream(params.url, {
         method: http.RequestMethod.GET,
         readTimeout: 60000,
         connectTimeout: 60000,
@@ -77,32 +157,14 @@ export class DownloadTask {
           'Content-Type': 'application/octet-stream',
         },
       });
-      if (response.responseCode > 299) {
-        throw Error(`Server error: ${response.responseCode}`);
+      if (responseCode > 299) {
+        throw Error(`Server error: ${responseCode}`);
       }
 
-      const contentLength = parseInt(response.header['content-length'] || '0');
-      const writer = await fileIo.open(
-        params.targetFile,
-        fileIo.OpenMode.CREATE | fileIo.OpenMode.READ_WRITE,
-      );
-      let received = 0;
-      const data = response.result as ArrayBuffer;
-      const chunks = Math.ceil(data.byteLength / this.DOWNLOAD_CHUNK_SIZE);
-      for (let i = 0; i < chunks; i++) {
-        const start = i * this.DOWNLOAD_CHUNK_SIZE;
-        const end = Math.min(start + this.DOWNLOAD_CHUNK_SIZE, data.byteLength);
-        const chunk = data.slice(start, end);
-
-        await fileIo.write(writer.fd, chunk);
-        received += chunk.byteLength;
-
-        this.onProgressUpdate(received, contentLength);
-      }
-      await fileIo.close(writer);
+      await dataEndPromise;
       const stats = await fileIo.stat(params.targetFile);
       const fileSize = stats.size;
-      if (fileSize !== contentLength) {
+      if (contentLength > 0 && fileSize !== contentLength) {
         throw Error(
           `Download incomplete: expected ${contentLength} bytes but got ${stats.size} bytes`,
         );
@@ -111,6 +173,15 @@ export class DownloadTask {
       console.error('Download failed:', error);
       throw error;
     } finally {
+      try {
+        await closeWriter();
+      } catch (closeError) {
+        console.error('Failed to close file:', closeError);
+      }
+      httpRequest.off('headersReceive');
+      httpRequest.off('dataReceive');
+      httpRequest.off('dataReceiveProgress');
+      httpRequest.off('dataEnd');
       httpRequest.destroy();
     }
   }
