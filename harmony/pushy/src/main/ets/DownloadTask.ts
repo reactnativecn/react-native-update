@@ -55,22 +55,18 @@ export class DownloadTask {
     this.hash = params.hash;
 
     try {
-      try {
-        let exists = fileIo.accessSync(params.targetFile);
-        if (exists) {
-          await fileIo.unlink(params.targetFile);
-        } else {
-          const targetDir = params.targetFile.substring(
-            0,
-            params.targetFile.lastIndexOf('/'),
-          );
-          exists = fileIo.accessSync(targetDir);
-          if (!exists) {
-            await fileIo.mkdir(targetDir);
-          }
+      let exists = fileIo.accessSync(params.targetFile);
+      if (exists) {
+        await fileIo.unlink(params.targetFile);
+      } else {
+        const targetDir = params.targetFile.substring(
+          0,
+          params.targetFile.lastIndexOf('/'),
+        );
+        exists = fileIo.accessSync(targetDir);
+        if (!exists) {
+          await fileIo.mkdir(targetDir);
         }
-      } catch (error) {
-        throw error;
       }
 
       const response = await httpRequest.request(params.url, {
@@ -432,7 +428,6 @@ export class DownloadTask {
         default:
           throw Error(`Unknown task type: ${params.type}`);
       }
-
     } catch (error) {
       console.error('Task execution failed:', error.message);
       if (params.type !== DownloadTaskParams.TASK_TYPE_CLEANUP) {
