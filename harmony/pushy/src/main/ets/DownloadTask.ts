@@ -428,7 +428,9 @@ export class DownloadTask {
       for (const [from, targets] of copyList.entries()) {
         currentFrom = from;
         if (from.startsWith('resources/base/media/')) {
-          const mediaName = from.replace('resources/base/media/', '');
+          const mediaName = from
+            .replace('resources/base/media/', '')
+            .split('.')[0];
           const mediaBuffer = await resourceManager.getMediaByName(mediaName);
           for (const target of targets) {
             const fileStream = fileIo.createStreamSync(target, 'w+');
@@ -444,7 +446,14 @@ export class DownloadTask {
       }
     } catch (error) {
       error.message =
-        'Copy from resource failed:' + currentFrom + ',' + error.message;
+        'Copy from resource failed:' +
+        currentFrom +
+        ',' +
+        error.code +
+        ',' +
+        error.message +
+        ',' +
+        error.stack;
       console.error(error);
       throw error;
     }
