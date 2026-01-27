@@ -45,20 +45,7 @@ export class PushyTurboModule extends TurboModule {
       '',
     ) as string;
     const currentVersionInfo = this.context.getKv(`hash_${currentVersion}`);
-    let buildTime = preferencesManager.getSync('buildTime', '') as string;
-    if (!buildTime) {
-      try {
-        const resourceManager = this.mUiCtx.resourceManager;
-        const content = resourceManager.getRawFileContentSync('meta.json');
-        const metaData = JSON.parse(
-          new util.TextDecoder().decodeToString(content),
-        );
-        if (metaData.pushy_build_time) {
-          buildTime = String(metaData.pushy_build_time);
-          preferencesManager.putSync('buildTime', buildTime);
-        }
-      } catch {}
-    }
+
     const isUsingBundleUrl = this.context.getIsUsingBundleUrl();
     let bundleFlags =
       bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_REQUESTED_PERMISSION;
@@ -68,6 +55,35 @@ export class PushyTurboModule extends TurboModule {
       packageVersion = bundleInfo?.versionName || 'Unknown';
     } catch (error) {
       console.error('Failed to get bundle info:', error);
+    }
+    const storedPackageVersion = preferencesManager.getSync(
+      'packageVersion',
+      '',
+    ) as string;
+    const storedBuildTime = preferencesManager.getSync(
+      'buildTime',
+      '',
+    ) as string;
+    let buildTime = '';
+    try {
+      const resourceManager = this.mUiCtx.resourceManager;
+      const content = resourceManager.getRawFileContentSync('meta.json');
+      const metaData = JSON.parse(
+        new util.TextDecoder().decodeToString(content),
+      );
+      if (metaData.pushy_build_time) {
+        buildTime = String(metaData.pushy_build_time);
+      }
+    } catch {}
+
+    const packageVersionChanged =
+      !storedPackageVersion || packageVersion !== storedPackageVersion;
+    const buildTimeChanged = !storedBuildTime || buildTime !== storedBuildTime;
+
+    if (packageVersionChanged || buildTimeChanged) {
+      this.context.cleanUp();
+      preferencesManager.putSync('packageVersion', packageVersion);
+      preferencesManager.putSync('buildTime', buildTime);
     }
 
     if (isFirstTime) {

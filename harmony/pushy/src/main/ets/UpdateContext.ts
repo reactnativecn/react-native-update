@@ -246,14 +246,14 @@ export class UpdateContext {
     return lastVersion;
   }
 
-  private cleanUp(): void {
+  public async cleanUp() {
     const params = new DownloadTaskParams();
     params.type = DownloadTaskParams.TASK_TYPE_CLEANUP;
     params.hash = this.preferences.getSync('currentVersion', '') as string;
     params.originHash = this.preferences.getSync('lastVersion', '') as string;
     params.unzipDirectory = this.rootDir;
     const downloadTask = new DownloadTask(this.context);
-    downloadTask.execute(params);
+    await downloadTask.execute(params);
   }
 
   public getIsUsingBundleUrl(): boolean {
