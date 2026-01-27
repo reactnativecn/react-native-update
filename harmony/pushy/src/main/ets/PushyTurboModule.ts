@@ -9,6 +9,7 @@ import logger from './Logger';
 import { UpdateModuleImpl } from './UpdateModuleImpl';
 import { UpdateContext } from './UpdateContext';
 import { EventHub } from './EventHub';
+import { util } from '@kit.ArkTS';
 
 const TAG = 'PushyTurboModule';
 
@@ -44,7 +45,20 @@ export class PushyTurboModule extends TurboModule {
       '',
     ) as string;
     const currentVersionInfo = this.context.getKv(`hash_${currentVersion}`);
-    const buildTime = preferencesManager.getSync('buildTime', '') as string;
+    let buildTime = preferencesManager.getSync('buildTime', '') as string;
+    if (!buildTime) {
+      try {
+        const resourceManager = this.mUiCtx.resourceManager;
+        const content = resourceManager.getRawFileContentSync('metadata.json');
+        const metaData = JSON.parse(
+          new util.TextDecoder().decodeToString(content),
+        );
+        if (metaData.buildTime) {
+          buildTime = String(metaData.buildTime);
+          preferencesManager.putSync('buildTime', buildTime);
+        }
+      } catch {}
+    }
     const isUsingBundleUrl = this.context.getIsUsingBundleUrl();
     let bundleFlags =
       bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_REQUESTED_PERMISSION;

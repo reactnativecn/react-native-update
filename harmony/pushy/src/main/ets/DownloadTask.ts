@@ -6,6 +6,7 @@ import { EventHub } from './EventHub';
 import { DownloadTaskParams } from './DownloadTaskParams';
 import Pushy from 'librnupdate.so';
 import { saveFileToSandbox } from './SaveFile';
+import { util } from '@kit.ArkTS';
 
 interface ZipEntry {
   filename: string;
@@ -255,12 +256,10 @@ export class DownloadTask {
 
       if (fn === '__diff.json') {
         foundDiff = true;
-        let jsonContent = '';
         const bufferArray = new Uint8Array(entry.content);
-        for (let i = 0; i < bufferArray.length; i++) {
-          jsonContent += String.fromCharCode(bufferArray[i]);
-        }
-        const obj = JSON.parse(jsonContent);
+        const obj = JSON.parse(
+          new util.TextDecoder().decodeToString(bufferArray),
+        );
 
         const copies = obj.copies as Record<string, string>;
         for (const [to, rawPath] of Object.entries(copies)) {
@@ -345,12 +344,10 @@ export class DownloadTask {
             console.error('copy error:', error);
           });
 
-        let jsonContent = '';
         const bufferArray = new Uint8Array(entry.content);
-        for (let i = 0; i < bufferArray.length; i++) {
-          jsonContent += String.fromCharCode(bufferArray[i]);
-        }
-        const obj = JSON.parse(jsonContent);
+        const obj = JSON.parse(
+          new util.TextDecoder().decodeToString(bufferArray),
+        );
 
         const { copies, deletes } = obj;
         for (const [to, from] of Object.entries(copies)) {
