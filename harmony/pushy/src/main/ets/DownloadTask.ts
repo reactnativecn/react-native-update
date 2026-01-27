@@ -434,7 +434,7 @@ export class DownloadTask {
           const mediaBuffer = await resourceManager.getMediaByName(mediaName);
           for (const target of targets) {
             const fileStream = fileIo.createStreamSync(target, 'w+');
-            fileStream.writeSync(mediaBuffer);
+            fileStream.writeSync(mediaBuffer.buffer);
             fileStream.close();
           }
           continue;
@@ -451,9 +451,7 @@ export class DownloadTask {
         ',' +
         error.code +
         ',' +
-        error.message +
-        ',' +
-        error.stack;
+        error.message;
       console.error(error);
       throw error;
     }
