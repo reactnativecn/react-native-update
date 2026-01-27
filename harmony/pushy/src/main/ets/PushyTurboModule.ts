@@ -49,7 +49,7 @@ export class PushyTurboModule extends TurboModule {
     if (!buildTime) {
       try {
         const resourceManager = this.mUiCtx.resourceManager;
-        const content = resourceManager.getRawFileContentSync('metadata.json');
+        const content = resourceManager.getRawFileContentSync('meta.json');
         const metaData = JSON.parse(
           new util.TextDecoder().decodeToString(content),
         );
