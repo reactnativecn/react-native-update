@@ -69,7 +69,7 @@ export class UpdateModuleImpl {
   ): Promise<boolean> {
     const hash = options.hash;
     if (!hash) {
-      throw Error('hash不能为空');
+      throw Error('empty hash');
     }
 
     try {
@@ -87,7 +87,7 @@ export class UpdateModuleImpl {
       return true;
     } catch (error) {
       logger.error(TAG, `markSuccess failed: ${error}`);
-      throw Error(`执行报错: ${error.message}`);
+      throw error;
     }
   }
 

@@ -1,8 +1,7 @@
 import {
   FileJSBundle,
-  HotReloadConfig,
   JSBundleProvider,
-  JSBundleProviderError
+  JSBundleProviderError,
 } from '@rnoh/react-native-openharmony';
 import common from '@ohos.app.ability.common';
 import fs from '@ohos.file.fs';
@@ -10,7 +9,7 @@ import { UpdateContext } from './UpdateContext';
 
 export class PushyFileJSBundleProvider extends JSBundleProvider {
   private updateContext: UpdateContext;
-  private path: string = ''
+  private path: string = '';
 
   constructor(context: common.UIAbilityContext) {
     super();
@@ -26,20 +25,22 @@ export class PushyFileJSBundleProvider extends JSBundleProvider {
     if (!this.path) {
       throw new JSBundleProviderError({
         whatHappened: 'No pushy bundle found. using default bundle',
-        howCanItBeFixed: ['']
-      })
+        howCanItBeFixed: [''],
+      });
     }
     try {
       await fs.access(this.path, fs.OpenMode.READ_ONLY);
       return {
-        filePath: this.path
-      }
+        filePath: this.path,
+      };
     } catch (error) {
       throw new JSBundleProviderError({
         whatHappened: `Couldn't load JSBundle from ${this.path}`,
         extraData: error,
-        howCanItBeFixed: [`Check if a bundle exists at "${this.path}" on your device.`]
-      })
+        howCanItBeFixed: [
+          `Check if a bundle exists at "${this.path}" on your device.`,
+        ],
+      });
     }
   }
 

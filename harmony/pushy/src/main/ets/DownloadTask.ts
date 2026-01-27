@@ -5,6 +5,7 @@ import { zlib } from '@kit.BasicServicesKit';
 import { EventHub } from './EventHub';
 import { DownloadTaskParams } from './DownloadTaskParams';
 import Pushy from 'librnupdate.so';
+import { saveFileToSandbox } from './SaveFile';
 
 interface ZipEntry {
   filename: string;
@@ -233,7 +234,8 @@ export class DownloadTask {
 
       return { entries };
     } catch (error) {
-      console.error('Failed to process unzipped files:', error);
+      error.message = 'Failed to process unzipped files:' + error.message;
+      console.error(error);
       throw error;
     }
   }
@@ -262,10 +264,6 @@ export class DownloadTask {
 
         const copies = obj.copies as Record<string, string>;
         for (const [to, rawPath] of Object.entries(copies)) {
-          if (!rawPath.startsWith('resources/rawfile/')) {
-            // skip other resource
-            continue;
-          }
           let from = rawPath.replace('resources/rawfile/', '');
           if (from === '') {
             from = to;
@@ -311,7 +309,7 @@ export class DownloadTask {
           await fileIo.close(writer);
           continue;
         } catch (error) {
-          console.error('Failed to process bundle patch:', error);
+          error.message = 'Failed to process bundle patch:' + error.message;
           throw error;
         }
       }
@@ -432,15 +430,27 @@ export class DownloadTask {
 
       for (const [from, targets] of copyList.entries()) {
         currentFrom = from;
-        const fromContent = await resourceManager.getRawFileContent(from);
+        if (from.startsWith('resources/base/media/')) {
+          const mediaName = from
+            .replace('resources/base/media/', '')
+            .split('.')[0];
+          const mediaBuffer = await resourceManager.getMediaByName(mediaName);
+          for (const target of targets) {
+            const fileStream = fileIo.createStreamSync(target, 'w+');
+            fileStream.writeSync(mediaBuffer);
+            fileStream.close();
+          }
+          continue;
+        }
+        const fromContent = await resourceManager.getRawFd(from);
         for (const target of targets) {
-          const fileStream = fileIo.createStreamSync(target, 'w+');
-          fileStream.writeSync(fromContent.buffer);
-          fileStream.close();
+          saveFileToSandbox(fromContent, target);
         }
       }
     } catch (error) {
-      console.error('Copy from resource failed:', currentFrom, error.message);
+      error.message =
+        'Copy from resource failed:' + currentFrom + ',' + error.message;
+      console.error(error);
       throw error;
     }
   }
@@ -473,7 +483,8 @@ export class DownloadTask {
         }
       }
     } catch (error) {
-      console.error('Cleanup failed:', error);
+      error.message = 'Cleanup failed:' + error.message;
+      console.error(error);
       throw error;
     }
   }

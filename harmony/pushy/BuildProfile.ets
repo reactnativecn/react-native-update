@@ -1,7 +1,9 @@
 /**
  * Use these variables when you tailor your ArkTS code. They must be of the const type.
  */
-export const HAR_VERSION = '3.1.0-0.0.7';
+import packageJson from '../../package.json'
+
+export const HAR_VERSION = packageJson.version;
 export const BUILD_MODE_NAME = 'debug';
 export const DEBUG = true;
 export const TARGET_NAME = 'default';
