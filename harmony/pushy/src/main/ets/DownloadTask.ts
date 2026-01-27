@@ -431,9 +431,7 @@ export class DownloadTask {
       for (const [from, targets] of copyList.entries()) {
         currentFrom = from;
         if (from.startsWith('resources/base/media/')) {
-          const mediaName = from
-            .replace('resources/base/media/', '')
-            .split('.')[0];
+          const mediaName = from.replace('resources/base/media/', '');
           const mediaBuffer = await resourceManager.getMediaByName(mediaName);
           for (const target of targets) {
             const fileStream = fileIo.createStreamSync(target, 'w+');
