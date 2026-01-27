@@ -53,8 +53,8 @@ export class PushyTurboModule extends TurboModule {
         const metaData = JSON.parse(
           new util.TextDecoder().decodeToString(content),
         );
-        if (metaData.buildTime) {
-          buildTime = String(metaData.buildTime);
+        if (metaData.pushy_build_time) {
+          buildTime = String(metaData.pushy_build_time);
           preferencesManager.putSync('buildTime', buildTime);
         }
       } catch {}
