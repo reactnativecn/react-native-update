@@ -26,6 +26,7 @@ import TestConsole from './TestConsole';
 
 import _updateConfig from '../update.json';
 import { UpdateProvider, Pushy, useUpdate } from 'react-native-update';
+const { LOCAL_UPDATE_LABELS } = require('../e2e/localUpdateConfig');
 const { appKey } = _updateConfig[Platform.OS];
 
 function App() {
@@ -50,6 +51,8 @@ function App() {
     !useDefaultAlert && showUpdateSnackbar && updateInfo?.update;
   const [showCamera, setShowCamera] = useState(false);
   const lastParsedCode = useRef('');
+  const bundleLabel =
+    (global as any).__RNU_E2E_BUNDLE_LABEL || LOCAL_UPDATE_LABELS.base;
 
   return (
     <View style={styles.container}>
@@ -116,6 +119,7 @@ function App() {
         {'\n'}
         当前热更新版本信息: {JSON.stringify(currentVersionInfo) || '(空)'}
       </Text>
+      <Text testID="bundle-label">bundleLabel: {bundleLabel}</Text>
       <Text>
         下载进度：{received} / {total}
       </Text>

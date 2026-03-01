@@ -1,29 +1,50 @@
 /* eslint-disable react-native/no-inline-styles */
 /* eslint-disable react/react-in-jsx-scope */
-import {useState} from 'react';
+import {useMemo, useState} from 'react';
 import {
-  Alert,
   ActivityIndicator,
-  Modal,
-  TextInput,
   Button,
+  Modal,
+  Platform,
+  ScrollView,
   StyleSheet,
   Text,
-  View,
+  TextInput,
   TouchableOpacity,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {PushyModule} from 'react-native-update/src/core';
-const Hash = '9D5CE6EBA420717BE7E7D308B11F8207681B066C951D68F3994D19828F342474';
+import {
+  LOCAL_UPDATE_FILES,
+  LOCAL_UPDATE_HASHES,
+  LOCAL_UPDATE_PORT,
+} from '../e2e/localUpdateConfig';
+
 const UUID = '00000000-0000-0000-0000-000000000000';
-const DownloadUrl =
-  'http://cos.pgyer.com/697913e94d7441f20c686e2b0996a1aa.apk?sign=7a8f11b1df82cba45c8ac30b1acec88c&t=1680404102&response-content-disposition=attachment%3Bfilename%3DtestHotupdate_1.0.apk';
+
+function createLocalAssetUrls() {
+  const host = Platform.OS === 'android' ? '10.0.2.2' : '127.0.0.1';
+  const baseUrl = `http://${host}:${LOCAL_UPDATE_PORT}/${Platform.OS}`;
+  return {
+    full: `${baseUrl}/${LOCAL_UPDATE_FILES.full}`,
+    ppkDiff: `${baseUrl}/${LOCAL_UPDATE_FILES.ppkDiff}`,
+    packageDiff: `${baseUrl}/${LOCAL_UPDATE_FILES.packageDiff}`,
+    apk: `${baseUrl}/${LOCAL_UPDATE_FILES.apk}`,
+  };
+}
 
 export default function TestConsole({visible, onClose}) {
   const [text, setText] = useState('');
   const [running, setRunning] = useState(false);
+  const [result, setResult] = useState(null);
+  const urls = useMemo(createLocalAssetUrls, []);
+
   const convertCommands = (cmd, params) => {
+    if (!params) {
+      return cmd;
+    }
     if (typeof params === 'string') {
       return `${cmd}\n${params}`;
     }
@@ -31,7 +52,26 @@ export default function TestConsole({visible, onClose}) {
     for (const [k, v] of Object.entries(params)) {
       paramText += `\n${k}\n${v}`;
     }
-    return `${cmd}${paramText}`;
+    return `${cmd}${paramText}`.trim();
+  };
+
+  const invokePushyMethod = async (methodName, params) => {
+    if (methodName === 'setLocalHashInfo') {
+      if (!params || typeof params !== 'object' || Array.isArray(params)) {
+        throw new Error('setLocalHashInfo requires hash and info fields');
+      }
+      const {hash, ...info} = params;
+      if (!hash) {
+        throw new Error('setLocalHashInfo requires hash');
+      }
+      return PushyModule.setLocalHashInfo(hash, JSON.stringify(info));
+    }
+
+    if (params === undefined) {
+      return PushyModule[methodName]();
+    }
+
+    return PushyModule[methodName](params);
   };
   const shortCuts = [
       {
@@ -39,8 +79,9 @@ export default function TestConsole({visible, onClose}) {
         invoke: () => {
           setText(
             convertCommands('setLocalHashInfo', {
-              version: '1.0.0',
-              size: '19M',
+              hash: LOCAL_UPDATE_HASHES.full,
+              version: '1.0.0-e2e',
+              size: '19M-e2e',
             }),
           );
         },
@@ -48,7 +89,7 @@ export default function TestConsole({visible, onClose}) {
       {
         name: 'getLocalHashInfo',
         invoke: () => {
-          setText(convertCommands('getLocalHashInfo', Hash));
+          setText(convertCommands('getLocalHashInfo', LOCAL_UPDATE_HASHES.full));
         },
       },
       {
@@ -58,43 +99,18 @@ export default function TestConsole({visible, onClose}) {
         },
       },
       {
-        name: 'reloadUpdate',
-        invoke: () => {
-          setText(convertCommands('reloadUpdate', {hash: Hash}));
-        },
-      },
-      {
-        name: 'setNeedUpdate',
-        invoke: () => {
-          setText(convertCommands('setNeedUpdate', {hash: Hash}));
-        },
-      },
-      {
-        name: 'markSuccess',
-        invoke: () => {
-          setText(convertCommands('markSuccess'));
-        },
-      },
-      {
-        name: 'downloadPatchFromPpk',
+        name: 'reloadUpdateFull',
         invoke: () => {
           setText(
-            convertCommands('downloadPatchFromPpk', {
-              updateUrl: DownloadUrl,
-              hash: Hash,
-              originHash: Hash,
-            }),
+            convertCommands('reloadUpdate', {hash: LOCAL_UPDATE_HASHES.full}),
           );
         },
       },
       {
-        name: 'downloadPatchFromPackage',
+        name: 'setNeedUpdateFull',
         invoke: () => {
           setText(
-            convertCommands('downloadPatchFromPackage', {
-              updateUrl: DownloadUrl,
-              hash: Hash,
-            }),
+            convertCommands('setNeedUpdate', {hash: LOCAL_UPDATE_HASHES.full}),
           );
         },
       },
@@ -103,8 +119,81 @@ export default function TestConsole({visible, onClose}) {
         invoke: () => {
           setText(
             convertCommands('downloadFullUpdate', {
-              updateUrl: DownloadUrl,
-              hash: Hash,
+              updateUrl: urls.full,
+              hash: LOCAL_UPDATE_HASHES.full,
+            }),
+          );
+        },
+      },
+      {
+        name: 'downloadPatchFromPpk',
+        invoke: () => {
+          setText(
+            convertCommands('downloadPatchFromPpk', {
+              updateUrl: urls.ppkDiff,
+              hash: LOCAL_UPDATE_HASHES.ppkPatch,
+              originHash: LOCAL_UPDATE_HASHES.full,
+            }),
+          );
+        },
+      },
+      {
+        name: 'setNeedUpdatePatched',
+        invoke: () => {
+          setText(
+            convertCommands('setNeedUpdate', {
+              hash: LOCAL_UPDATE_HASHES.ppkPatch,
+            }),
+          );
+        },
+      },
+      {
+        name: 'reloadUpdatePatched',
+        invoke: () => {
+          setText(
+            convertCommands('reloadUpdate', {
+              hash: LOCAL_UPDATE_HASHES.ppkPatch,
+            }),
+          );
+        },
+      },
+      {
+        name: 'markSuccess',
+        invoke: () => {
+          setText(convertCommands('markSuccess'));
+        },
+      },
+    ];
+
+  if (Platform.OS === 'android') {
+    shortCuts.push(
+      {
+        name: 'downloadPatchFromPackage',
+        invoke: () => {
+          setText(
+            convertCommands('downloadPatchFromPackage', {
+              updateUrl: urls.packageDiff,
+              hash: LOCAL_UPDATE_HASHES.packagePatch,
+            }),
+          );
+        },
+      },
+      {
+        name: 'setNeedUpdatePackage',
+        invoke: () => {
+          setText(
+            convertCommands('setNeedUpdate', {
+              hash: LOCAL_UPDATE_HASHES.packagePatch,
+            }),
+          );
+        },
+      },
+      {
+        name: 'reloadUpdatePackage',
+        invoke: () => {
+          setText(
+            convertCommands('reloadUpdate', {
+              hash: LOCAL_UPDATE_HASHES.packagePatch,
             }),
           );
         },
@@ -114,14 +203,15 @@ export default function TestConsole({visible, onClose}) {
         invoke: () => {
           setText(
             convertCommands('downloadAndInstallApk', {
-              url: DownloadUrl,
-              target: Hash,
-              hash: Hash,
+              url: urls.apk,
+              target: 'update.apk',
+              hash: LOCAL_UPDATE_HASHES.packagePatch,
             }),
           );
         },
       },
-    ];
+    );
+  }
 
   return (
     <Modal visible={visible}>
@@ -133,9 +223,10 @@ export default function TestConsole({visible, onClose}) {
             alignItems: 'center',
           }}>
           <Text>调试Pushy方法（方法名，参数，值换行）</Text>
-          <Button title="Close" onPress={onClose} />
+          <Button title="Close" onPress={onClose} testID="close-console" />
         </View>
         <TextInput
+          testID="command-input"
           autoCorrect={false}
           autoCapitalize="none"
           style={{
@@ -164,13 +255,21 @@ export default function TestConsole({visible, onClose}) {
           }}
           testID="submit"
           onPress={async () => {
+            setResult(null);
             setRunning(true);
             try {
-              const inputs = text.split('\n');
+              const inputs = text
+                .split('\n')
+                .map(v => v.trim())
+                .filter(v => v.length > 0);
               const methodName = inputs[0];
+              if (!methodName || typeof PushyModule[methodName] !== 'function') {
+                throw new Error(`Unknown method: ${methodName || '(empty)'}`);
+              }
               let params;
+              let output;
               if (inputs.length === 1) {
-                await PushyModule[methodName]();
+                output = await invokePushyMethod(methodName);
               } else {
                 if (inputs.length === 2) {
                   params = inputs[1];
@@ -181,72 +280,57 @@ export default function TestConsole({visible, onClose}) {
                   }
                   console.log({inputs, params});
                 }
-                await PushyModule[methodName](params);
+                output = await invokePushyMethod(methodName, params);
               }
-              Alert.alert('done');
+              const message =
+                output == null
+                  ? ''
+                  : typeof output === 'string'
+                  ? output
+                  : JSON.stringify(output);
+              setResult({
+                status: 'done',
+                message,
+              });
             } catch (e) {
-              Alert.alert(e.message);
+              setResult({
+                status: 'error',
+                message: e?.message || String(e),
+              });
             }
             setRunning(false);
           }}>
           <Text style={{color: 'white'}}>执行</Text>
         </TouchableOpacity>
         <Button title="重置" onPress={() => setText('')} />
-        {
-          <View>
-            {shortCuts.map(({name, invoke}, i) => (
-              <TouchableOpacity
-                key={i}
-                testID={name}
-                onPress={() => {
-                  invoke();
-                }}>
-                <Text>{name}</Text>
-              </TouchableOpacity>
-            ))}
+        {result && (
+          <View style={{marginTop: 10}}>
+            <Text testID="command-status">{result.status}</Text>
+            <Text testID="command-message">{result.message || '(empty)'}</Text>
+            <TouchableOpacity
+              testID="result-clear"
+              onPress={() => setResult(null)}>
+              <Text style={{color: '#007bff'}}>清空结果</Text>
+            </TouchableOpacity>
           </View>
-        }
+        )}
+        <ScrollView
+          style={{marginTop: 12}}
+          contentContainerStyle={{paddingBottom: 24}}
+          testID="shortcut-list">
+          {shortCuts.map(({name, invoke}, i) => (
+            <TouchableOpacity
+              key={i}
+              testID={name}
+              onPress={() => {
+                invoke();
+              }}
+              style={{paddingVertical: 6}}>
+              <Text>{name}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
       </SafeAreaView>
     </Modal>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  overlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  dialog: {
-    backgroundColor: 'white',
-    borderRadius: 10,
-    padding: 20,
-    width: '80%',
-    alignItems: 'center',
-  },
-  title: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 20,
-  },
-  button: {
-    backgroundColor: '#2196F3',
-    borderRadius: 5,
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-  },
-  buttonText: {
-    color: 'white',
-    fontWeight: 'bold',
-  },
-});

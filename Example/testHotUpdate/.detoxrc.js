@@ -1,3 +1,75 @@
+const { execSync } = require('child_process');
+
+function detectIosSimulatorType() {
+  if (process.env.DETOX_IOS_DEVICE_TYPE) {
+    return process.env.DETOX_IOS_DEVICE_TYPE;
+  }
+
+  if (process.platform !== 'darwin') {
+    return 'iPhone 14';
+  }
+
+  try {
+    const output = execSync('xcrun simctl list devices available', {
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).toString();
+
+    const lines = output
+      .split('\n')
+      .map(line => line.trim())
+      .filter(Boolean);
+
+    const preferredPrefixes = ['iPhone 17', 'iPhone 16', 'iPhone 15', 'iPhone 14'];
+
+    for (const prefix of preferredPrefixes) {
+      const line = lines.find(item => item.startsWith(prefix) && item.includes('('));
+      if (line) {
+        return line.split(' (')[0];
+      }
+    }
+
+    const fallbackLine = lines.find(item => item.startsWith('iPhone ') && item.includes('('));
+    if (fallbackLine) {
+      return fallbackLine.split(' (')[0];
+    }
+  } catch {
+    // fall through to default
+  }
+
+  return 'iPhone 14';
+}
+
+const iosSimulatorType = detectIosSimulatorType();
+
+function detectAndroidAvdName() {
+  if (process.env.DETOX_AVD_NAME) {
+    return process.env.DETOX_AVD_NAME;
+  }
+
+  if (process.platform !== 'darwin' && process.platform !== 'linux') {
+    return 'Pixel_3a_API_33_arm64-v8a';
+  }
+
+  try {
+    const output = execSync('emulator -list-avds', {
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).toString();
+    const avds = output
+      .split('\n')
+      .map(line => line.trim())
+      .filter(Boolean);
+    if (avds.length > 0) {
+      return avds[0];
+    }
+  } catch {
+    // fall through to default
+  }
+
+  return 'Pixel_3a_API_33_arm64-v8a';
+}
+
+const androidAvdName = detectAndroidAvdName();
+
 /** @type {Detox.DetoxConfig} */
 module.exports = {
   logger: {
@@ -49,7 +121,7 @@ module.exports = {
     simulator: {
       type: 'ios.simulator',
       device: {
-        type: 'iPhone 14',
+        type: iosSimulatorType,
       },
     },
     attached: {
@@ -61,7 +133,7 @@ module.exports = {
     emulator: {
       type: 'android.emulator',
       device: {
-        avdName: 'Pixel_3a_API_33_arm64-v8a',
+        avdName: androidAvdName,
       },
     },
   },

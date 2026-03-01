@@ -7,7 +7,8 @@
     "ios": "react-native run-ios",
     "start": "react-native start",
     "test": "jest",
-    "test:e2e": "detox test --configuration android.emu.debug",
+    "test:e2e:ios": "E2E_PLATFORM=ios detox test --configuration ios.sim.release",
+    "test:e2e:android": "E2E_PLATFORM=android detox test --configuration android.emu.release --headless --record-logs all",
     "lint": "eslint .",
     "postinstall": "patch-package",
     "apk": "cd android && ./gradlew assembleRelease",
@@ -22,7 +23,7 @@
     "react-native-paper": "^5.14.5",
     "react-native-safe-area-context": "^5.6.2",
     "react-native-svg": "^15.15.0",
-    "react-native-update": "^10.37.2",
+    "react-native-update": "^10.37.13",
     "react-native-vector-icons": "^10.3.0"
   },
   "devDependencies": {
@@ -38,7 +39,7 @@
     "@react-native/typescript-config": "0.82.1",
     "@types/react": "^19.1.13",
     "@types/react-test-renderer": "^19.1.0",
-    "detox": "^20.41.2",
+    "detox": "^20.47.0",
     "eslint": "^9.35.0",
     "jest": "^29.6.3",
     "prettier": "2.8.8",

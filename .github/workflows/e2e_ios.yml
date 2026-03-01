@@ -1,182 +1,73 @@
-name: Testing E2E iOS
+name: e2e-ios
 
 on:
   pull_request:
     branches:
       - '**'
-    paths-ignore:
-      - 'docs/**'
-      - 'website/**'
-      - '.spellcheck.dict.txt'
-      - '**/*.md'
-
   push:
     branches:
       - master
-    paths-ignore:
-      - 'docs/**'
-      - 'website/**'
-      - '.spellcheck.dict.txt'
-        # - '**/*.md'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  ios:
-    name: iOS
-    runs-on: macos-14-arm64
-    # TODO matrix across APIs, at least 11 and 15 (lowest to highest)
-    timeout-minutes: 60
-    env:
-      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+  e2e-ios:
+    runs-on: macos-latest
+    timeout-minutes: 10
     steps:
-      # Set up tool versions
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 18
+      - name: Checkout react-native-update
+        uses: actions/checkout@v4
 
-      - name: Configure JDK 1.11
-        uses: actions/setup-java@v3
+      - name: Checkout react-native-update-cli
+        uses: actions/checkout@v4
         with:
-          distribution: 'temurin'
-          java-version: '11'
+          repository: reactnativecn/react-native-update-cli
+          path: react-native-update-cli
 
-      - uses: maxim-lobanov/setup-xcode@v1
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
         with:
-          xcode-version: 'latest-stable'
+          node-version: 20
 
-      - uses: actions/checkout@v3
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
         with:
-          fetch-depth: 50
+          bun-version: latest
 
-      # Set path variables needed for caches
-      - name: Set workflow variables
-        id: workflow-variables
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Install applesimutils
+        run: HOMEBREW_NO_AUTO_UPDATE=1 brew tap wix/brew && HOMEBREW_NO_AUTO_UPDATE=1 brew install applesimutils
+
+      - name: Install testHotUpdate dependencies
+        run: cd Example/testHotUpdate && bun install --frozen-lockfile
+
+      - name: Install react-native-update-cli dependencies
+        run: cd react-native-update-cli && bun install --frozen-lockfile
+
+      - name: Rebuild Detox iOS framework cache
         run: |
-          echo "metro-cache=$HOME/.metro" >> $GITHUB_OUTPUT
-          echo "xcode-version=$(xcodebuild -version|tail -1|cut -f3 -d' ')" >> $GITHUB_OUTPUT
-          echo "yarn-cache-dir=$(yarn cache dir)" >> $GITHUB_OUTPUT
+          cd Example/testHotUpdate
+          npx detox clean-framework-cache
+          npx detox build-framework-cache
 
-      - uses: actions/cache@v3
-        name: Yarn Cache
-        id: yarn-cache
-        with:
-          path: ${{ steps.workflow-variables.outputs.yarn-cache-dir }}
-          key: ${{ runner.os }}-yarn-v1-${{ hashFiles('yarn.lock') }}
-          restore-keys: ${{ runner.os }}-yarn-v1
+      - name: Detox build (ios.sim.release)
+        env:
+          RNU_CLI_ROOT: ${{ github.workspace }}/react-native-update-cli
+        run: cd Example/testHotUpdate && E2E_PLATFORM=ios npx detox build --configuration ios.sim.release
 
-      - uses: actions/cache@v3
-        name: Detox Framework Cache
-        id: detox-cache
-        with:
-          path: ~/Library/Detox/ios
-          key: ${{ runner.os }}-detox-framework-cache-${{ steps.workflow-variables.outputs.xcode-version }}
-
-      # Detox is compiled during yarn install, using Xcode, set up cache first
-      - uses: hendrikmuhs/ccache-action@v1.2
-        name: Xcode Compile Cache
-        with:
-          key: ${{ runner.os }}-v2 # makes a unique key w/related restore key internally
-          max-size: 1500M
-
-      - name: Yarn Install
-        uses: nick-invision/retry@v2
-        with:
-          timeout_minutes: 10
-          retry_wait_seconds: 60
-          max_attempts: 3
-          command: yarn --no-audit --prefer-offline
-
-      - name: Setup Ruby
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: 3
-
-      - name: Update Ruby build tools
-        uses: nick-invision/retry@v2
-        with:
-          timeout_minutes: 2
-          retry_wait_seconds: 60
-          max_attempts: 3
-          command: gem update cocoapods xcodeproj
-
-      - uses: actions/cache@v3
-        name: Cache Pods
-        id: pods-cache
-        with:
-          path: tests/ios/Pods
-          key: ${{ runner.os }}-pods-v2-${{ hashFiles('tests/ios/Podfile.lock') }}
-          restore-keys: ${{ runner.os }}-pods-v2
-
-      - name: Pod Install
-        uses: nick-invision/retry@v2
-        with:
-          timeout_minutes: 10
-          retry_wait_seconds: 30
-          max_attempts: 3
-          command: yarn tests:ios:pod:install
-
-      - name: Cache Firestore Emulator
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/pushy/emulators
-          key: pushy-emulators-v1-${{ github.run_id }}
-          restore-keys: pushy-emulators-v1
-
-      - name: Start Firestore Emulator
-        run: yarn tests:emulator:start-ci
-
-      - name: Install brew utilities
-        uses: nick-invision/retry@v2
-        with:
-          timeout_minutes: 5
-          retry_wait_seconds: 60
-          max_attempts: 3
-          command: HOMEBREW_NO_AUTO_UPDATE=1 brew tap wix/brew && HOMEBREW_NO_AUTO_UPDATE=1 brew install applesimutils xcbeautify && applesimutils --list
-
-      - name: Build iOS App
-        run: |
-          export PATH="/usr/lib/ccache:/usr/local/opt/ccache/libexec:$PATH"
-          export CCACHE_SLOPPINESS=clang_index_store,file_stat_matches,include_file_ctime,include_file_mtime,ivfsoverlay,pch_defines,modules,system_headers,time_macros
-          export CCACHE_FILECLONE=true
-          export CCACHE_DEPEND=true
-          export CCACHE_INODECACHE=true
-          export CCACHE_LIMIT_MULTIPLE=0.95
-          ccache -s
-          export SKIP_BUNDLING=1
-          export RCT_NO_LAUNCH_PACKAGER=1
-          set -o pipefail
-          yarn build:ios-debug
-          ccache -s
-        shell: bash
-
-      - name: Metro Bundler Cache
-        uses: actions/cache@v3
-        with:
-          path: ${{ steps.workflow-variables.outputs.metro-cache }}
-          key: ${{ runner.os }}-metro-v1-${{ github.run_id }}
-          restore-keys: ${{ runner.os }}-metro-v1
-
-      - name: Pre-fetch Javascript bundle
-        run: |
-          nohup yarn tests:packager:jet-ci &
-          printf 'Waiting for packager to come online'
-          until curl --output /dev/null --silent --head --fail http://localhost:8081/status; do
-            printf '.'
-            sleep 2
-          done
-          echo "Packager is online! Preparing bundle..."
-          curl --output /dev/null --silent --head --fail "http://localhost:8081/index.bundle?platform=ios&dev=true&minify=false&inlineSourceMap=true"
-          echo "...javascript bundle ready"
-
-      - name: Create Simulator Log
-        # With a little delay so the detox test below has time to spawn it, missing the first part of boot is fine
-        # If you boot the simulator separately from detox, some other race fails and detox testee never sends ready to proxy
-        continue-on-error: true
-        run: nohup sh -c "sleep 30 && xcrun simctl spawn booted log stream --level debug --style compact > simulator.log 2>&1 &"
-
-      - name: Detox Test
-        timeout-minutes: 60
-        run: yarn test:ios-debug
+      - name: Detox test (ios.sim.release)
+        env:
+          RNU_CLI_ROOT: ${{ github.workspace }}/react-native-update-cli
+        run: cd Example/testHotUpdate && E2E_PLATFORM=ios npx detox test --configuration ios.sim.release

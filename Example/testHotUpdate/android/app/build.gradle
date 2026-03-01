@@ -82,6 +82,8 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.82.1"
+        testBuildType System.getProperty('testBuildType', 'debug')
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {
         debug {
@@ -107,9 +109,23 @@ android {
 }
 
 
+def detoxVersion = "20.41.2"
+
+repositories {
+    maven {
+        url("$rootDir/../node_modules/detox/Detox-android")
+    }
+}
+
 dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
+
+    androidTestImplementation("com.wix:detox:${detoxVersion}")
+    androidTestImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test:rules:1.6.1")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
 
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")
