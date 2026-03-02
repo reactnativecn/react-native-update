@@ -323,9 +323,10 @@ export class Pushy {
       this.throwIfEnabled(Error('errorChecking: ' + errorMessage));
       return this.lastRespJson ? await this.lastRespJson : emptyObj;
     }
-    this.lastRespJson = resp.json();
+    const respJsonPromise = resp.json() as Promise<CheckResult>;
+    this.lastRespJson = respJsonPromise;
 
-    const result: CheckResult = await this.lastRespJson;
+    const result: CheckResult = await respJsonPromise;
 
     log('checking result:', result);
 
