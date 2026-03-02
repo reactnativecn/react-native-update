@@ -22,6 +22,41 @@ def supportsNamespace() {
   return major >= 8
 }
 
+def parseMajorVersion(String versionString) {
+    if (!versionString) {
+        return null
+    }
+
+    def matcher = (versionString =~ /(\d+)/)
+    if (matcher.find()) {
+        return matcher[0][0].toInteger()
+    }
+
+    return null
+}
+
+def resolveInstalledExpoMajorVersion(File projectDir) {
+    try {
+        def stdout = new ByteArrayOutputStream()
+        def stderr = new ByteArrayOutputStream()
+        def result = project.exec {
+            workingDir projectDir
+            commandLine 'node', '--print', "require('expo/package.json').version"
+            standardOutput = stdout
+            errorOutput = stderr
+            ignoreExitValue true
+        }
+
+        if (result.exitValue != 0) {
+            return null
+        }
+
+        return parseMajorVersion(stdout.toString().trim())
+    } catch (Exception ignored) {
+        return null
+    }
+}
+
 def checkProjectInfo() {
     def hasExpoModulesCore = rootProject.subprojects.any { it.name == 'expo-modules-core' }
     def packageJsonFile = new File(rootProject.projectDir.parentFile, 'package.json')
@@ -33,24 +68,19 @@ def checkProjectInfo() {
         def packageJson = new groovy.json.JsonSlurper().parseText(packageJsonFile.text)
         projectVersion = packageJson.version ?: '1.0.0' // Get project version
 
-        // Check for expo dependency and version >= 50
+        // Check for expo dependency and version >= 50.
+        // For pnpm catalogs (e.g. "catalog:native"), the version string in package.json
+        // is not numeric, so we resolve the installed expo package version as fallback.
         String expoVersionString = packageJson.dependencies?.expo ?: packageJson.devDependencies?.expo
-        boolean expoVersionIsHighEnough = false
-        if (expoVersionString) {
-            try {
-                // Extract the first number sequence as the major version
-                def matcher = (expoVersionString =~ /(\d+)/)
-                if (matcher.find()) {
-                    int majorVersion = matcher[0][0].toInteger()
-                    if (majorVersion >= 50) {
-                        expoVersionIsHighEnough = true
-                    }
-                }
-            } catch (NumberFormatException e) {
-                // Handle error if version parsing fails, maybe log a warning
-                println "Warning: Could not parse Expo version string: ${expoVersionString}"
-            }
-        }
+        Integer declaredExpoMajorVersion = parseMajorVersion(expoVersionString)
+        Integer installedExpoMajorVersion = expoVersionString ?
+            resolveInstalledExpoMajorVersion(packageJsonFile.parentFile) :
+            null
+        Integer expoMajorVersion = installedExpoMajorVersion ?: declaredExpoMajorVersion
+
+        boolean expoVersionIsHighEnough =
+            expoMajorVersion != null && expoMajorVersion >= 50
+
         hasExpoDependency = expoVersionIsHighEnough // Update based on version check
     }
     
