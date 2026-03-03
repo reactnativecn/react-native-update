@@ -344,9 +344,14 @@ export class Pushy {
         const remoteEndpoints = await resp.json();
         log('fetch endpoints:', remoteEndpoints);
         if (Array.isArray(remoteEndpoints)) {
-          server.backups = Array.from(
-            new Set([...(server.backups || []), ...remoteEndpoints]),
-          );
+          const backups = server.backups || [];
+          const set = new Set(backups);
+          for (const endpoint of remoteEndpoints) {
+            set.add(endpoint);
+          }
+          if (set.size !== backups.length) {
+            server.backups = Array.from(set);
+          }
         }
       } catch (e: any) {
         log('failed to fetch endpoints from: ', server.queryUrls);
