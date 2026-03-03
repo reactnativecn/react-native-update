@@ -1,5 +1,6 @@
 import { NativeEventEmitter, NativeModules, Platform } from 'react-native';
-import { emptyModule, log } from './utils';
+import { emptyModule, error, log } from './utils';
+import i18n from './i18n';
 const {
   version: v,
 } = require('react-native/Libraries/Core/ReactNativeVersion');
@@ -46,10 +47,9 @@ if (currentVersionInfoString) {
       delete _currentVersionInfo.debugChannel;
       setLocalHashInfo(currentVersion, _currentVersionInfo);
     }
-  } catch (error) {
-    console.error(
-      'Failed to parse currentVersionInfo:',
-      currentVersionInfoString,
+  } catch (err) {
+    error(
+      i18n.t('error_parse_version_info', { info: currentVersionInfoString }),
     );
   }
 }

@@ -5,6 +5,18 @@ export function log(...args: any[]) {
   console.log(i18n.t('dev_log_prefix'), ...args);
 }
 
+export function info(...args: any[]) {
+  console.info(i18n.t('dev_log_prefix'), ...args);
+}
+
+export function warn(...args: any[]) {
+  console.warn(i18n.t('dev_log_prefix'), ...args);
+}
+
+export function error(...args: any[]) {
+  console.error(i18n.t('dev_log_prefix'), ...args);
+}
+
 export const isWeb = Platform.OS === 'web';
 
 export function promiseAny<T>(promises: Promise<T>[]) {
@@ -93,7 +105,7 @@ export const testUrls = async (urls?: string[]) => {
 
 export const assertWeb = () => {
   if (isWeb) {
-    console.warn(i18n.t('dev_web_not_supported'));
+    warn(i18n.t('dev_web_not_supported'));
     return false;
   }
   return true;

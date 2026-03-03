@@ -44,6 +44,7 @@ export default {
 
   // Error messages
   error_appkey_required: 'appKey is required',
+  error_parse_version_info: 'Failed to parse currentVersionInfo: {{info}}',
   error_update_check_failed: 'Update check failed',
   error_cannot_connect_server:
     'Can not connect to update server. Please check your network.',
