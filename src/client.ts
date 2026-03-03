@@ -22,6 +22,7 @@ import {
   assertWeb,
   emptyObj,
   enhancedFetch,
+  info,
   joinUrls,
   log,
   noop,
@@ -189,7 +190,7 @@ export class Pushy {
   };
   assertDebug = (matter: string) => {
     if (__DEV__ && !this.options.debug) {
-      console.info(this.t('dev_debug_disabled', { matter }));
+      info(this.t('dev_debug_disabled', { matter }));
       return false;
     }
     return true;
