@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.io.File;
+import java.io.IOException;
 
 public class UpdateContext {
     private Context context;
@@ -112,7 +113,11 @@ public class UpdateContext {
 
         } else {
             params.targetFile = new File(rootDir, fileName);
-
+            try {
+                SafeZipFile.validatePath(params.targetFile, rootDir);
+            } catch (IOException e) {
+                throw new SecurityException("Illegal fileName: " + fileName);
+            }
         }
 //        params.unzipDirectory = new File(rootDir, hash);
         new DownloadTask(context).executeOnExecutor(this.executor, params);

@@ -425,7 +425,7 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
                             if (sourceZipFile == null) {
                                 sourceZipFile = zipFile; // 回退到基础 APK
                             }
-                            sourceZipFile.unzipToFile(ze, target);
+                            sourceZipFile.unzipToFile(ze, target, param.unzipDirectory);
                             lastTarget = target;
                         }
                     } catch (IOException e) {
@@ -496,12 +496,7 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
                     }
                     File toFile = new File(param.unzipDirectory, to);
 
-                    // Fixing a Zip Path Traversal Vulnerability
-                    // https://support.google.com/faqs/answer/9294009
-                    String canonicalPath = toFile.getCanonicalPath();
-                    if (!canonicalPath.startsWith(param.unzipDirectory.getCanonicalPath() + File.separator)) {
-                        throw new SecurityException("Illegal name: " + to);
-                    }
+                    SafeZipFile.validatePath(toFile, param.unzipDirectory);
                     target.add(toFile);
                 }
                 continue;
@@ -579,7 +574,11 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
                     if (from.isEmpty()) {
                         from = to;
                     }
-                    copyFile(new File(param.originDirectory, from), new File(param.unzipDirectory, to));
+                    File fromFile = new File(param.originDirectory, from);
+                    File toFile = new File(param.unzipDirectory, to);
+                    SafeZipFile.validatePath(fromFile, param.originDirectory);
+                    SafeZipFile.validatePath(toFile, param.unzipDirectory);
+                    copyFile(fromFile, toFile);
                 }
                 JSONObject blackList = obj.getJSONObject("deletes");
                 copyFilesWithBlacklist(param.originDirectory, param.unzipDirectory, blackList);

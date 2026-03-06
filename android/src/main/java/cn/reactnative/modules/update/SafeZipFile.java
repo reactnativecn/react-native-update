@@ -55,28 +55,32 @@ public class SafeZipFile extends ZipFile {
         }
     }
 
+    public static void validatePath(File target, File baseDir) throws IOException {
+        String canonicalTarget = target.getCanonicalPath();
+        String canonicalBase = baseDir.getCanonicalPath();
+        String prefix = canonicalBase.endsWith(File.separator) ? canonicalBase : canonicalBase + File.separator;
+        if (!canonicalTarget.startsWith(prefix) && !canonicalTarget.equals(canonicalBase)) {
+            throw new SecurityException("Illegal path: " + canonicalTarget);
+        }
+    }
+
     public void unzipToPath(ZipEntry ze, File targetPath) throws IOException {
         String name = ze.getName();
         File target = new File(targetPath, name);
 
-        // Fixing a Zip Path Traversal Vulnerability
-        // https://support.google.com/faqs/answer/9294009
-        String canonicalPath = target.getCanonicalPath();
-        if (!canonicalPath.startsWith(targetPath.getCanonicalPath() + File.separator)) {
-            throw new SecurityException("Illegal name: " + name);
-        }
+        validatePath(target, targetPath);
 
-        
         Log.d("react-native-update", "Unzipping " + name);
 
         if (ze.isDirectory()) {
             target.mkdirs();
             return;
         }
-        unzipToFile(ze, target);
+        unzipToFile(ze, target, targetPath);
     }
 
-    public void unzipToFile(ZipEntry ze, File target) throws IOException {
+    public void unzipToFile(ZipEntry ze, File target, File baseDir) throws IOException {
+        validatePath(target, baseDir);
         try (InputStream inputStream = getInputStream(ze)) {
             try (BufferedOutputStream output = new BufferedOutputStream(new FileOutputStream(target));
                  BufferedInputStream input = new BufferedInputStream(inputStream)) {
