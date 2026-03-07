@@ -53,6 +53,7 @@ describe('core info parsing', () => {
 
     // Use a unique query parameter to bypass cache if supported, or just rely on fresh environment per file.
     // In Bun, you can sometimes use a cache buster if it's dynamic import.
+    // @ts-ignore
     await import('../core?error');
 
     expect(mockError).toHaveBeenCalledWith(
@@ -95,6 +96,7 @@ describe('core info parsing', () => {
       emptyModule: {},
     }));
 
+    // @ts-ignore
     await import('../core?success');
 
     expect(mockError).not.toHaveBeenCalled();

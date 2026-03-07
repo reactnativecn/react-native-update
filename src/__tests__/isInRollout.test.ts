@@ -13,6 +13,7 @@ describe('isInRollout', () => {
 
   beforeAll(async () => {
     // Dynamic import to ensure the mock is picked up
+    // @ts-ignore
     const module = await import('../isInRollout?deterministic');
     isInRollout = module.isInRollout;
   });
