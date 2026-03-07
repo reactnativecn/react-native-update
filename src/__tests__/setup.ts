@@ -35,3 +35,13 @@ mock.module('../i18n', () => {
     },
   };
 });
+
+mock.module('react-native/Libraries/Core/ReactNativeVersion', () => {
+  return {
+    version: {
+      major: 0,
+      minor: 70,
+      patch: 0,
+    },
+  };
+});
