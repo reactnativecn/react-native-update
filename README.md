@@ -1,64 +1,76 @@
 # react-native-update [![npm version](https://badge.fury.io/js/react-native-update.svg)](http://badge.fury.io/js/react-native-update)
 
-本组件是面向 React Native 提供热更新功能的组件，详情请访问我们的官方网站 <https://pushy.reactnative.cn>。
+[中文文档](./README-CN.md)
 
-**现已支持鸿蒙以及新架构**
+`react-native-update` provides over-the-air update capabilities for React Native apps. For full documentation, visit:
 
-### 快速开始
+- China service: <https://pushy.reactnative.cn>
+- Global service: <https://cresc.dev>
 
-请查看[文档](https://pushy.reactnative.cn/docs/getting-started.html)
+## Regional Service Notice
 
-### 优势
+- **Pushy** (<https://pushy.reactnative.cn>) is the China service, operated by **Wuhan Qingluo Network Technology Co., Ltd.**, with servers and user data hosted in mainland China.
+- **Cresc** (<https://cresc.dev>) is the global service, operated by **CHARMLOT PTE. LTD.**, with servers and user data hosted in Singapore.
+- Pushy and Cresc are operated by different legal entities with separate infrastructure, data storage, and admin systems. Developers outside mainland China should use Cresc directly.
 
-1. 对中国用户使用阿里云高速 CDN 分发，对比其他服务器在国外的热更新服务，分发更稳定，更新成功率极高。对国外用户则智能分流至 cloudflare，同样享受高速更新服务。
-2. 基于 bsdiff/hdiff 算法创建的**超小更新包**，通常版本迭代后在几十至几百 KB 级别（其他全量热更新服务所需流量通常在几十 MB 级别）。
-3. 始终跟进 RN 最新正式版本，第一时间提供支持。支持 hermes 字节码格式。支持新架构（注：安卓 0.73.0 ~ 0.76.0 的新架构因官方 bug 不支持，0.73 以下或 0.76.1 以上的新架构可用）。
-4. 跨越多个版本进行更新时，只需要下载**一个更新包**，不需要逐版本依次更新。
-5. 命令行工具 & 网页双端管理，版本发布过程简单便捷，完全可以集成 CI。
-6. 支持崩溃回滚，安全可靠。
-7. meta 信息及开放 API，提供更高扩展性。
-8. 提供付费的专人技术支持。
+**HarmonyOS and React Native New Architecture are supported.**
 
-### 与其他热更新库对比
+## Quick Start
 
-| 对比维度 | react-native-update | expo-update | react-native-code-push |
+See the docs:
+
+- Chinese docs: <https://pushy.reactnative.cn/docs/getting-started.html>
+- English docs: <https://cresc.dev/docs/getting-started>
+
+## Advantages
+
+1. For users in China, updates are distributed through Alibaba Cloud CDN for high stability and excellent delivery success. For developers outside mainland China, Cresc provides a dedicated global service with fast and reliable worldwide delivery.
+2. **Tiny update packages** generated with bsdiff/hdiff are typically only tens to hundreds of KB, instead of the tens of MB usually required by full-bundle update systems.
+3. The library tracks new React Native stable releases closely, supports Hermes bytecode, and supports the new architecture. Note: Android RN 0.73.0 to 0.76.0 new architecture is unavailable because of upstream issues; versions below 0.73 or above 0.76.1 are supported.
+4. When updating across multiple versions, clients only need to download **one update package** instead of applying every intermediate version in sequence.
+5. Command-line tools and a web dashboard are both available, making release workflows simple and CI-friendly.
+6. Built-in crash rollback keeps updates safe and reliable.
+7. Meta information and open APIs make the system more extensible.
+8. Paid technical support is available.
+
+## Comparison With Other OTA Libraries
+
+| Category | react-native-update | expo-update | react-native-code-push |
 |---------|---------------------|-------------|------------------------|
-| **价格/成本** | 提供免费额度，多级梯度付费（最低约 66 元/月），流量不单独计费 | 提供免费额度，多级梯度付费（最低约 136 元/月），超出流量额外计费 | ❌ **已停运**（Microsoft App Center 已于 2025 年 3 月 31 日停止服务） |
-| **更新包大小** | ⭐⭐⭐⭐⭐ 几十至几百 KB（增量更新） | ⭐⭐⭐ 全量更新（通常几十 MB） | ❌ **已停运** |
-| **中国地区访问速度** | ⭐⭐⭐⭐⭐ 阿里云 CDN，速度极快 | ⭐⭐ 国外服务器，可能较慢 | ❌ **已停运** |
-| **iOS 支持** | ✅ 支持 | ✅ 支持 | ❌ **已停运** |
-| **Android 支持** | ✅ 支持 | ✅ 支持 | ❌ **已停运** |
-| **鸿蒙支持** | ✅ 支持 | ❌ 不支持 | ❌ **已停运** |
-| **Expo 支持** | ✅ 支持 | ✅ 支持 | ❌ **已停运** |
-| **RN 版本支持** | ⭐⭐⭐⭐⭐ 第一时间支持最新版本 | ⭐⭐⭐⭐ 跟随 Expo SDK | ❌ **已停运** |
-| **新架构支持** | ✅ 支持 | ✅ 支持 | ❌ **已停运** |
-| **Hermes 支持** | ✅ 支持 | ✅ 支持 | ❌ **已停运** |
-| **崩溃回滚** | ✅ 自动回滚机制 | ✅ 支持 | ❌ **已停运** |
-| **管理界面** | ✅ 命令行工具 + Web 管理界面 | ✅ Expo Dashboard | ❌ **已停运** |
-| **CI/CD 集成** | ✅ 支持 | ✅ 支持 | ❌ **已停运** |
-| **API 扩展性** | ✅ Meta 信息 + 开放 API | ⚠️ 有限 | ❌ **已停运** |
-| **中文文档/支持** | ⭐⭐⭐⭐⭐ 完整中文文档，中文社区支持 | ⭐⭐ 英文为主 | ❌ **已停运** |
-| **技术支持** | ✅ 付费专人技术支持 | ⚠️ 社区支持 | ❌ **已停运** |
-| **服务器部署** | ✅ 可托管也可付费私有部署 | ✅ Expo 托管（EAS Update） | ❌ **已停运** |
-| **更新策略** | 灵活配置（静默/提示/立即/延迟） | 相对固定 | ❌ **已停运** |
-| **流量消耗** | ⭐⭐⭐⭐⭐ 极低（增量更新） | ⭐⭐⭐ 较高（全量更新） | ❌ **已停运** |
-| **更新成功率** | ⭐⭐⭐⭐⭐ 极高（国内 CDN 优势） | ⭐⭐⭐ 中等 | ❌ **已停运** |
+| **Price / Cost** | Free tier with multiple paid plans (starting at about CNY 66/month), bandwidth included | Free tier with multiple paid plans (starting at about CNY 136/month), extra bandwidth charges apply | ❌ **Discontinued** (Microsoft App Center shut down on March 31, 2025) |
+| **Package Size** | ⭐⭐⭐⭐⭐ Tens to hundreds of KB (incremental) | ⭐⭐⭐ Full bundle updates (usually tens of MB) | ❌ **Discontinued** |
+| **China Access Speed** | ⭐⭐⭐⭐⭐ Alibaba Cloud CDN, very fast | ⭐⭐ Overseas servers, may be slower | ❌ **Discontinued** |
+| **iOS Support** | ✅ Supported | ✅ Supported | ❌ **Discontinued** |
+| **Android Support** | ✅ Supported | ✅ Supported | ❌ **Discontinued** |
+| **HarmonyOS Support** | ✅ Supported | ❌ Not supported | ❌ **Discontinued** |
+| **Expo Support** | ✅ Supported | ✅ Supported | ❌ **Discontinued** |
+| **RN Version Support** | ⭐⭐⭐⭐⭐ Fast support for latest stable RN versions | ⭐⭐⭐⭐ Follows Expo SDK cadence | ❌ **Discontinued** |
+| **New Architecture** | ✅ Supported | ✅ Supported | ❌ **Discontinued** |
+| **Hermes Support** | ✅ Supported | ✅ Supported | ❌ **Discontinued** |
+| **Crash Rollback** | ✅ Automatic rollback | ✅ Supported | ❌ **Discontinued** |
+| **Management UI** | ✅ CLI + Web dashboard | ✅ Expo Dashboard | ❌ **Discontinued** |
+| **CI/CD Integration** | ✅ Supported | ✅ Supported | ❌ **Discontinued** |
+| **API Extensibility** | ✅ Meta info + Open API | ⚠️ Limited | ❌ **Discontinued** |
+| **Chinese Docs / Support** | ⭐⭐⭐⭐⭐ Complete Chinese docs and community support | ⭐⭐ Mostly English | ❌ **Discontinued** |
+| **Technical Support** | ✅ Paid dedicated support | ⚠️ Community support | ❌ **Discontinued** |
+| **Server Deployment** | ✅ Hosted service or paid private deployment | ✅ Hosted by Expo (EAS Update) | ❌ **Discontinued** |
+| **Update Strategy** | Flexible configuration (silent / prompted / immediate / delayed) | More fixed workflow | ❌ **Discontinued** |
+| **Bandwidth Usage** | ⭐⭐⭐⭐⭐ Very low (incremental) | ⭐⭐⭐ Higher (full bundle) | ❌ **Discontinued** |
+| **Update Success Rate** | ⭐⭐⭐⭐⭐ Excellent, especially in China | ⭐⭐⭐ Moderate | ❌ **Discontinued** |
 
+## Local Development
 
-
-### 本地开发
-
-```
-$ git clone git@github.com:reactnativecn/react-native-update.git
-$ cd react-native-pushy/Example/testHotUpdate
-$ yarn
-$ yarn start
+```bash
+git clone git@github.com:reactnativecn/react-native-update.git
+cd react-native-pushy/Example/testHotUpdate
+yarn
+yarn start
 ```
 
-本地库文件使用 yarn link 链接，因此可直接在源文件中修改，在 testHotUpdate 项目中调试。
+The local library is linked with `yarn link`, so you can modify the source files directly and debug with the `testHotUpdate` example project.
 
-### 关于我们
+## About
 
-本组件由[React Native 中文网](https://reactnative.cn/)独家发布，如有定制需求可以[联系我们](https://reactnative.cn/about.html#content)。
+This package is published by [React Native Chinese](https://reactnative.cn/). For custom integration or service inquiries, see [Contact Us](https://reactnative.cn/about.html#content).
 
-关于此插件发现任何问题，可以前往[Issues](https://github.com/reactnativecn/react-native-update/issues)发帖提问。
+If you find any issues, please open a thread in [Issues](https://github.com/reactnativecn/react-native-update/issues).
