@@ -55,8 +55,10 @@ Example/harmony_use_pushy/libs
 
 
 harmony/package
+harmony/pushy.har
 **/oh_modules
 harmony/pushy/.preview
+harmony/pushy/.cxx
 Example/harmony_use_pushy/harmony/entry/src/main/resources/rawfile/meta.json
 **/.hvigor
 Example/harmony_use_pushy/harmony/entry/src/main/cpp/generated
