@@ -1,0 +1,8 @@
+{
+  "app": {
+    "bundleName": "com.reactnativecn.pushy.har",
+    "vendor": "reactnativecn",
+    "versionCode": 1,
+    "versionName": "1.0.0"
+  }
+}

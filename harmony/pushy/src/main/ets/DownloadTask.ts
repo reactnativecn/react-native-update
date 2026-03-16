@@ -51,6 +51,108 @@ export class DownloadTask {
     }
   }
 
+  private async ensureDirectory(path: string): Promise<void> {
+    if (!path || fileIo.accessSync(path)) {
+      return;
+    }
+
+    const parentPath = path.substring(0, path.lastIndexOf('/'));
+    if (parentPath && parentPath !== path) {
+      await this.ensureDirectory(parentPath);
+    }
+
+    if (!fileIo.accessSync(path)) {
+      await fileIo.mkdir(path);
+    }
+  }
+
+  private async ensureParentDirectory(filePath: string): Promise<void> {
+    const parentPath = filePath.substring(0, filePath.lastIndexOf('/'));
+    if (!parentPath) {
+      return;
+    }
+    await this.ensureDirectory(parentPath);
+  }
+
+  private async recreateDirectory(path: string): Promise<void> {
+    await this.removeDirectory(path);
+    await this.ensureDirectory(path);
+  }
+
+  private async readFileContent(filePath: string): Promise<ArrayBuffer> {
+    const stat = await fileIo.stat(filePath);
+    const reader = await fileIo.open(filePath, fileIo.OpenMode.READ_ONLY);
+    const content = new ArrayBuffer(stat.size);
+
+    try {
+      await fileIo.read(reader.fd, content);
+      return content;
+    } finally {
+      await fileIo.close(reader);
+    }
+  }
+
+  private toUint8Array(content: ArrayBuffer | Uint8Array): Uint8Array {
+    if (content instanceof Uint8Array) {
+      return content;
+    }
+    return new Uint8Array(content);
+  }
+
+  private async writeFileContent(
+    targetFile: string,
+    content: ArrayBuffer | Uint8Array,
+  ): Promise<void> {
+    const payload = this.toUint8Array(content);
+    await this.ensureParentDirectory(targetFile);
+    if (fileIo.accessSync(targetFile)) {
+      await fileIo.unlink(targetFile);
+    }
+
+    let writer: fileIo.File | null = null;
+    try {
+      writer = await fileIo.open(
+        targetFile,
+        fileIo.OpenMode.CREATE | fileIo.OpenMode.WRITE_ONLY,
+      );
+      const chunkSize = 4096;
+      let bytesWritten = 0;
+
+      while (bytesWritten < payload.byteLength) {
+        const chunk = payload.slice(bytesWritten, bytesWritten + chunkSize);
+        await fileIo.write(writer.fd, chunk);
+        bytesWritten += chunk.byteLength;
+      }
+    } finally {
+      if (writer) {
+        await fileIo.close(writer);
+      }
+    }
+  }
+
+  private parseJsonEntry(content: ArrayBuffer): Record<string, any> {
+    return JSON.parse(
+      new util.TextDecoder().decodeToString(new Uint8Array(content)),
+    ) as Record<string, any>;
+  }
+
+  private async applyBundlePatch(
+    originContent: ArrayBuffer | Uint8Array,
+    patchContent: ArrayBuffer | Uint8Array,
+    outputFile: string,
+  ): Promise<void> {
+    try {
+      const patched = await Pushy.hdiffPatch(
+        this.toUint8Array(originContent),
+        this.toUint8Array(patchContent),
+      );
+      await this.writeFileContent(outputFile, patched);
+    } catch (error) {
+      error.message = `Failed to process bundle patch: ${error.message}`;
+      throw error;
+    }
+  }
+
   private async downloadFile(params: DownloadTaskParams): Promise<void> {
     const httpRequest = http.createHttp();
     this.hash = params.hash;
@@ -89,14 +191,7 @@ export class DownloadTask {
       if (exists) {
         await fileIo.unlink(params.targetFile);
       } else {
-        const targetDir = params.targetFile.substring(
-          0,
-          params.targetFile.lastIndexOf('/'),
-        );
-        exists = fileIo.accessSync(targetDir);
-        if (!exists) {
-          await fileIo.mkdir(targetDir);
-        }
+        await this.ensureParentDirectory(params.targetFile);
       }
 
       writer = await fileIo.open(
@@ -198,9 +293,7 @@ export class DownloadTask {
 
   private async doFullPatch(params: DownloadTaskParams): Promise<void> {
     await this.downloadFile(params);
-    await this.removeDirectory(params.unzipDirectory);
-    await fileIo.mkdir(params.unzipDirectory);
-
+    await this.recreateDirectory(params.unzipDirectory);
     await zlib.decompressFile(params.targetFile, params.unzipDirectory);
   }
 
@@ -243,12 +336,11 @@ export class DownloadTask {
 
   private async doPatchFromApp(params: DownloadTaskParams): Promise<void> {
     await this.downloadFile(params);
-    await this.removeDirectory(params.unzipDirectory);
-    await fileIo.mkdir(params.unzipDirectory);
+    await this.recreateDirectory(params.unzipDirectory);
 
     let foundDiff = false;
     let foundBundlePatch = false;
-    const copyList: Map<string, Array<any>> = new Map();
+    const copyList: Map<string, string[]> = new Map();
     await zlib.decompressFile(params.targetFile, params.unzipDirectory);
     const zipFile = await this.processUnzippedFiles(params.unzipDirectory);
     for (const entry of zipFile.entries) {
@@ -256,11 +348,7 @@ export class DownloadTask {
 
       if (fn === '__diff.json') {
         foundDiff = true;
-        const bufferArray = new Uint8Array(entry.content);
-        const obj = JSON.parse(
-          new util.TextDecoder().decodeToString(bufferArray),
-        );
-
+        const obj = this.parseJsonEntry(entry.content);
         const copies = obj.copies as Record<string, string>;
         for (const [to, rawPath] of Object.entries(copies)) {
           let from = rawPath.replace('resources/rawfile/', '');
@@ -282,35 +370,16 @@ export class DownloadTask {
       }
       if (fn === 'bundle.harmony.js.patch') {
         foundBundlePatch = true;
-        try {
-          const resourceManager = this.context.resourceManager;
-          const originContent = await resourceManager.getRawFileContent(
-            'bundle.harmony.js',
-          );
-          const patched = await Pushy.hdiffPatch(
-            new Uint8Array(originContent.buffer),
-            new Uint8Array(entry.content),
-          );
-          const outputFile = `${params.unzipDirectory}/bundle.harmony.js`;
-          const writer = await fileIo.open(
-            outputFile,
-            fileIo.OpenMode.CREATE | fileIo.OpenMode.WRITE_ONLY,
-          );
-          const chunkSize = 4096;
-          let bytesWritten = 0;
-          const totalLength = patched.byteLength;
-
-          while (bytesWritten < totalLength) {
-            const chunk = patched.slice(bytesWritten, bytesWritten + chunkSize);
-            await fileIo.write(writer.fd, chunk);
-            bytesWritten += chunk.byteLength;
-          }
-          await fileIo.close(writer);
-          continue;
-        } catch (error) {
-          error.message = 'Failed to process bundle patch:' + error.message;
-          throw error;
-        }
+        const resourceManager = this.context.resourceManager;
+        const originContent = await resourceManager.getRawFileContent(
+          'bundle.harmony.js',
+        );
+        await this.applyBundlePatch(
+          originContent,
+          entry.content,
+          `${params.unzipDirectory}/bundle.harmony.js`,
+        );
+        continue;
       }
     }
 
@@ -325,8 +394,7 @@ export class DownloadTask {
 
   private async doPatchFromPpk(params: DownloadTaskParams): Promise<void> {
     await this.downloadFile(params);
-    await this.removeDirectory(params.unzipDirectory);
-    await fileIo.mkdir(params.unzipDirectory);
+    await this.recreateDirectory(params.unzipDirectory);
 
     let foundDiff = false;
     let foundBundlePatch = false;
@@ -338,74 +406,43 @@ export class DownloadTask {
       if (fn === '__diff.json') {
         foundDiff = true;
 
-        await fileIo
-          .copyDir(params.originDirectory + '/', params.unzipDirectory + '/')
-          .catch(error => {
-            console.error('copy error:', error);
-          });
-
-        const bufferArray = new Uint8Array(entry.content);
-        const obj = JSON.parse(
-          new util.TextDecoder().decodeToString(bufferArray),
+        await fileIo.copyDir(
+          `${params.originDirectory}/`,
+          `${params.unzipDirectory}/`,
         );
+
+        const obj = this.parseJsonEntry(entry.content);
 
         const { copies, deletes } = obj;
         for (const [to, from] of Object.entries(copies)) {
-          await fileIo
-            .copyFile(
-              `${params.originDirectory}/${from}`,
-              `${params.unzipDirectory}/${to}`,
-            )
-            .catch(error => {
-              console.error('copy error:', error);
-            });
+          const targetFile = `${params.unzipDirectory}/${to}`;
+          await this.ensureParentDirectory(targetFile);
+          await fileIo.copyFile(
+            `${params.originDirectory}/${from}`,
+            targetFile,
+          );
         }
         for (const fileToDelete of Object.keys(deletes)) {
-          await fileIo
-            .unlink(`${params.unzipDirectory}/${fileToDelete}`)
-            .catch(error => {
-              console.error('delete error:', error);
-            });
+          const targetFile = `${params.unzipDirectory}/${fileToDelete}`;
+          if (fileIo.accessSync(targetFile)) {
+            await fileIo.unlink(targetFile);
+          }
         }
         continue;
       }
       if (fn === 'bundle.harmony.js.patch') {
         foundBundlePatch = true;
-        const filePath = params.originDirectory + '/bundle.harmony.js';
-        const res = fileIo.accessSync(filePath);
-        if (res) {
-          const stat = await fileIo.stat(filePath);
-          const reader = await fileIo.open(filePath, fileIo.OpenMode.READ_ONLY);
-          const fileSize = stat.size;
-          const originContent = new ArrayBuffer(fileSize);
-          try {
-            await fileIo.read(reader.fd, originContent);
-            const patched = await Pushy.hdiffPatch(
-              new Uint8Array(originContent),
-              new Uint8Array(entry.content),
-            );
-            const outputFile = `${params.unzipDirectory}/bundle.harmony.js`;
-            const writer = await fileIo.open(
-              outputFile,
-              fileIo.OpenMode.CREATE | fileIo.OpenMode.WRITE_ONLY,
-            );
-            const chunkSize = 4096;
-            let bytesWritten = 0;
-            const totalLength = patched.byteLength;
-            while (bytesWritten < totalLength) {
-              const chunk = patched.slice(
-                bytesWritten,
-                bytesWritten + chunkSize,
-              );
-              await fileIo.write(writer.fd, chunk);
-              bytesWritten += chunk.byteLength;
-            }
-            await fileIo.close(writer);
-            continue;
-          } finally {
-            await fileIo.close(reader);
-          }
+        const bundlePath = `${params.originDirectory}/bundle.harmony.js`;
+        if (!fileIo.accessSync(bundlePath)) {
+          throw Error(`Origin bundle not found: ${bundlePath}`);
         }
+        const originContent = await this.readFileContent(bundlePath);
+        await this.applyBundlePatch(
+          originContent,
+          entry.content,
+          `${params.unzipDirectory}/bundle.harmony.js`,
+        );
+        continue;
       }
     }
 
@@ -433,6 +470,7 @@ export class DownloadTask {
             .split('.')[0];
           const mediaBuffer = await resourceManager.getMediaByName(mediaName);
           for (const target of targets) {
+            await this.ensureParentDirectory(target);
             const fileStream = fileIo.createStreamSync(target, 'w+');
             fileStream.writeSync(mediaBuffer.buffer);
             fileStream.close();
@@ -441,6 +479,7 @@ export class DownloadTask {
         }
         const fromContent = await resourceManager.getRawFd(from);
         for (const target of targets) {
+          await this.ensureParentDirectory(target);
           saveFileToSandbox(fromContent, target);
         }
       }
