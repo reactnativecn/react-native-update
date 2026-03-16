@@ -4,6 +4,70 @@ import { access, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { $ } from 'bun';
 
+function normalizeVersion(version: string): string {
+  return version.trim().replace(/^refs\/tags\//, '').replace(/^v/, '');
+}
+
+function getVersionFromEnvironment(): string | null {
+  const candidates = [
+    process.env.RELEASE_VERSION,
+    process.env.CI_COMMIT_TAG,
+    process.env.GITHUB_REF_TYPE === 'tag' ? process.env.GITHUB_REF_NAME : null,
+    process.env.GITHUB_REF?.startsWith('refs/tags/')
+      ? process.env.GITHUB_REF
+      : null,
+  ];
+
+  for (const candidate of candidates) {
+    if (candidate?.trim()) {
+      return normalizeVersion(candidate);
+    }
+  }
+
+  return null;
+}
+
+function getShellErrorMessage(error: unknown): string {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'stderr' in error &&
+    typeof error.stderr === 'string' &&
+    error.stderr.trim()
+  ) {
+    return error.stderr.trim();
+  }
+
+  if (error instanceof Error && error.message.trim()) {
+    return error.message.trim();
+  }
+
+  return 'Unknown git error';
+}
+
+async function getVersionFromGit(): Promise<string> {
+  try {
+    return normalizeVersion(await $`git describe --tags --always`.text());
+  } catch (error) {
+    const message = getShellErrorMessage(error);
+
+    if (message.includes('detected dubious ownership')) {
+      throw new Error(
+        'Git refused to read repository metadata because this checkout is not marked as safe. Configure safe.directory in CI or provide RELEASE_VERSION/GITHUB_REF_NAME.',
+        { cause: error },
+      );
+    }
+
+    throw new Error(`Unable to resolve publish version from git: ${message}`, {
+      cause: error,
+    });
+  }
+}
+
+async function resolveVersion(): Promise<string> {
+  return getVersionFromEnvironment() ?? (await getVersionFromGit());
+}
+
 async function modifyPackageJson({
   version,
 }: {
@@ -35,17 +99,15 @@ async function modifyPackageJson({
 }
 
 async function main(): Promise<void> {
-  const version = (await $`git describe --tags --always`.text())
-    .replace('v', '')
-    .trim();
   try {
+    const version = await resolveVersion();
+    console.log(`Using publish version ${version}`);
     await modifyPackageJson({ version });
     console.log('✅ Prepublish script completed successfully');
   } catch (error) {
     console.error('❌ Prepublish script failed:', error);
     process.exit(1);
   }
-
 }
 
 main();
