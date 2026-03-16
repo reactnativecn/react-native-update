@@ -13,13 +13,14 @@ set(WITH_HITRACE_SYSTRACE 1) # for other CMakeLists.txt files to use
 add_compile_definitions(WITH_HITRACE_SYSTRACE)
 
 set(PUSHY_CPP_DIR "${NODE_MODULES}/react-native-update/harmony/pushy/src/main/cpp")
-if(NOT EXISTS "${PUSHY_CPP_DIR}/PushyTurboModule.cpp")
-    message(FATAL_ERROR "Cannot find Pushy glue sources in node_modules: ${PUSHY_CPP_DIR}")
+set(PUSHY_TURBO_MODULE_CPP "${PUSHY_CPP_DIR}/PushyTurboModule.cpp")
+if(NOT EXISTS "${PUSHY_TURBO_MODULE_CPP}")
+    message(FATAL_ERROR "Cannot find Pushy glue source in node_modules: ${PUSHY_TURBO_MODULE_CPP}")
 endif()
 add_subdirectory("${RNOH_CPP_DIR}" ./rn)
 
-file(GLOB PUSHY_GLUE_CPP CONFIGURE_DEPENDS "${PUSHY_CPP_DIR}/*.cpp")
-add_library(rnoh_pushy SHARED ${PUSHY_GLUE_CPP})
+# Build only the RNOH glue here. librnupdate.so is provided by pushy.har.
+add_library(rnoh_pushy SHARED "${PUSHY_TURBO_MODULE_CPP}")
 target_include_directories(rnoh_pushy PUBLIC "${PUSHY_CPP_DIR}")
 target_link_libraries(rnoh_pushy PUBLIC rnoh)
 
