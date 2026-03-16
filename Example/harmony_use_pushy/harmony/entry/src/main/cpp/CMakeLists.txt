@@ -13,16 +13,7 @@ set(WITH_HITRACE_SYSTRACE 1) # for other CMakeLists.txt files to use
 add_compile_definitions(WITH_HITRACE_SYSTRACE)
 
 set(PUSHY_CPP_DIR "${NODE_MODULES}/react-native-update/harmony/pushy/src/main/cpp")
-set(PUSHY_TURBO_MODULE_CPP "${PUSHY_CPP_DIR}/PushyTurboModule.cpp")
-if(NOT EXISTS "${PUSHY_TURBO_MODULE_CPP}")
-    message(FATAL_ERROR "Cannot find Pushy glue source in node_modules: ${PUSHY_TURBO_MODULE_CPP}")
-endif()
 add_subdirectory("${RNOH_CPP_DIR}" ./rn)
-
-# Build only the RNOH glue here. librnupdate.so is provided by pushy.har.
-add_library(rnoh_pushy SHARED "${PUSHY_TURBO_MODULE_CPP}")
-target_include_directories(rnoh_pushy PUBLIC "${PUSHY_CPP_DIR}")
-target_link_libraries(rnoh_pushy PUBLIC rnoh)
 
 file(GLOB GENERATED_CPP_FILES "${CMAKE_CURRENT_SOURCE_DIR}/generated/*.cpp") # this line is needed by codegen v1
 
@@ -32,5 +23,6 @@ add_library(rnoh_app SHARED
     "${RNOH_CPP_DIR}/RNOHAppNapiBridge.cpp"
 )
 target_include_directories(rnoh_app PRIVATE "${PUSHY_CPP_DIR}")
+# Pushy's RNOH glue is compiled into rnoh_app directly. librnupdate.so comes from pushy.har.
+target_sources(rnoh_app PRIVATE "${PUSHY_CPP_DIR}/PushyTurboModule.cpp")
 target_link_libraries(rnoh_app PUBLIC rnoh)
-target_link_libraries(rnoh_app PUBLIC rnoh_pushy)
