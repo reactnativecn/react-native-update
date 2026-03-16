@@ -362,7 +362,7 @@ export class Pushy {
     return server.backups;
   };
   downloadUpdate = async (
-    info: CheckResult,
+    updateInfo: CheckResult,
     onDownloadProgress?: (data: ProgressData) => void,
   ) => {
     const {
@@ -374,15 +374,15 @@ export class Pushy {
       name,
       description = '',
       metaInfo,
-    } = info;
+    } = updateInfo;
     if (
       this.options.beforeDownloadUpdate &&
-      (await this.options.beforeDownloadUpdate(info)) === false
+      (await this.options.beforeDownloadUpdate(updateInfo)) === false
     ) {
       log('beforeDownloadUpdate returned false, skipping download');
       return;
     }
-    if (!info.update || !hash) {
+    if (!updateInfo.update || !hash) {
       return;
     }
     if (rolledBackVersion === hash) {

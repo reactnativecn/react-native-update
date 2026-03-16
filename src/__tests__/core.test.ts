@@ -7,6 +7,7 @@ import { describe, expect, test, mock } from 'bun:test';
 // or run tests in isolation.
 // Actually, bun test runs each file in its own environment usually,
 // BUT if we run multiple test files in one process, they might share the cache.
+const importFreshCore = (cacheKey: string) => import(`../core?${cacheKey}`);
 
 describe('core info parsing', () => {
   test('should call error when currentVersionInfo is invalid JSON', async () => {
@@ -53,7 +54,7 @@ describe('core info parsing', () => {
 
     // Use a unique query parameter to bypass cache if supported, or just rely on fresh environment per file.
     // In Bun, you can sometimes use a cache buster if it's dynamic import.
-    await import('../core?error');
+    await importFreshCore('error');
 
     expect(mockError).toHaveBeenCalledWith(
       expect.stringContaining('error_parse_version_info')
@@ -95,7 +96,7 @@ describe('core info parsing', () => {
       emptyModule: {},
     }));
 
-    await import('../core?success');
+    await importFreshCore('success');
 
     expect(mockError).not.toHaveBeenCalled();
   });
