@@ -10,14 +10,25 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    container: ghcr.io/sanchuanhehe/harmony-next-pipeline-docker/harmonyos-ci-image:latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
       - uses: oven-sh/setup-bun@v2
       # Setup .npmrc file to publish to npm
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          registry-url: 'https://registry.npmjs.org'
+      # - uses: actions/setup-node@v6
+      #   with:
+      #     node-version: 24
+      #     registry-url: 'https://registry.npmjs.org'
       - run: bun install --frozen-lockfile
+      - name: Verify Harmony build tools
+        run: |
+          command -v hvigorw >/dev/null 2>&1 || (echo "Missing hvigorw in the Harmony container image." >&2; exit 1)
+          command -v ohpm >/dev/null 2>&1 || (echo "Missing ohpm in the Harmony container image." >&2; exit 1)
+      - name: Build Harmony HAR
+        run: npm run build:harmony-har -- --build-mode release
+      - name: Verify Harmony HAR artifact
+        run: test -f harmony/pushy.har
       - run: npm publish --provenance --access public
