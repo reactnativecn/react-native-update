@@ -13,7 +13,7 @@ export class PushyFileJSBundleProvider extends JSBundleProvider {
 
   constructor(context: common.UIAbilityContext) {
     super();
-    this.updateContext = new UpdateContext(context);
+    this.updateContext = UpdateContext.getInstance(context);
     this.path = this.updateContext.getBundleUrl();
   }
 
