@@ -83,6 +83,78 @@ public class UpdateModuleImpl {
         return bundleAssetName;
     }
 
+    private static String toAssetUrl(String bundleAssetName) {
+        if (bundleAssetName == null || bundleAssetName.isEmpty()) {
+            return "assets://index.android.bundle";
+        }
+        if (bundleAssetName.startsWith("assets://")) {
+            return bundleAssetName;
+        }
+        return "assets://" + bundleAssetName;
+    }
+
+    private static JSBundleLoader createBundleLoader(Context application, String updateBundlePath, boolean loadAssetSynchronously) {
+        if (updateBundlePath != null) {
+            return JSBundleLoader.createFileLoader(updateBundlePath);
+        }
+        return JSBundleLoader.createAssetLoader(
+            application,
+            toAssetUrl(getDefaultBundleAssetName(application)),
+            loadAssetSynchronously
+        );
+    }
+
+    private static Object getReactHost(Activity currentActivity, Context application) {
+        if (currentActivity instanceof ReactActivity) {
+            try {
+                Method getReactDelegateMethod = ReactActivity.class.getMethod("getReactDelegate");
+                ReactDelegate reactDelegate = (ReactDelegate) getReactDelegateMethod.invoke(currentActivity);
+                if (reactDelegate != null) {
+                    Field reactHostField = getCompatibleField(reactDelegate.getClass(), "reactHost");
+                    reactHostField.setAccessible(true);
+                    Object reactHost = reactHostField.get(reactDelegate);
+                    if (reactHost != null) {
+                        return reactHost;
+                    }
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+
+        try {
+            Method getReactHostMethod = application.getClass().getMethod("getReactHost");
+            return getReactHostMethod.invoke(application);
+        } catch (Throwable ignored) {
+        }
+
+        return null;
+    }
+
+    private static void reloadReactHost(Object reactHost, JSBundleLoader loader) throws Throwable {
+        try {
+            Field devSupportField = getCompatibleField(reactHost.getClass(), "useDevSupport");
+            devSupportField.setAccessible(true);
+            devSupportField.set(reactHost, false);
+        } catch (Throwable ignored) {
+        }
+
+        Field reactHostDelegateField = getCompatibleField(reactHost.getClass(), "reactHostDelegate");
+        reactHostDelegateField.setAccessible(true);
+        Object reactHostDelegate = reactHostDelegateField.get(reactHost);
+
+        String bundleFieldName = "jsBundleLoader";
+        if ("expo.modules.ExpoReactHostFactory.ExpoReactHostDelegate".equals(reactHostDelegate.getClass().getCanonicalName())) {
+            bundleFieldName = "_jsBundleLoader";
+        }
+
+        Field jsBundleLoaderField = reactHostDelegate.getClass().getDeclaredField(bundleFieldName);
+        jsBundleLoaderField.setAccessible(true);
+        jsBundleLoaderField.set(reactHostDelegate, loader);
+
+        Method reloadMethod = reactHost.getClass().getMethod("reload", String.class);
+        reloadMethod.invoke(reactHost, "react-native-update");
+    }
+
     public static void downloadFullUpdate(UpdateContext updateContext, final ReadableMap options, final Promise promise) {
         String url = options.getString("updateUrl");
         String hash = options.getString("hash");
@@ -178,14 +250,20 @@ public class UpdateModuleImpl {
                 
                 final Context application = mContext.getApplicationContext();
                 String updateBundlePath = updateContext.getBundleUrl(application);
+                final Activity currentActivity = mContext.getCurrentActivity();
 
-                JSBundleLoader loader;
-
-                if (updateBundlePath != null) {
-                    loader = JSBundleLoader.createFileLoader(updateBundlePath);
-                } else {
-                    loader = JSBundleLoader.createAssetLoader(application, getDefaultBundleAssetName(application), false);
+                Object reactHost = getReactHost(currentActivity, application);
+                if (reactHost != null) {
+                    try {
+                        reloadReactHost(reactHost, createBundleLoader(application, updateBundlePath, true));
+                        promise.resolve(true);
+                        return;
+                    } catch (Throwable err) {
+                        Log.e(NAME, "Failed to reload via ReactHost", err);
+                    }
                 }
+
+                JSBundleLoader loader = createBundleLoader(application, updateBundlePath, false);
                 try {
                     ReactInstanceManager instanceManager = updateContext.getCustomReactInstanceManager();
 
@@ -207,46 +285,16 @@ public class UpdateModuleImpl {
                     promise.resolve(true);
 
                 } catch (Throwable err) {
-                    final Activity currentActivity = mContext.getCurrentActivity();
                     if (currentActivity == null) {
                         promise.reject(err);
                         return;
                     }
                     try {
-                        java.lang.reflect.Method getReactDelegateMethod = 
-                            ReactActivity.class.getMethod("getReactDelegate");
-
-                        ReactDelegate reactDelegate = (ReactDelegate) 
-                            getReactDelegateMethod.invoke(currentActivity);
-
-                        Field reactHostField = getCompatibleField(ReactDelegate.class, "reactHost");
-                        reactHostField.setAccessible(true);
-                        Object reactHost = reactHostField.get(reactDelegate);
-
-                        Field devSupport = getCompatibleField(reactHost.getClass(), "useDevSupport");
-                        devSupport.setAccessible(true);
-                        devSupport.set(reactHost, false);
-
-                        // Access the ReactHostDelegate field (compatible with mReactHostDelegate/reactHostDelegate)
-                        Field reactHostDelegateField = getCompatibleField(reactHost.getClass(), "reactHostDelegate");
-                        reactHostDelegateField.setAccessible(true);
-                        Object reactHostDelegate = reactHostDelegateField.get(reactHost);
-
-                        String bundleFieldName = "jsBundleLoader";
-                        if (reactHostDelegate.getClass().getCanonicalName().equals("expo.modules.ExpoReactHostFactory.ExpoReactHostDelegate")) {
-                            bundleFieldName = "_jsBundleLoader";
+                        Object currentReactHost = getReactHost(currentActivity, application);
+                        if (currentReactHost == null) {
+                            throw err;
                         }
-
-                        // Modify the jsBundleLoader field
-                        Field jsBundleLoaderField = reactHostDelegate.getClass().getDeclaredField(bundleFieldName);
-                        jsBundleLoaderField.setAccessible(true);
-                        jsBundleLoaderField.set(reactHostDelegate, loader);
-                        
-                        // Get the reload method with a String parameter
-                        java.lang.reflect.Method reloadMethod = reactHost.getClass().getMethod("reload", String.class);
-
-                        // Invoke the reload method with a reason
-                        reloadMethod.invoke(reactHost, "react-native-update");
+                        reloadReactHost(currentReactHost, createBundleLoader(application, updateBundlePath, true));
                         promise.resolve(true);
                     } catch (Throwable e) {
                         currentActivity.runOnUiThread(new Runnable() {
