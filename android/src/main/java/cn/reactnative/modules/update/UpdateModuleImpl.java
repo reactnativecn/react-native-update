@@ -150,7 +150,26 @@ public class UpdateModuleImpl {
                 }
                 
                 final Context application = mContext.getApplicationContext();
-                JSBundleLoader loader = JSBundleLoader.createFileLoader(UpdateContext.getBundleUrl(application));
+                final Context application = mContext.getApplicationContext();
+                String updateBundlePath = updateContext.getBundleUrl(application);
+
+                JSBundleLoader loader;
+
+                if (updateBundlePath != null) {
+                    loader = JSBundleLoader.createFileLoader(updateBundlePath);
+                } else {
+                    String bundleAssetName = "index.android.bundle";
+                    try {
+                        ReactInstanceManager defaultInstanceManager = ((ReactApplication) application).getReactNativeHost().getReactInstanceManager();
+                        String rnBundleAssetName = defaultInstanceManager.getBundleAssetName();
+                        if (rnBundleAssetName != null && !rnBundleAssetName.isEmpty()) {
+                            bundleAssetName = rnBundleAssetName;
+                        }
+                    } catch (Exception e) {
+                        Log.e(NAME, "Failed to get default asset name from ReactNativeHost: " + e.getMessage());
+                    }
+                    loader = JSBundleLoader.createAssetLoader(application, bundleAssetName, false);
+                }
                 try {
                     ReactInstanceManager instanceManager = updateContext.getCustomReactInstanceManager();
 
