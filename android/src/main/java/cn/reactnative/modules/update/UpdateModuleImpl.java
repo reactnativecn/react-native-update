@@ -8,6 +8,7 @@ import com.facebook.react.ReactActivity;
 import com.facebook.react.ReactApplication;
 import com.facebook.react.ReactDelegate;
 import com.facebook.react.ReactInstanceManager;
+import com.facebook.react.ReactNativeHost;
 import com.facebook.react.bridge.JSBundleLoader;
 import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReactApplicationContext;
@@ -18,6 +19,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.Map;
 
 public class UpdateModuleImpl {
@@ -54,6 +56,31 @@ public class UpdateModuleImpl {
             return str;
         }
         return str.substring(0, 1).toUpperCase() + str.substring(1);
+    }
+
+    private static String getDefaultBundleAssetName(Context application) {
+        String bundleAssetName = "index.android.bundle";
+        if (!(application instanceof ReactApplication)) {
+            return bundleAssetName;
+        }
+
+        try {
+            ReactNativeHost reactNativeHost = ((ReactApplication) application).getReactNativeHost();
+            if (reactNativeHost == null) {
+                return bundleAssetName;
+            }
+
+            Method getBundleAssetNameMethod = ReactNativeHost.class.getDeclaredMethod("getBundleAssetName");
+            getBundleAssetNameMethod.setAccessible(true);
+            Object resolvedBundleAssetName = getBundleAssetNameMethod.invoke(reactNativeHost);
+            if (resolvedBundleAssetName instanceof String && !((String) resolvedBundleAssetName).isEmpty()) {
+                return (String) resolvedBundleAssetName;
+            }
+        } catch (Exception e) {
+            Log.e(NAME, "Failed to get default asset name from ReactNativeHost: " + e.getMessage());
+        }
+
+        return bundleAssetName;
     }
 
     public static void downloadFullUpdate(UpdateContext updateContext, final ReadableMap options, final Promise promise) {
@@ -150,7 +177,6 @@ public class UpdateModuleImpl {
                 }
                 
                 final Context application = mContext.getApplicationContext();
-                final Context application = mContext.getApplicationContext();
                 String updateBundlePath = updateContext.getBundleUrl(application);
 
                 JSBundleLoader loader;
@@ -158,17 +184,7 @@ public class UpdateModuleImpl {
                 if (updateBundlePath != null) {
                     loader = JSBundleLoader.createFileLoader(updateBundlePath);
                 } else {
-                    String bundleAssetName = "index.android.bundle";
-                    try {
-                        ReactInstanceManager defaultInstanceManager = ((ReactApplication) application).getReactNativeHost().getReactInstanceManager();
-                        String rnBundleAssetName = defaultInstanceManager.getBundleAssetName();
-                        if (rnBundleAssetName != null && !rnBundleAssetName.isEmpty()) {
-                            bundleAssetName = rnBundleAssetName;
-                        }
-                    } catch (Exception e) {
-                        Log.e(NAME, "Failed to get default asset name from ReactNativeHost: " + e.getMessage());
-                    }
-                    loader = JSBundleLoader.createAssetLoader(application, bundleAssetName, false);
+                    loader = JSBundleLoader.createAssetLoader(application, getDefaultBundleAssetName(application), false);
                 }
                 try {
                     ReactInstanceManager instanceManager = updateContext.getCustomReactInstanceManager();
@@ -324,4 +340,3 @@ public class UpdateModuleImpl {
     }
 
 }
-
