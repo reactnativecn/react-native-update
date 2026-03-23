@@ -132,6 +132,24 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
     byte[] buffer = new byte[1024*4];
 
     private static native byte[] hdiffPatch(byte[] origin, byte[] patch);
+    private static native void applyPatchFromFileSource(
+        String sourceRoot,
+        String targetRoot,
+        String originBundlePath,
+        String bundlePatchPath,
+        String bundleOutputPath,
+        String mergeSourceSubdir,
+        boolean enableMerge,
+        String[] copyFroms,
+        String[] copyTos,
+        String[] deletes
+    );
+    private static native void cleanupOldEntries(
+        String rootDir,
+        String keepCurrent,
+        String keepPrevious,
+        int maxAgeDays
+    );
 
 
     private void copyFile(File from, File fmd) throws IOException {
@@ -181,48 +199,6 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
         fout.close();
         in.close();
         return fout.toByteArray();
-    }
-
-    private byte[] readFile(File file)  throws IOException {
-        InputStream in = new FileInputStream(file);
-        int count;
-
-        ByteArrayOutputStream fout = new ByteArrayOutputStream();
-        while ((count = in.read(buffer)) != -1)
-        {
-            fout.write(buffer, 0, count);
-        }
-
-        fout.close();
-        in.close();
-        return fout.toByteArray();
-    }
-
-    private void copyFilesWithBlacklist(String current, File from, File to, JSONObject blackList) throws IOException {
-        File[] files = from.listFiles();
-        for (File file : files) {
-            if (file.isDirectory()) {
-                String subName = current + file.getName() + '/';
-                if (blackList.has(subName)) {
-                    continue;
-                }
-                File toFile = new File(to, file.getName());
-                if (!toFile.exists()) {
-                    toFile.mkdir();
-                }
-                copyFilesWithBlacklist(subName, file, toFile, blackList);
-            } else if (!blackList.has(current + file.getName())) {
-                // Copy file.
-                File toFile = new File(to, file.getName());
-                if (!toFile.exists()) {
-                    copyFile(file, toFile);
-                }
-            }
-        }
-    }
-
-    private void copyFilesWithBlacklist(File from, File to, JSONObject blackList) throws IOException {
-        copyFilesWithBlacklist("", from, to, blackList);
     }
 
     private void doFullPatch(DownloadTaskParams param) throws IOException {
@@ -552,10 +528,11 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
         removeDirectory(param.unzipDirectory);
         param.unzipDirectory.mkdirs();
 
-        int count;
-        String filename;
         boolean foundDiff = false;
         boolean foundBundlePatch = false;
+        ArrayList<String> copyFroms = new ArrayList<String>();
+        ArrayList<String> copyTos = new ArrayList<String>();
+        ArrayList<String> deletes = new ArrayList<String>();
 
 
         SafeZipFile zipFile = new SafeZipFile(param.targetFile);
@@ -579,19 +556,19 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
                     if (from.isEmpty()) {
                         from = to;
                     }
-                    copyFile(new File(param.originDirectory, from), new File(param.unzipDirectory, to));
+                    copyFroms.add(from);
+                    copyTos.add(to);
                 }
                 JSONObject blackList = obj.getJSONObject("deletes");
-                copyFilesWithBlacklist(param.originDirectory, param.unzipDirectory, blackList);
+                Iterator<?> deleteKeys = blackList.keys();
+                while (deleteKeys.hasNext()) {
+                    deletes.add((String)deleteKeys.next());
+                }
                 continue;
             }
             if (fn.equals("index.bundlejs.patch")) {
                 foundBundlePatch = true;
-                byte[] patched = hdiffPatch(readFile(new File(param.originDirectory, "index.bundlejs")), readBytes(zipFile.getInputStream(ze)));
-
-                FileOutputStream fout = new FileOutputStream(new File(param.unzipDirectory, "index.bundlejs"));
-                fout.write(patched);
-                fout.close();
+                zipFile.unzipToPath(ze, param.unzipDirectory);
                 continue;
             }
 
@@ -606,6 +583,20 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
         if (!foundBundlePatch) {
             throw new Error("bundle patch not found");
         }
+
+        applyPatchFromFileSource(
+            param.originDirectory.getAbsolutePath(),
+            param.unzipDirectory.getAbsolutePath(),
+            new File(param.originDirectory, "index.bundlejs").getAbsolutePath(),
+            new File(param.unzipDirectory, "index.bundlejs.patch").getAbsolutePath(),
+            new File(param.unzipDirectory, "index.bundlejs").getAbsolutePath(),
+            "",
+            true,
+            copyFroms.toArray(new String[0]),
+            copyTos.toArray(new String[0]),
+            deletes.toArray(new String[0])
+        );
+
         if (UpdateContext.DEBUG) {
             Log.d("react-native-update", "Unzip finished");
         }
@@ -614,30 +605,12 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
         if (UpdateContext.DEBUG) {
             Log.d("react-native-update", "Start cleaning up");
         }
-        File root = param.unzipDirectory;
-        for (File sub : root.listFiles()) {
-            if (sub.getName().charAt(0) == '.') {
-                continue;
-            }
-            if (isFileUpdatedWithinDays(sub, 7)) {
-                continue;
-            }
-            if (sub.isFile()) {
-                sub.delete();
-            } else {
-                if (sub.getName().equals(param.hash) || sub.getName().equals(param.originHash)) {
-                    continue;
-                }
-                removeDirectory(sub);
-            }
-        }
-    }
-
-    private boolean isFileUpdatedWithinDays(File file, int days) {
-        long currentTime = System.currentTimeMillis();
-        long lastModified = file.lastModified();
-        long daysInMillis = days * 24 * 60 * 60 * 1000L;
-        return (currentTime - lastModified) < daysInMillis;
+        cleanupOldEntries(
+            param.unzipDirectory.getAbsolutePath(),
+            param.hash,
+            param.originHash,
+            7
+        );
     }
 
     @Override

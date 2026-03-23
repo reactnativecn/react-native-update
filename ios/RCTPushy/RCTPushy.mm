@@ -1,6 +1,7 @@
 #import "RCTPushy.h"
 #import "RCTPushyDownloader.h"
 #import "RCTPushyManager.h"
+#include "../../cpp/patch_core/patch_core.h"
 
 #if __has_include("RCTReloadCommand.h")
 #import "RCTReloadCommand.h"
@@ -57,6 +58,42 @@ typedef NS_ENUM(NSInteger, PushyType) {
 };
 
 static BOOL ignoreRollback = false;
+
+static std::string PushyToStdString(NSString *value) {
+    if (value == nil) {
+        return std::string();
+    }
+    return std::string([value UTF8String]);
+}
+
+static NSError *PushyNSErrorFromStatus(const pushy::patch::Status &status) {
+    return [NSError errorWithDomain:@"cn.reactnative.pushy"
+                               code:-1
+                           userInfo:@{ NSLocalizedDescriptionKey: [NSString stringWithUTF8String:status.message.c_str()] }];
+}
+
+static pushy::patch::PatchManifest PushyPatchManifestFromJson(NSDictionary *json) {
+    pushy::patch::PatchManifest manifest;
+
+    NSDictionary *copies = json[@"copies"];
+    for (NSString *to in copies) {
+        NSString *from = copies[to];
+        if (from.length <= 0) {
+            from = to;
+        }
+        manifest.copies.push_back(pushy::patch::CopyOperation{
+            PushyToStdString(from),
+            PushyToStdString(to),
+        });
+    }
+
+    NSDictionary *deletes = json[@"deletes"];
+    for (NSString *path in deletes) {
+        manifest.deletes.push_back(PushyToStdString(path));
+    }
+
+    return manifest;
+}
 
 @implementation RCTPushy {
     RCTPushyManager *_fileManager;
@@ -496,7 +533,7 @@ RCT_EXPORT_METHOD(markSuccess:(RCTPromiseResolveBlock)resolve
                             {
                                 NSString *sourceOrigin = [[NSBundle mainBundle] resourcePath];
                                 NSString *bundleOrigin = [[RCTPushy binaryBundleURL] path];
-                                [self patch:hash fromBundle:bundleOrigin source:sourceOrigin callback:callback];
+                                [self patch:hash fromBundle:bundleOrigin source:sourceOrigin mergeSourceSubdir:@"assets" callback:callback];
                             }
                                 break;
                             case PushyTypePatchFromPpk:
@@ -505,7 +542,7 @@ RCT_EXPORT_METHOD(markSuccess:(RCTPromiseResolveBlock)resolve
                                 
                                 NSString *sourceOrigin = lastVersionDir;
                                 NSString *bundleOrigin = [lastVersionDir stringByAppendingPathComponent:BUNDLE_FILE_NAME];
-                                [self patch:hash fromBundle:bundleOrigin source:sourceOrigin callback:callback];
+                                [self patch:hash fromBundle:bundleOrigin source:sourceOrigin mergeSourceSubdir:@"" callback:callback];
                             }
                                 break;
                             default:
@@ -519,7 +556,10 @@ RCT_EXPORT_METHOD(markSuccess:(RCTPromiseResolveBlock)resolve
     }];
 }
 
-- (void)_dopatch:(NSString *)hash fromBundle:(NSString *)bundleOrigin source:(NSString *)sourceOrigin
+- (void)_dopatch:(NSString *)hash
+      fromBundle:(NSString *)bundleOrigin
+          source:(NSString *)sourceOrigin
+  mergeSourceSubdir:(NSString *)mergeSourceSubdir
         callback:(void (^)(NSError *error))callback
 {
     NSString *unzipDir = [[RCTPushy downloadDir] stringByAppendingPathComponent:hash];
@@ -527,46 +567,40 @@ RCT_EXPORT_METHOD(markSuccess:(RCTPromiseResolveBlock)resolve
     NSString *bundlePatch = [unzipDir stringByAppendingPathComponent:BUNDLE_PATCH_NAME];
     
     NSString *destination = [unzipDir stringByAppendingPathComponent:BUNDLE_FILE_NAME];
-    void (^completionHandler)(BOOL success) = ^(BOOL success) {
-        if (success) {
-            NSData *data = [NSData dataWithContentsOfFile:sourcePatch];
-            NSError *error = nil;
-            NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingAllowFragments error:&error];
-            if (error) {
-                callback(error);
-                return;
-            }
-            
-            NSDictionary *copies = json[@"copies"];
-            NSDictionary *deletes = json[@"deletes"];
+    NSData *data = [NSData dataWithContentsOfFile:sourcePatch];
+    NSError *error = nil;
+    NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingAllowFragments error:&error];
+    if (error) {
+        callback(error);
+        return;
+    }
 
-            [self->_fileManager copyFiles:copies fromDir:sourceOrigin toDir:unzipDir deletes:deletes completionHandler:^(NSError *error) {
-                if (error) {
-                    callback(error);
-                }
-                else {
-                    callback(nil);
-                }
-            }];
-        }
-        else {
-            callback([self errorWithMessage:ERROR_HDIFFPATCH]);
-        }
-    };
-    
-    @try {
-        [_fileManager hdiffFileAtPath:bundlePatch fromOrigin:bundleOrigin toDestination:destination completionHandler:completionHandler];
+    pushy::patch::FileSourcePatchOptions options;
+    options.manifest = PushyPatchManifestFromJson(json);
+    options.source_root = PushyToStdString(sourceOrigin);
+    options.target_root = PushyToStdString(unzipDir);
+    options.origin_bundle_path = PushyToStdString(bundleOrigin);
+    options.bundle_patch_path = PushyToStdString(bundlePatch);
+    options.bundle_output_path = PushyToStdString(destination);
+    options.merge_source_subdir = PushyToStdString(mergeSourceSubdir);
+    options.enable_merge = true;
+
+    pushy::patch::Status status = pushy::patch::ApplyPatchFromFileSource(options);
+    if (!status.ok) {
+        callback(PushyNSErrorFromStatus(status));
+        return;
     }
-    @catch (NSException *exception) {
-        NSLog(@"Pushy _dopatch error: exception occurred during hdiffFileAtPath: %@, reason: %@", 
-              exception.name, exception.reason);
-        callback([self errorWithMessage:ERROR_HDIFFPATCH]);
-    }
+
+    callback(nil);
 }
 
-- (void)patch:(NSString *)hash fromBundle:(NSString *)bundleOrigin source:(NSString *)sourceOrigin callback:(void (^)(NSError *error))callback
+- (void)patch:(NSString *)hash
+   fromBundle:(NSString *)bundleOrigin
+       source:(NSString *)sourceOrigin
+mergeSourceSubdir:(NSString *)mergeSourceSubdir
+     callback:(void (^)(NSError *error))callback
 {
-    [self _dopatch:hash fromBundle:bundleOrigin source:sourceOrigin callback:callback];
+    [self _dopatch:hash fromBundle:bundleOrigin source:sourceOrigin mergeSourceSubdir:mergeSourceSubdir callback:callback];
 }
 
 - (void)clearInvalidFiles
@@ -574,26 +608,17 @@ RCT_EXPORT_METHOD(markSuccess:(RCTPromiseResolveBlock)resolve
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     NSDictionary *pushyInfo = [defaults objectForKey:keyPushyInfo];
     NSString *curVersion = [pushyInfo objectForKey:paramCurrentVersion];
+    NSString *lastVersion = [pushyInfo objectForKey:paramLastVersion];
     
     NSString *downloadDir = [RCTPushy downloadDir];
-    NSError *error = nil;
-    NSArray *list = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:downloadDir error:&error];
-    if (error) {
-        return;
-    }
-    
-    for(NSString *fileName in list) {
-        if (![fileName isEqualToString:curVersion]) {
-            NSString *filePath = [downloadDir stringByAppendingPathComponent:fileName];
-            NSDictionary *attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:filePath error:&error];
-            if (error) {
-                continue;
-            }
-            NSDate *modificationDate = [attributes fileModificationDate];
-            if ([[NSDate date] timeIntervalSinceDate:modificationDate] > 7 * 24 * 60 * 60) {
-                [_fileManager removeFile:filePath completionHandler:nil];
-            }
-        }
+    pushy::patch::Status status = pushy::patch::CleanupOldEntries(
+        PushyToStdString(downloadDir),
+        PushyToStdString(curVersion),
+        PushyToStdString(lastVersion),
+        7
+    );
+    if (!status.ok) {
+        NSLog(@"Pushy cleanup error: %s", status.message.c_str());
     }
 }
 
