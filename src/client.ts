@@ -17,11 +17,18 @@ import {
   setLocalHashInfo,
 } from './core';
 import { PermissionsAndroid } from './permissions';
-import { CheckResult, ClientOptions, EventType, ProgressData } from './type';
+import {
+  CheckResult,
+  ClientOptions,
+  EventType,
+  ProgressData,
+  UpdateServerConfig,
+} from './type';
 import {
   assertWeb,
+  DEFAULT_FETCH_TIMEOUT_MS,
   emptyObj,
-  enhancedFetch,
+  fetchWithTimeout,
   info,
   joinUrls,
   log,
@@ -30,6 +37,7 @@ import {
   testUrls,
 } from './utils';
 import i18n from './i18n';
+import { dedupeEndpoints, executeEndpointFallback } from './endpoint';
 
 const SERVER_PRESETS = {
   // cn
@@ -61,6 +69,19 @@ const defaultClientOptions: ClientOptions = {
   logger: noop,
   debug: false,
   throwError: false,
+};
+
+const cloneServerConfig = (
+  server?: UpdateServerConfig,
+): UpdateServerConfig | undefined => {
+  if (!server) {
+    return undefined;
+  }
+  return {
+    main: server.main,
+    backups: server.backups ? [...server.backups] : undefined,
+    queryUrls: server.queryUrls ? [...server.queryUrls] : undefined,
+  };
 };
 
 export const sharedState: {
@@ -110,7 +131,7 @@ export class Pushy {
 
   constructor(options: ClientOptions, clientType?: 'Pushy' | 'Cresc') {
     this.clientType = clientType || 'Pushy';
-    this.options.server = SERVER_PRESETS[this.clientType];
+    this.options.server = cloneServerConfig(SERVER_PRESETS[this.clientType]);
 
     i18n.setLocale(options.locale ?? this.clientType === 'Pushy' ? 'zh' : 'en');
 
@@ -134,7 +155,10 @@ export class Pushy {
   setOptions = (options: Partial<ClientOptions>) => {
     for (const [key, value] of Object.entries(options)) {
       if (value !== undefined) {
-        (this.options as any)[key] = value;
+        (this.options as any)[key] =
+          key === 'server'
+            ? cloneServerConfig(value as UpdateServerConfig)
+            : value;
         if (key === 'logger') {
           this.loggerPromise.resolve();
         }
@@ -187,6 +211,90 @@ export class Pushy {
   };
   getCheckUrl = (endpoint: string = this.options.server!.main) => {
     return `${endpoint}/checkUpdate/${this.options.appKey}`;
+  };
+  getConfiguredCheckEndpoints = () => {
+    const { server } = this.options;
+    if (!server) {
+      return [];
+    }
+    return dedupeEndpoints([server.main, ...(server.backups || [])]);
+  };
+  getRemoteEndpoints = async () => {
+    const { server } = this.options;
+    if (!server?.queryUrls?.length) {
+      return [];
+    }
+    try {
+      const resp = await promiseAny(
+        server.queryUrls.map(queryUrl =>
+          fetchWithTimeout(queryUrl, {}, DEFAULT_FETCH_TIMEOUT_MS),
+        ),
+      );
+      const remoteEndpoints = await resp.json();
+      log('fetch endpoints:', remoteEndpoints);
+      if (Array.isArray(remoteEndpoints)) {
+        const normalizedRemoteEndpoints = dedupeEndpoints(
+          remoteEndpoints.filter(
+            (endpoint): endpoint is string => typeof endpoint === 'string',
+          ),
+        ).filter(endpoint => endpoint !== server.main);
+        server.backups = dedupeEndpoints([
+          ...(server.backups || []),
+          ...normalizedRemoteEndpoints,
+        ]).filter(endpoint => endpoint !== server.main);
+        return normalizedRemoteEndpoints;
+      }
+    } catch (e) {
+      log('failed to fetch endpoints from: ', server.queryUrls, e);
+    }
+    return [];
+  };
+  requestCheckResult = async (
+    endpoint: string,
+    fetchPayload: Parameters<typeof fetch>[1],
+  ) => {
+    const resp = await fetchWithTimeout(
+      this.getCheckUrl(endpoint),
+      fetchPayload,
+      DEFAULT_FETCH_TIMEOUT_MS,
+    );
+
+    if (!resp.ok) {
+      const respText = await resp.text();
+      throw Error(
+        this.t('error_http_status', {
+          status: resp.status,
+          statusText: respText,
+        }),
+      );
+    }
+
+    return (await resp.json()) as CheckResult;
+  };
+  fetchCheckResult = async (fetchPayload: Parameters<typeof fetch>[1]) => {
+    const { endpoint, value } = await executeEndpointFallback<CheckResult>({
+      configuredEndpoints: this.getConfiguredCheckEndpoints(),
+      getRemoteEndpoints: this.getRemoteEndpoints,
+      tryEndpoint: async currentEndpoint => {
+        try {
+          return await this.requestCheckResult(currentEndpoint, fetchPayload);
+        } catch (e) {
+          log('check endpoint failed', currentEndpoint, e);
+          throw e;
+        }
+      },
+      onFirstFailure: ({ error }) => {
+        this.report({
+          type: 'errorChecking',
+          message: this.t('error_cannot_connect_backup', {
+            message: error.message,
+          }),
+        });
+      },
+    });
+
+    log('check endpoint success', endpoint);
+    return value;
   };
   assertDebug = (matter: string) => {
     if (__DEV__ && !this.options.debug) {
@@ -271,95 +379,40 @@ export class Pushy {
       },
       body,
     };
-    let resp;
+    const previousRespJson = this.lastRespJson;
     try {
       this.report({
         type: 'checking',
         message: this.options.appKey + ': ' + stringifyBody,
       });
-      resp = await enhancedFetch(this.getCheckUrl(), fetchPayload);
-    } catch (e: any) {
-      this.report({
-        type: 'errorChecking',
-        message: this.t('error_cannot_connect_backup', { message: e.message }),
-      });
-      const backupEndpoints = await this.getBackupEndpoints().catch();
-      if (backupEndpoints) {
-        resp = await promiseAny(
-          backupEndpoints.map(endpoint =>
-            enhancedFetch(this.getCheckUrl(endpoint), fetchPayload),
-          ),
-        ).catch(() => {
-          this.report({
-            type: 'errorChecking',
-            message: this.t('errorCheckingUseBackup'),
-          });
-        });
-      } else {
-        this.report({
-          type: 'errorChecking',
-          message: this.t('errorCheckingGetBackup'),
-        });
-      }
-    }
-    if (!resp) {
-      this.report({
-        type: 'errorChecking',
-        message: this.t('error_cannot_connect_server'),
-      });
-      this.throwIfEnabled(Error('errorChecking'));
-      return this.lastRespJson ? await this.lastRespJson : emptyObj;
-    }
+      const respJsonPromise = this.fetchCheckResult(fetchPayload);
+      this.lastRespJson = respJsonPromise;
+      const result: CheckResult = await respJsonPromise;
 
-    if (!resp.ok) {
-      const respText = await resp.text();
-      const errorMessage = this.t('error_http_status', {
-        status: resp.status,
-        statusText: respText,
-      });
+      log('checking result:', result);
+
+      return result;
+    } catch (e: any) {
+      this.lastRespJson = previousRespJson;
+      const errorMessage =
+        e?.message || this.t('error_cannot_connect_server');
       this.report({
         type: 'errorChecking',
         message: errorMessage,
       });
-      this.throwIfEnabled(Error('errorChecking: ' + errorMessage));
-      return this.lastRespJson ? await this.lastRespJson : emptyObj;
+      this.throwIfEnabled(e);
+      return previousRespJson ? await previousRespJson : emptyObj;
     }
-    const respJsonPromise = resp.json() as Promise<CheckResult>;
-    this.lastRespJson = respJsonPromise;
-
-    const result: CheckResult = await respJsonPromise;
-
-    log('checking result:', result);
-
-    return result;
   };
   getBackupEndpoints = async () => {
     const { server } = this.options;
     if (!server) {
       return [];
     }
-    if (server.queryUrls) {
-      try {
-        const resp = await promiseAny(
-          server.queryUrls.map(queryUrl => fetch(queryUrl)),
-        );
-        const remoteEndpoints = await resp.json();
-        log('fetch endpoints:', remoteEndpoints);
-        if (Array.isArray(remoteEndpoints)) {
-          const backups = server.backups || [];
-          const set = new Set(backups);
-          for (const endpoint of remoteEndpoints) {
-            set.add(endpoint);
-          }
-          if (set.size !== backups.length) {
-            server.backups = Array.from(set);
-          }
-        }
-      } catch (e: any) {
-        log('failed to fetch endpoints from: ', server.queryUrls);
-      }
-    }
-    return server.backups;
+    const remoteEndpoints = await this.getRemoteEndpoints();
+    return dedupeEndpoints([...(server.backups || []), ...remoteEndpoints]).filter(
+      endpoint => endpoint !== server.main,
+    );
   };
   downloadUpdate = async (
     updateInfo: CheckResult,

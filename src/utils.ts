@@ -18,6 +18,7 @@ export function error(...args: any[]) {
 }
 
 export const isWeb = Platform.OS === 'web';
+export const DEFAULT_FETCH_TIMEOUT_MS = 5000;
 
 export function promiseAny<T>(promises: Promise<T>[]) {
   return new Promise<T>((resolve, reject) => {
@@ -52,33 +53,23 @@ export const emptyModule = new EmptyModule();
 const ping = isWeb
   ? Promise.resolve
   : async (url: string) => {
-      let pingFinished = false;
-      return Promise.race([
-        enhancedFetch(url, {
-          method: 'HEAD',
-        })
-          .then(({ status, statusText, url: finalUrl }) => {
-            pingFinished = true;
-            if (status === 200) {
-              return finalUrl;
-            }
-            log('ping failed', url, status, statusText);
-            throw Error(i18n.t('error_ping_failed'));
-          })
-          .catch(e => {
-            pingFinished = true;
-            log('ping error', url, e);
-            throw e;
-          }),
-        new Promise((_, reject) =>
-          setTimeout(() => {
-            reject(Error(i18n.t('error_ping_timeout')));
-            if (!pingFinished) {
-              log('ping timeout', url);
-            }
-          }, 5000),
-        ),
-      ]);
+      try {
+        const { status, statusText, url: finalUrl } = await fetchWithTimeout(
+          url,
+          {
+            method: 'HEAD',
+          },
+          DEFAULT_FETCH_TIMEOUT_MS,
+        );
+        if (status === 200) {
+          return finalUrl;
+        }
+        log('ping failed', url, status, statusText);
+        throw Error(i18n.t('error_ping_failed'));
+      } catch (e) {
+        log('ping error', url, e);
+        throw e;
+      }
     };
 
 export function joinUrls(paths: string[], fileName?: string) {
@@ -109,6 +100,28 @@ export const assertWeb = () => {
     return false;
   }
   return true;
+};
+
+export const fetchWithTimeout = (
+  url: string,
+  params: Parameters<typeof fetch>[1],
+  timeoutMs = DEFAULT_FETCH_TIMEOUT_MS,
+): Promise<Response> => {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+  return Promise.race([
+    enhancedFetch(url, params),
+    new Promise<Response>((_, reject) => {
+      timeoutId = setTimeout(() => {
+        log('fetch timeout', url);
+        reject(Error(i18n.t('error_ping_timeout')));
+      }, timeoutMs);
+    }),
+  ]).finally(() => {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  });
 };
 
 // export const isAndroid70AndBelow = () => {
