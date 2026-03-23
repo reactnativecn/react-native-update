@@ -3,7 +3,6 @@ import {
   TurboModuleContext,
 } from '@rnoh/react-native-openharmony/ts';
 import common from '@ohos.app.ability.common';
-import dataPreferences from '@ohos.data.preferences';
 import { bundleManager } from '@kit.AbilityKit';
 import logger from './Logger';
 import { UpdateModuleImpl } from './UpdateModuleImpl';
@@ -28,25 +27,6 @@ export class PushyTurboModule extends TurboModule {
   getConstants(): Object {
     logger.debug(TAG, ',call getConstants');
     const context = this.mUiCtx;
-    const preferencesManager = dataPreferences.getPreferencesSync(context, {
-      name: 'update',
-    });
-    const isFirstTime = preferencesManager.getSync(
-      'isFirstTime',
-      false,
-    ) as boolean;
-    const rolledBackVersion = preferencesManager.getSync(
-      'rolledBackVersion',
-      '',
-    ) as string;
-    const uuid = preferencesManager.getSync('uuid', '') as string;
-    const currentVersion = preferencesManager.getSync(
-      'currentVersion',
-      '',
-    ) as string;
-    const currentVersionInfo = this.context.getKv(`hash_${currentVersion}`);
-
-    const isUsingBundleUrl = this.context.getIsUsingBundleUrl();
     let bundleFlags =
       bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_REQUESTED_PERMISSION;
     let packageVersion = '';
@@ -56,14 +36,6 @@ export class PushyTurboModule extends TurboModule {
     } catch (error) {
       console.error('Failed to get bundle info:', error);
     }
-    const storedPackageVersion = preferencesManager.getSync(
-      'packageVersion',
-      '',
-    ) as string;
-    const storedBuildTime = preferencesManager.getSync(
-      'buildTime',
-      '',
-    ) as string;
     let buildTime = '';
     try {
       const resourceManager = this.mUiCtx.resourceManager;
@@ -75,23 +47,19 @@ export class PushyTurboModule extends TurboModule {
         buildTime = String(metaData.pushy_build_time);
       }
     } catch {}
+    this.context.syncStateWithBinaryVersion(packageVersion, buildTime);
 
-    const packageVersionChanged =
-      !storedPackageVersion || packageVersion !== storedPackageVersion;
-    const buildTimeChanged = !storedBuildTime || buildTime !== storedBuildTime;
-
-    if (packageVersionChanged || buildTimeChanged) {
-      this.context.cleanUp();
-      preferencesManager.putSync('packageVersion', packageVersion);
-      preferencesManager.putSync('buildTime', buildTime);
-    }
-
-    if (isFirstTime) {
-      preferencesManager.deleteSync('isFirstTime');
-    }
+    const currentVersion = this.context.getCurrentVersion();
+    const currentVersionInfo = currentVersion
+      ? this.context.getKv(`hash_${currentVersion}`)
+      : '';
+    const isFirstTime = this.context.isFirstTime();
+    const rolledBackVersion = this.context.rolledBackVersion();
+    const uuid = this.context.getKv('uuid');
+    const isUsingBundleUrl = this.context.getIsUsingBundleUrl();
 
     if (rolledBackVersion) {
-      preferencesManager.deleteSync('rolledBackVersion');
+      this.context.clearRollbackMark();
     }
 
     return {

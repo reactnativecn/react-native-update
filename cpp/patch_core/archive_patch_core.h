@@ -39,7 +39,8 @@ patch::Status BuildArchivePatchPlan(
     ArchivePatchType type,
     const patch::PatchManifest& manifest,
     const std::vector<std::string>& entry_names,
-    ArchivePatchPlan* out_plan);
+    ArchivePatchPlan* out_plan,
+    const std::string& bundle_patch_entry_name = "index.bundlejs.patch");
 
 patch::Status BuildCopyGroups(
     const patch::PatchManifest& manifest,

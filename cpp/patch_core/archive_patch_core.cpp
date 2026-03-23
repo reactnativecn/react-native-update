@@ -5,8 +5,6 @@ namespace archive_patch {
 namespace {
 
 constexpr const char* kManifestEntryName = "__diff.json";
-constexpr const char* kBundlePatchEntryName = "index.bundlejs.patch";
-
 bool HasEntry(const std::vector<std::string>& entry_names, const std::string& name) {
   for (const std::string& entry_name : entry_names) {
     if (entry_name == name) {
@@ -31,7 +29,8 @@ patch::Status BuildArchivePatchPlan(
     ArchivePatchType type,
     const patch::PatchManifest& manifest,
     const std::vector<std::string>& entry_names,
-    ArchivePatchPlan* out_plan) {
+    ArchivePatchPlan* out_plan,
+    const std::string& bundle_patch_entry_name) {
   if (out_plan == nullptr) {
     return patch::Status::Error("Archive patch plan output is required");
   }
@@ -54,7 +53,7 @@ patch::Status BuildArchivePatchPlan(
       if (!HasEntry(entry_names, kManifestEntryName)) {
         return patch::Status::Error("diff.json not found");
       }
-      if (!HasEntry(entry_names, kBundlePatchEntryName)) {
+      if (!HasEntry(entry_names, bundle_patch_entry_name)) {
         return patch::Status::Error("bundle patch not found");
       }
       out_plan->merge_source_subdir =

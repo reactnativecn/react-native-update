@@ -4,9 +4,13 @@ import common from '@ohos.app.ability.common';
 import { zlib } from '@kit.BasicServicesKit';
 import { EventHub } from './EventHub';
 import { DownloadTaskParams } from './DownloadTaskParams';
-import Pushy from 'librnupdate.so';
 import { saveFileToSandbox } from './SaveFile';
 import { util } from '@kit.ArkTS';
+import NativePatchCore, {
+  ARCHIVE_PATCH_TYPE_FROM_PACKAGE,
+  ARCHIVE_PATCH_TYPE_FROM_PPK,
+  CopyGroupResult,
+} from './NativePatchCore';
 
 interface ZipEntry {
   filename: string;
@@ -16,6 +20,14 @@ interface ZipEntry {
 interface ZipFile {
   entries: ZipEntry[];
 }
+
+interface PatchManifestArrays {
+  copyFroms: string[];
+  copyTos: string[];
+  deletes: string[];
+}
+
+const HARMONY_BUNDLE_PATCH_ENTRY = 'bundle.harmony.js.patch';
 
 export class DownloadTask {
   private context: common.Context;
@@ -136,13 +148,46 @@ export class DownloadTask {
     ) as Record<string, any>;
   }
 
+  private manifestToArrays(
+    manifest: Record<string, any>,
+    normalizeResourceCopies: boolean,
+  ): PatchManifestArrays {
+    const copyFroms: string[] = [];
+    const copyTos: string[] = [];
+    const deletesValue = manifest.deletes;
+    const deletes = Array.isArray(deletesValue)
+      ? deletesValue.map(item => String(item))
+      : deletesValue && typeof deletesValue === 'object'
+        ? Object.keys(deletesValue)
+        : [];
+
+    const copies = (manifest.copies || {}) as Record<string, string>;
+    for (const [to, rawFrom] of Object.entries(copies)) {
+      let from = String(rawFrom || '');
+      if (normalizeResourceCopies) {
+        from = from.replace('resources/rawfile/', '');
+        if (!from) {
+          from = to;
+        }
+      }
+      copyFroms.push(from);
+      copyTos.push(to);
+    }
+
+    return {
+      copyFroms,
+      copyTos,
+      deletes,
+    };
+  }
+
   private async applyBundlePatch(
     originContent: ArrayBuffer | Uint8Array,
     patchContent: ArrayBuffer | Uint8Array,
     outputFile: string,
   ): Promise<void> {
     try {
-      const patched = await Pushy.hdiffPatch(
+      const patched = await NativePatchCore.hdiffPatch(
         this.toUint8Array(originContent),
         this.toUint8Array(patchContent),
       );
@@ -338,134 +383,118 @@ export class DownloadTask {
     await this.downloadFile(params);
     await this.recreateDirectory(params.unzipDirectory);
 
-    let foundDiff = false;
-    let foundBundlePatch = false;
-    const copyList: Map<string, string[]> = new Map();
     await zlib.decompressFile(params.targetFile, params.unzipDirectory);
     const zipFile = await this.processUnzippedFiles(params.unzipDirectory);
+    const entryNames = zipFile.entries.map(entry => entry.filename);
+    let bundlePatchContent: ArrayBuffer | null = null;
+    let manifestArrays: PatchManifestArrays = {
+      copyFroms: [],
+      copyTos: [],
+      deletes: [],
+    };
+
     for (const entry of zipFile.entries) {
       const fn = entry.filename;
 
       if (fn === '__diff.json') {
-        foundDiff = true;
-        const obj = this.parseJsonEntry(entry.content);
-        const copies = obj.copies as Record<string, string>;
-        for (const [to, rawPath] of Object.entries(copies)) {
-          let from = rawPath.replace('resources/rawfile/', '');
-          if (from === '') {
-            from = to;
-          }
-
-          if (!copyList.has(from)) {
-            copyList.set(from, []);
-          }
-
-          const target = copyList.get(from);
-          if (target) {
-            const toFile = `${params.unzipDirectory}/${to}`;
-            target.push(toFile);
-          }
-        }
-        continue;
-      }
-      if (fn === 'bundle.harmony.js.patch') {
-        foundBundlePatch = true;
-        const resourceManager = this.context.resourceManager;
-        const originContent = await resourceManager.getRawFileContent(
-          'bundle.harmony.js',
-        );
-        await this.applyBundlePatch(
-          originContent,
-          entry.content,
-          `${params.unzipDirectory}/bundle.harmony.js`,
+        manifestArrays = this.manifestToArrays(
+          this.parseJsonEntry(entry.content),
+          true,
         );
         continue;
       }
+      if (fn === HARMONY_BUNDLE_PATCH_ENTRY) {
+        bundlePatchContent = entry.content;
+      }
     }
 
-    if (!foundDiff) {
-      throw Error('diff.json not found');
-    }
-    if (!foundBundlePatch) {
+    NativePatchCore.buildArchivePatchPlan(
+      ARCHIVE_PATCH_TYPE_FROM_PACKAGE,
+      entryNames,
+      manifestArrays.copyFroms,
+      manifestArrays.copyTos,
+      manifestArrays.deletes,
+      HARMONY_BUNDLE_PATCH_ENTRY,
+    );
+    if (!bundlePatchContent) {
       throw Error('bundle patch not found');
     }
-    await this.copyFromResource(copyList);
+    const resourceManager = this.context.resourceManager;
+    const originContent = await resourceManager.getRawFileContent(
+      'bundle.harmony.js',
+    );
+    await this.applyBundlePatch(
+      originContent,
+      bundlePatchContent,
+      `${params.unzipDirectory}/bundle.harmony.js`,
+    );
+    await this.copyFromResource(
+      NativePatchCore.buildCopyGroups(
+        manifestArrays.copyFroms,
+        manifestArrays.copyTos,
+      ),
+      params.unzipDirectory,
+    );
   }
 
   private async doPatchFromPpk(params: DownloadTaskParams): Promise<void> {
     await this.downloadFile(params);
     await this.recreateDirectory(params.unzipDirectory);
 
-    let foundDiff = false;
-    let foundBundlePatch = false;
     await zlib.decompressFile(params.targetFile, params.unzipDirectory);
     const zipFile = await this.processUnzippedFiles(params.unzipDirectory);
+    const entryNames = zipFile.entries.map(entry => entry.filename);
+    let manifestArrays: PatchManifestArrays = {
+      copyFroms: [],
+      copyTos: [],
+      deletes: [],
+    };
+
     for (const entry of zipFile.entries) {
-      const fn = entry.filename;
-
-      if (fn === '__diff.json') {
-        foundDiff = true;
-
-        await fileIo.copyDir(
-          `${params.originDirectory}/`,
-          `${params.unzipDirectory}/`,
+      if (entry.filename === '__diff.json') {
+        manifestArrays = this.manifestToArrays(
+          this.parseJsonEntry(entry.content),
+          false,
         );
-
-        const obj = this.parseJsonEntry(entry.content);
-
-        const { copies, deletes } = obj;
-        for (const [to, from] of Object.entries(copies)) {
-          const targetFile = `${params.unzipDirectory}/${to}`;
-          await this.ensureParentDirectory(targetFile);
-          await fileIo.copyFile(
-            `${params.originDirectory}/${from}`,
-            targetFile,
-          );
-        }
-        for (const fileToDelete of Object.keys(deletes)) {
-          const targetFile = `${params.unzipDirectory}/${fileToDelete}`;
-          if (fileIo.accessSync(targetFile)) {
-            await fileIo.unlink(targetFile);
-          }
-        }
-        continue;
-      }
-      if (fn === 'bundle.harmony.js.patch') {
-        foundBundlePatch = true;
-        const bundlePath = `${params.originDirectory}/bundle.harmony.js`;
-        if (!fileIo.accessSync(bundlePath)) {
-          throw Error(`Origin bundle not found: ${bundlePath}`);
-        }
-        const originContent = await this.readFileContent(bundlePath);
-        await this.applyBundlePatch(
-          originContent,
-          entry.content,
-          `${params.unzipDirectory}/bundle.harmony.js`,
-        );
-        continue;
       }
     }
 
-    if (!foundDiff) {
-      throw Error('diff.json not found');
-    }
-    if (!foundBundlePatch) {
-      throw Error('bundle patch not found');
-    }
+    const plan = NativePatchCore.buildArchivePatchPlan(
+      ARCHIVE_PATCH_TYPE_FROM_PPK,
+      entryNames,
+      manifestArrays.copyFroms,
+      manifestArrays.copyTos,
+      manifestArrays.deletes,
+      HARMONY_BUNDLE_PATCH_ENTRY,
+    );
+    NativePatchCore.applyPatchFromFileSource({
+      copyFroms: manifestArrays.copyFroms,
+      copyTos: manifestArrays.copyTos,
+      deletes: manifestArrays.deletes,
+      sourceRoot: params.originDirectory,
+      targetRoot: params.unzipDirectory,
+      originBundlePath: `${params.originDirectory}/bundle.harmony.js`,
+      bundlePatchPath: `${params.unzipDirectory}/${HARMONY_BUNDLE_PATCH_ENTRY}`,
+      bundleOutputPath: `${params.unzipDirectory}/bundle.harmony.js`,
+      mergeSourceSubdir: plan.mergeSourceSubdir,
+      enableMerge: plan.enableMerge,
+    });
     console.info('Patch from PPK completed');
   }
 
   private async copyFromResource(
-    copyList: Map<string, Array<string>>,
+    copyGroups: CopyGroupResult[],
+    targetRoot: string,
   ): Promise<void> {
     let currentFrom = '';
     try {
       const resourceManager = this.context.resourceManager;
 
-      for (const [from, targets] of copyList.entries()) {
-        currentFrom = from;
-        if (from.startsWith('resources/base/media/')) {
-          const mediaName = from
+      for (const group of copyGroups) {
+        currentFrom = group.from;
+        const targets = group.toPaths.map(path => `${targetRoot}/${path}`);
+        if (currentFrom.startsWith('resources/base/media/')) {
+          const mediaName = currentFrom
             .replace('resources/base/media/', '')
             .split('.')[0];
           const mediaBuffer = await resourceManager.getMediaByName(mediaName);
@@ -477,7 +506,7 @@ export class DownloadTask {
           }
           continue;
         }
-        const fromContent = await resourceManager.getRawFd(from);
+        const fromContent = await resourceManager.getRawFd(currentFrom);
         for (const target of targets) {
           await this.ensureParentDirectory(target);
           saveFileToSandbox(fromContent, target);
@@ -497,32 +526,13 @@ export class DownloadTask {
   }
 
   private async doCleanUp(params: DownloadTaskParams): Promise<void> {
-    const DAYS_TO_KEEP = 7;
-    const now = Date.now();
-    const maxAge = DAYS_TO_KEEP * 24 * 60 * 60 * 1000;
-
     try {
-      const files = await fileIo.listFile(params.unzipDirectory);
-      for (const file of files) {
-        if (file.startsWith('.')) {
-          continue;
-        }
-
-        const filePath = `${params.unzipDirectory}/${file}`;
-        const stat = await fileIo.stat(filePath);
-
-        if (
-          now - stat.mtime > maxAge &&
-          file !== params.hash &&
-          file !== params.originHash
-        ) {
-          if (stat.isDirectory()) {
-            await this.removeDirectory(filePath);
-          } else {
-            await fileIo.unlink(filePath);
-          }
-        }
-      }
+      NativePatchCore.cleanupOldEntries(
+        params.unzipDirectory,
+        params.hash || '',
+        params.originHash || '',
+        7,
+      );
     } catch (error) {
       error.message = 'Cleanup failed:' + error.message;
       console.error(error);

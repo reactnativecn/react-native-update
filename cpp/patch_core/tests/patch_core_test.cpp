@@ -426,6 +426,22 @@ void TestArchivePatchCoreRejectsMissingEntries() {
       "manifest entry should be skipped");
 }
 
+void TestArchivePatchCoreSupportsCustomBundlePatchEntry() {
+  PatchManifest manifest;
+  manifest.copies.push_back(CopyOperation{"assets/a.png", "assets/a.png"});
+
+  pushy::archive_patch::ArchivePatchPlan plan;
+  Status status = pushy::archive_patch::BuildArchivePatchPlan(
+      pushy::archive_patch::ArchivePatchType::kPatchFromPpk,
+      manifest,
+      {"__diff.json", "bundle.harmony.js.patch"},
+      &plan,
+      "bundle.harmony.js.patch");
+  Expect(status.ok, status.message);
+  Expect(plan.enable_merge, "custom bundle patch plan should enable merge");
+  ExpectEq(plan.merge_source_subdir, "", "custom bundle patch merge subdir mismatch");
+}
+
 }  // namespace
 
 int main() {
@@ -440,6 +456,7 @@ int main() {
       {"StateCoreCanClearMarkers", TestStateCoreCanClearMarkers},
       {"ArchivePatchCoreBuildPlanAndCopyGroups", TestArchivePatchCoreBuildPlanAndCopyGroups},
       {"ArchivePatchCoreRejectsMissingEntries", TestArchivePatchCoreRejectsMissingEntries},
+      {"ArchivePatchCoreSupportsCustomBundlePatchEntry", TestArchivePatchCoreSupportsCustomBundlePatchEntry},
   };
 
   for (const auto& test : tests) {
