@@ -49,6 +49,8 @@ class BundlePatcher {
 
 const BundlePatcher& DefaultBundlePatcher();
 
+Status ValidateManifest(const PatchManifest& manifest);
+
 Status ApplyPatchFromFileSource(
     const FileSourcePatchOptions& options,
     const BundlePatcher& bundle_patcher = DefaultBundlePatcher());

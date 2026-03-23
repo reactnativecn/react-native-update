@@ -26,7 +26,9 @@ c++ \
   -Wextra \
   $COMMON_INCLUDES \
   "$ROOT_DIR/cpp/patch_core/tests/patch_core_test.cpp" \
+  "$ROOT_DIR/cpp/patch_core/archive_patch_core.cpp" \
   "$ROOT_DIR/cpp/patch_core/patch_core.cpp" \
+  "$ROOT_DIR/cpp/patch_core/state_core.cpp" \
   "$BUILD_DIR/hpatch.o" \
   "$BUILD_DIR/patch.o" \
   "$BUILD_DIR/file_for_patch.o" \

@@ -1,4 +1,6 @@
+#include "../archive_patch_core.h"
 #include "../patch_core.h"
+#include "../state_core.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -22,6 +24,10 @@ using pushy::patch::CopyOperation;
 using pushy::patch::FileSourcePatchOptions;
 using pushy::patch::PatchManifest;
 using pushy::patch::Status;
+using pushy::state::BinaryVersionSyncResult;
+using pushy::state::LaunchDecision;
+using pushy::state::MarkSuccessResult;
+using pushy::state::State;
 
 void EnsureDirectory(const std::string& path);
 
@@ -255,6 +261,171 @@ void TestCleanupOldEntriesRemovesOnlyExpiredPaths() {
   Expect(Exists(JoinPath(root, ".hidden")), "hidden entry should be kept");
 }
 
+void TestStateCoreSyncBinaryVersionResetsUpdates() {
+  State state;
+  state.package_version = "1.0.0";
+  state.build_time = "100";
+  state.current_version = "current";
+  state.last_version = "last";
+  state.first_time = true;
+  state.first_time_ok = false;
+  state.rolled_back_version = "rolled";
+
+  BinaryVersionSyncResult result =
+      pushy::state::SyncBinaryVersion(state, "1.1.0", "200");
+  Expect(result.changed, "binary version sync should detect changes");
+  ExpectEq(result.state.package_version, "1.1.0", "package version mismatch");
+  ExpectEq(result.state.build_time, "200", "build time mismatch");
+  Expect(result.state.current_version.empty(), "current version should reset");
+  Expect(result.state.last_version.empty(), "last version should reset");
+  Expect(!result.state.first_time, "first_time should reset");
+  Expect(result.state.first_time_ok, "first_time_ok should reset");
+  Expect(result.state.rolled_back_version.empty(), "rolled_back_version should reset");
+}
+
+void TestStateCoreSwitchVersionAndMarkSuccess() {
+  State state;
+  state.package_version = "1.0.0";
+  state.build_time = "100";
+  state.current_version = "old";
+  state.last_version = "older";
+  state.first_time_ok = true;
+
+  State switched = pushy::state::SwitchVersion(state, "new");
+  ExpectEq(switched.current_version, "new", "current version mismatch");
+  ExpectEq(switched.last_version, "old", "last version mismatch");
+  Expect(switched.first_time, "first_time should be set");
+  Expect(!switched.first_time_ok, "first_time_ok should be false");
+
+  MarkSuccessResult success = pushy::state::MarkSuccess(switched);
+  ExpectEq(success.state.current_version, "new", "markSuccess current version mismatch");
+  Expect(success.state.last_version.empty(), "last version should be cleared");
+  ExpectEq(success.stale_version_to_delete, "old", "stale version mismatch");
+  Expect(!success.state.first_time, "first_time should clear after success");
+  Expect(success.state.first_time_ok, "first_time_ok should be true after success");
+}
+
+void TestStateCoreResolveLaunchStateAndRollback() {
+  State state;
+  state.current_version = "current";
+  state.last_version = "previous";
+  state.first_time = false;
+  state.first_time_ok = false;
+
+  LaunchDecision rollback =
+      pushy::state::ResolveLaunchState(state, false, true);
+  Expect(rollback.did_rollback, "launch decision should roll back");
+  ExpectEq(rollback.load_version, "previous", "rollback load version mismatch");
+  ExpectEq(rollback.state.current_version, "previous", "rollback current version mismatch");
+  ExpectEq(rollback.state.rolled_back_version, "current", "rolled back version mismatch");
+
+  State first_load;
+  first_load.current_version = "fresh";
+  first_load.first_time = true;
+  first_load.first_time_ok = false;
+  LaunchDecision consume =
+      pushy::state::ResolveLaunchState(first_load, false, true);
+  Expect(!consume.did_rollback, "first load should not roll back");
+  Expect(consume.consumed_first_time, "first load should be consumed");
+  ExpectEq(consume.load_version, "fresh", "first load version mismatch");
+  Expect(!consume.state.first_time, "first_time should clear when consumed");
+
+  LaunchDecision preserve =
+      pushy::state::ResolveLaunchState(first_load, false, false);
+  Expect(!preserve.consumed_first_time, "first load should not be consumed when disabled");
+  Expect(preserve.state.first_time, "first_time should be preserved when not consumed");
+}
+
+void TestStateCoreCanClearMarkers() {
+  State state;
+  state.current_version = "current";
+  state.first_time = true;
+  state.rolled_back_version = "rolled";
+
+  State clear_first_time = pushy::state::ClearFirstTime(state);
+  Expect(!clear_first_time.first_time, "clearFirstTime should clear first_time");
+  ExpectEq(
+      clear_first_time.rolled_back_version,
+      "rolled",
+      "clearFirstTime should preserve rollback marker");
+
+  State clear_rollback = pushy::state::ClearRollbackMark(state);
+  Expect(
+      clear_rollback.rolled_back_version.empty(),
+      "clearRollbackMark should clear rollback marker");
+  Expect(clear_rollback.first_time, "clearRollbackMark should preserve first_time");
+}
+
+void TestArchivePatchCoreBuildPlanAndCopyGroups() {
+  PatchManifest manifest;
+  manifest.copies.push_back(CopyOperation{"assets/a.png", "assets/x.png"});
+  manifest.copies.push_back(CopyOperation{"assets/a.png", "assets/y.png"});
+  manifest.deletes.push_back("assets/old.png");
+
+  pushy::archive_patch::ArchivePatchPlan plan;
+  Status status = pushy::archive_patch::BuildArchivePatchPlan(
+      pushy::archive_patch::ArchivePatchType::kPatchFromPpk,
+      manifest,
+      {"__diff.json", "index.bundlejs.patch", "assets/new.png"},
+      &plan);
+  Expect(status.ok, status.message);
+  Expect(plan.enable_merge, "ppk plan should enable merge");
+  ExpectEq(plan.merge_source_subdir, "", "ppk merge subdir mismatch");
+
+  std::vector<pushy::archive_patch::CopyGroup> groups;
+  status = pushy::archive_patch::BuildCopyGroups(manifest, &groups);
+  Expect(status.ok, status.message);
+  Expect(groups.size() == 1, "copy groups should merge identical sources");
+  ExpectEq(groups[0].from, "assets/a.png", "copy group source mismatch");
+  Expect(groups[0].to_paths.size() == 2, "copy group target count mismatch");
+
+  FileSourcePatchOptions options;
+  status = pushy::archive_patch::BuildFileSourcePatchOptions(
+      plan,
+      "/tmp/source",
+      "/tmp/target",
+      "/tmp/source/index.bundlejs",
+      "/tmp/target/index.bundlejs.patch",
+      "/tmp/target/index.bundlejs",
+      &options);
+  Expect(status.ok, status.message);
+  ExpectEq(options.source_root, "/tmp/source", "file source root mismatch");
+  ExpectEq(options.target_root, "/tmp/target", "file target root mismatch");
+  ExpectEq(options.merge_source_subdir, "", "file patch merge subdir mismatch");
+}
+
+void TestArchivePatchCoreRejectsMissingEntries() {
+  PatchManifest manifest;
+  Status status = pushy::archive_patch::BuildArchivePatchPlan(
+      pushy::archive_patch::ArchivePatchType::kPatchFromPackage,
+      manifest,
+      {"index.bundlejs.patch"},
+      nullptr);
+  Expect(!status.ok, "null output plan should fail");
+
+  pushy::archive_patch::ArchivePatchPlan plan;
+  status = pushy::archive_patch::BuildArchivePatchPlan(
+      pushy::archive_patch::ArchivePatchType::kPatchFromPackage,
+      manifest,
+      {"__diff.json"},
+      &plan);
+  Expect(!status.ok, "missing bundle patch should fail");
+
+  status = pushy::archive_patch::BuildArchivePatchPlan(
+      pushy::archive_patch::ArchivePatchType::kPatchFromPackage,
+      manifest,
+      {"__diff.json", "index.bundlejs.patch"},
+      &plan);
+  Expect(status.ok, status.message);
+  ExpectEq(plan.merge_source_subdir, "assets", "package merge subdir mismatch");
+  Expect(plan.enable_merge, "package plan should enable merge");
+  Expect(
+      pushy::archive_patch::ClassifyEntry(
+          pushy::archive_patch::ArchivePatchType::kPatchFromPackage,
+          "__diff.json") == pushy::archive_patch::EntryAction::kSkip,
+      "manifest entry should be skipped");
+}
+
 }  // namespace
 
 int main() {
@@ -263,6 +434,12 @@ int main() {
       {"ApplyPatchFromFileSourceCanLimitMergeSubdir", TestApplyPatchFromFileSourceCanLimitMergeSubdir},
       {"ApplyPatchFromFileSourceRejectsUnsafePaths", TestApplyPatchFromFileSourceRejectsUnsafePaths},
       {"CleanupOldEntriesRemovesOnlyExpiredPaths", TestCleanupOldEntriesRemovesOnlyExpiredPaths},
+      {"StateCoreSyncBinaryVersionResetsUpdates", TestStateCoreSyncBinaryVersionResetsUpdates},
+      {"StateCoreSwitchVersionAndMarkSuccess", TestStateCoreSwitchVersionAndMarkSuccess},
+      {"StateCoreResolveLaunchStateAndRollback", TestStateCoreResolveLaunchStateAndRollback},
+      {"StateCoreCanClearMarkers", TestStateCoreCanClearMarkers},
+      {"ArchivePatchCoreBuildPlanAndCopyGroups", TestArchivePatchCoreBuildPlanAndCopyGroups},
+      {"ArchivePatchCoreRejectsMissingEntries", TestArchivePatchCoreRejectsMissingEntries},
   };
 
   for (const auto& test : tests) {

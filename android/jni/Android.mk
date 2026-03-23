@@ -21,8 +21,11 @@ Hdp_Files := \
 
 LOCAL_SRC_FILES := \
 	DownloadTask.c \
+	../../cpp/patch_core/archive_patch_core.cpp \
 	../../cpp/patch_core/patch_core.cpp \
 	../../cpp/patch_core/patch_core_android.cpp \
+	../../cpp/patch_core/state_core.cpp \
+	../../cpp/patch_core/update_core_android.cpp \
 	$(Hdp_Files)
 
 include $(BUILD_SHARED_LIBRARY)

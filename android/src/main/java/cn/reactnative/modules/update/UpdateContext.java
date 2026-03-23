@@ -15,6 +15,10 @@ import java.util.concurrent.Executors;
 import java.io.File;
 
 public class UpdateContext {
+    static {
+        NativeUpdateCore.ensureLoaded();
+    }
+
     private Context context;
     private File rootDir;
     private Executor executor;
@@ -22,10 +26,30 @@ public class UpdateContext {
     public static boolean DEBUG = true;
     private static ReactInstanceManager mReactInstanceManager;
     private static boolean isUsingBundleUrl = false;
+    private static final int STATE_OP_SWITCH_VERSION = 1;
+    private static final int STATE_OP_MARK_SUCCESS = 2;
+    private static final int STATE_OP_ROLLBACK = 3;
+    private static final int STATE_OP_CLEAR_FIRST_TIME = 4;
+    private static final int STATE_OP_CLEAR_ROLLBACK_MARK = 5;
+    private static final int STATE_OP_RESOLVE_LAUNCH = 6;
     
     // Singleton instance
     private static UpdateContext sInstance;
     private static final Object sLock = new Object();
+
+    private static native StateCoreResult syncStateWithBinaryVersion(
+        String packageVersion,
+        String buildTime,
+        StateCoreResult state
+    );
+
+    private static native StateCoreResult runStateCore(
+        int operation,
+        StateCoreResult state,
+        String stringArg,
+        boolean flagA,
+        boolean flagB
+    );
 
     public UpdateContext(Context context) {
         this.context = context;
@@ -41,21 +65,18 @@ public class UpdateContext {
 
         String packageVersion = getPackageVersion();
         String buildTime = getBuildTime();
-        String storedPackageVersion = this.sp.getString("packageVersion", null);
-        String storedBuildTime = this.sp.getString("buildTime", null);
-        
+        StateCoreResult nextState = syncStateWithBinaryVersion(
+            packageVersion,
+            buildTime,
+            getStateSnapshot()
+        );
 
-        SharedPreferences.Editor editor = this.sp.edit();
-        
-        boolean packageVersionChanged = storedPackageVersion == null || !packageVersion.equals(storedPackageVersion);
-        boolean buildTimeChanged = storedBuildTime == null || !buildTime.equals(storedBuildTime);
-        
-        if (packageVersionChanged || buildTimeChanged) {
+        if (nextState.changed) {
             // Execute cleanUp before clearing SharedPreferences to avoid race condition
             this.cleanUp();
+            SharedPreferences.Editor editor = this.sp.edit();
             editor.clear();
-            editor.putString("packageVersion", packageVersion);
-            editor.putString("buildTime", buildTime);
+            applyState(editor, nextState);
             editor.apply();
         }
     }
@@ -144,19 +165,55 @@ public class UpdateContext {
 
     private SharedPreferences sp;
 
+    private StateCoreResult getStateSnapshot() {
+        StateCoreResult state = new StateCoreResult();
+        state.packageVersion = sp.getString("packageVersion", null);
+        state.buildTime = sp.getString("buildTime", null);
+        state.currentVersion = sp.getString("currentVersion", null);
+        state.lastVersion = sp.getString("lastVersion", null);
+        state.firstTime = sp.getBoolean("firstTime", false);
+        state.firstTimeOk = sp.getBoolean("firstTimeOk", true);
+        state.rolledBackVersion = sp.getString("rolledBackVersion", null);
+        return state;
+    }
+
+    private static void putNullableString(
+        SharedPreferences.Editor editor,
+        String key,
+        String value
+    ) {
+        if (value == null) {
+            editor.remove(key);
+        } else {
+            editor.putString(key, value);
+        }
+    }
+
+    private void applyState(SharedPreferences.Editor editor, StateCoreResult state) {
+        putNullableString(editor, "packageVersion", state.packageVersion);
+        putNullableString(editor, "buildTime", state.buildTime);
+        putNullableString(editor, "currentVersion", state.currentVersion);
+        putNullableString(editor, "lastVersion", state.lastVersion);
+        editor.putBoolean("firstTime", state.firstTime);
+        editor.putBoolean("firstTimeOk", state.firstTimeOk);
+        putNullableString(editor, "rolledBackVersion", state.rolledBackVersion);
+    }
+
     public void switchVersion(String hash) {
         if (!new File(rootDir, hash+"/index.bundlejs").exists()) {
             throw new Error("Bundle version " + hash + " not found.");
         }
-        String lastVersion = getCurrentVersion();
+        StateCoreResult currentState = getStateSnapshot();
+        StateCoreResult nextState = runStateCore(
+            STATE_OP_SWITCH_VERSION,
+            currentState,
+            hash
+            ,
+            false,
+            false
+        );
         SharedPreferences.Editor editor = sp.edit();
-        editor.putString("currentVersion", hash);
-        if (lastVersion != null && !lastVersion.equals(hash)) {
-            editor.putString("lastVersion", lastVersion);
-        }
-        editor.putBoolean("firstTime", true);
-        editor.putBoolean("firstTimeOk", false);
-        editor.putString("rolledBackVersion", null);
+        applyState(editor, nextState);
         editor.apply();
     }
 
@@ -184,13 +241,18 @@ public class UpdateContext {
 
     public void markSuccess() {
         if (!BuildConfig.DEBUG) {
+            StateCoreResult currentState = getStateSnapshot();
+            StateCoreResult nextState = runStateCore(
+                STATE_OP_MARK_SUCCESS,
+                currentState,
+                null,
+                false,
+                false
+            );
             SharedPreferences.Editor editor = sp.edit();
-            editor.putBoolean("firstTimeOk", true);
-            String lastVersion = sp.getString("lastVersion", null);
-            String curVersion = sp.getString("currentVersion", null);
-            if (lastVersion != null && !lastVersion.equals(curVersion)) {
-                editor.remove("lastVersion");
-                editor.remove("hash_" + lastVersion);
+            applyState(editor, nextState);
+            if (nextState.staleVersionToDelete != null) {
+                editor.remove("hash_" + nextState.staleVersionToDelete);
             }
             editor.apply();
 
@@ -199,16 +261,32 @@ public class UpdateContext {
     }
 
     public void clearFirstTime() {
+        StateCoreResult currentState = getStateSnapshot();
+        StateCoreResult nextState = runStateCore(
+            STATE_OP_CLEAR_FIRST_TIME,
+            currentState,
+            null,
+            false,
+            false
+        );
         SharedPreferences.Editor editor = sp.edit();
-        editor.putBoolean("firstTime", false);
+        applyState(editor, nextState);
         editor.apply();
 
         this.cleanUp();
     }
 
     public void clearRollbackMark() {
+        StateCoreResult currentState = getStateSnapshot();
+        StateCoreResult nextState = runStateCore(
+            STATE_OP_CLEAR_ROLLBACK_MARK,
+            currentState,
+            null,
+            false,
+            false
+        );
         SharedPreferences.Editor editor = sp.edit();
-        editor.putString("rolledBackVersion", null);
+        applyState(editor, nextState);
         editor.apply();
 
         this.cleanUp();
@@ -251,16 +329,23 @@ public class UpdateContext {
 
     public String getBundleUrl(String defaultAssetsUrl) {
         isUsingBundleUrl = true;
-        String currentVersion = getCurrentVersion();
+        StateCoreResult currentState = getStateSnapshot();
+        StateCoreResult launchState = runStateCore(
+            STATE_OP_RESOLVE_LAUNCH,
+            currentState,
+            null,
+            false,
+            false
+        );
+        if (launchState.didRollback || launchState.consumedFirstTime) {
+            SharedPreferences.Editor editor = sp.edit();
+            applyState(editor, launchState);
+            editor.apply();
+        }
+
+        String currentVersion = launchState.loadVersion;
         if (currentVersion == null) {
             return defaultAssetsUrl;
-        }
-        // Test should rollback.
-        if (!sp.getBoolean("firstTime", false)) {
-            if (!sp.getBoolean("firstTimeOk", true)) {
-                // Not firstTime, but not ok, so we roll back.
-                currentVersion = this.rollBack();
-            }
         }
 
         while (currentVersion != null) {
@@ -277,20 +362,18 @@ public class UpdateContext {
     }
 
     private String rollBack() {
-        String lastVersion = sp.getString("lastVersion", null);
-        String currentVersion = sp.getString("currentVersion", null);
+        StateCoreResult currentState = getStateSnapshot();
+        StateCoreResult nextState = runStateCore(
+            STATE_OP_ROLLBACK,
+            currentState,
+            null,
+            false,
+            false
+        );
         SharedPreferences.Editor editor = sp.edit();
-        if (lastVersion == null) {
-            editor.remove("currentVersion");
-        } else {
-            editor.remove("lastVersion");
-            editor.putString("currentVersion", lastVersion);
-        }
-        editor.putBoolean("firstTimeOk", true);
-        editor.putBoolean("firstTime", false);
-        editor.putString("rolledBackVersion", currentVersion);
+        applyState(editor, nextState);
         editor.apply();
-        return lastVersion;
+        return nextState.currentVersion;
     }
 
     private void cleanUp() {

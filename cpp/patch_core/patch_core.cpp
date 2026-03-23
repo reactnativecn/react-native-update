@@ -272,7 +272,7 @@ class DeleteMatcher {
   std::vector<DeleteRule> rules_;
 };
 
-Status ValidateManifest(const PatchManifest& manifest) {
+Status ValidateManifestImpl(const PatchManifest& manifest) {
   for (const CopyOperation& copy : manifest.copies) {
     if (!IsSafeRelativePath(copy.from)) {
       return Status::Error("Unsafe copy source path: " + copy.from);
@@ -361,6 +361,10 @@ Status Status::Ok() {
 
 Status Status::Error(const std::string& message) {
   return Status{false, message};
+}
+
+Status ValidateManifest(const PatchManifest& manifest) {
+  return ValidateManifestImpl(manifest);
 }
 
 const BundlePatcher& DefaultBundlePatcher() {
