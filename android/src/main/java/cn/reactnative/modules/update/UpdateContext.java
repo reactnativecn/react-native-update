@@ -26,12 +26,14 @@ public class UpdateContext {
     public static boolean DEBUG = true;
     private static ReactInstanceManager mReactInstanceManager;
     private static boolean isUsingBundleUrl = false;
+    private static boolean ignoreRollback = false;
     private static final int STATE_OP_SWITCH_VERSION = 1;
     private static final int STATE_OP_MARK_SUCCESS = 2;
     private static final int STATE_OP_ROLLBACK = 3;
     private static final int STATE_OP_CLEAR_FIRST_TIME = 4;
     private static final int STATE_OP_CLEAR_ROLLBACK_MARK = 5;
     private static final int STATE_OP_RESOLVE_LAUNCH = 6;
+    private static final String KEY_FIRST_LOAD_MARKED = "firstLoadMarked";
     
     // Singleton instance
     private static UpdateContext sInstance;
@@ -77,7 +79,7 @@ public class UpdateContext {
             SharedPreferences.Editor editor = this.sp.edit();
             editor.clear();
             applyState(editor, nextState);
-            editor.apply();
+            persistEditor(editor, "sync state with binary version");
         }
     }
 
@@ -199,6 +201,12 @@ public class UpdateContext {
         putNullableString(editor, "rolledBackVersion", state.rolledBackVersion);
     }
 
+    private void persistEditor(SharedPreferences.Editor editor, String reason) {
+        if (!editor.commit() && DEBUG) {
+            Log.w("react-native-update", "Failed to persist update state for " + reason);
+        }
+    }
+
     public void switchVersion(String hash) {
         if (!new File(rootDir, hash+"/index.bundlejs").exists()) {
             throw new Error("Bundle version " + hash + " not found.");
@@ -214,13 +222,14 @@ public class UpdateContext {
         );
         SharedPreferences.Editor editor = sp.edit();
         applyState(editor, nextState);
-        editor.apply();
+        persistEditor(editor, "switch version");
+        ignoreRollback = false;
     }
 
     public void setKv(String key, String value) {
         SharedPreferences.Editor editor = sp.edit();
         editor.putString(key, value);
-        editor.apply();
+        persistEditor(editor, "set key " + key);
     }
 
     public String getKv(String key) {
@@ -233,6 +242,16 @@ public class UpdateContext {
 
     public boolean isFirstTime() {
         return sp.getBoolean("firstTime", false);
+    }
+
+    public boolean consumeFirstLoadMarker() {
+        boolean isFirstLoadMarked = sp.getBoolean(KEY_FIRST_LOAD_MARKED, false);
+        if (isFirstLoadMarked) {
+            SharedPreferences.Editor editor = sp.edit();
+            editor.remove(KEY_FIRST_LOAD_MARKED);
+            persistEditor(editor, "clear first load marker");
+        }
+        return isFirstLoadMarked;
     }
 
     public String rolledBackVersion() {
@@ -254,7 +273,7 @@ public class UpdateContext {
             if (nextState.staleVersionToDelete != null) {
                 editor.remove("hash_" + nextState.staleVersionToDelete);
             }
-            editor.apply();
+            persistEditor(editor, "mark success");
 
             this.cleanUp();
         }
@@ -271,7 +290,8 @@ public class UpdateContext {
         );
         SharedPreferences.Editor editor = sp.edit();
         applyState(editor, nextState);
-        editor.apply();
+        editor.remove(KEY_FIRST_LOAD_MARKED);
+        persistEditor(editor, "clear first time");
 
         this.cleanUp();
     }
@@ -287,7 +307,7 @@ public class UpdateContext {
         );
         SharedPreferences.Editor editor = sp.edit();
         applyState(editor, nextState);
-        editor.apply();
+        persistEditor(editor, "clear rollback mark");
 
         this.cleanUp();
     }
@@ -334,13 +354,20 @@ public class UpdateContext {
             STATE_OP_RESOLVE_LAUNCH,
             currentState,
             null,
-            false,
-            false
+            ignoreRollback,
+            true
         );
         if (launchState.didRollback || launchState.consumedFirstTime) {
             SharedPreferences.Editor editor = sp.edit();
             applyState(editor, launchState);
-            editor.apply();
+            if (launchState.consumedFirstTime) {
+                editor.putBoolean(KEY_FIRST_LOAD_MARKED, true);
+            }
+            persistEditor(editor, "resolve launch");
+        }
+        if (launchState.consumedFirstTime) {
+            // bundleURL may be resolved multiple times in one process.
+            ignoreRollback = true;
         }
 
         String currentVersion = launchState.loadVersion;
@@ -372,7 +399,7 @@ public class UpdateContext {
         );
         SharedPreferences.Editor editor = sp.edit();
         applyState(editor, nextState);
-        editor.apply();
+        persistEditor(editor, "rollback");
         return nextState.currentVersion;
     }
 
