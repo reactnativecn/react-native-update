@@ -110,6 +110,9 @@ Pod::Spec.new do |s|
 
   s.subspec 'RCTPushy' do |ss|
     ss.source_files = ['ios/**/*.{h,m,mm,c}',
+                       'cpp/patch_core/archive_patch_core.{h,cpp}',
+                       'cpp/patch_core/patch_core.{h,cpp}',
+                       'cpp/patch_core/state_core.{h,cpp}',
                        'android/jni/hpatch.{h,c}',
                        'android/jni/HDiffPatch/libHDiffPatch/HPatch/*.{h,c}',
                        'android/jni/HDiffPatch/file_for_patch.{h,c}',

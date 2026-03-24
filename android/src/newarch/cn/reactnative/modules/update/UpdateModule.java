@@ -4,8 +4,6 @@ import static androidx.core.content.FileProvider.getUriForFile;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
-import android.os.Handler;
-import android.os.Looper;
 import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContext;
@@ -19,7 +17,6 @@ import java.util.Map;
 public class UpdateModule extends NativePushySpec {
     UpdateContext updateContext;
     public static ReactApplicationContext mContext;
-    private final Handler handler = new Handler(Looper.getMainLooper());
     public UpdateModule(ReactApplicationContext reactContext, UpdateContext updateContext) {
         super(reactContext);
         this.updateContext = updateContext;
@@ -40,25 +37,12 @@ public class UpdateModule extends NativePushySpec {
         constants.put("currentVersionInfo", updateContext.getKv("hash_" + currentVersion));
         constants.put("buildTime", updateContext.getBuildTime());
         constants.put("isUsingBundleUrl", updateContext.getIsUsingBundleUrl());
-        boolean isFirstTime = updateContext.isFirstTime();
+        boolean isFirstTime = updateContext.consumeFirstLoadMarker();
         constants.put("isFirstTime", isFirstTime);
-        if (isFirstTime) {
-            handler.postDelayed(new Runnable() {
-                @Override
-                public void run() {
-                    updateContext.clearFirstTime();
-                }
-            }, 2000);
-        }
         String rolledBackVersion = updateContext.rolledBackVersion();
         constants.put("rolledBackVersion", rolledBackVersion);
         if (rolledBackVersion != null) {
-            handler.postDelayed(new Runnable() {
-                @Override
-                public void run() {
-                    updateContext.clearRollbackMark();
-                }
-            }, 2000);
+            updateContext.clearRollbackMark();
         }
         constants.put("uuid", updateContext.getKv("uuid"));
         return constants;

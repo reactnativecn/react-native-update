@@ -53,11 +53,8 @@ public class UpdateModule extends ReactContextBaseJavaModule {
         constants.put("currentVersionInfo", updateContext.getKv("hash_" + currentVersion));
         constants.put("buildTime", updateContext.getBuildTime());
         constants.put("isUsingBundleUrl", updateContext.getIsUsingBundleUrl());
-        boolean isFirstTime = updateContext.isFirstTime();
+        boolean isFirstTime = updateContext.consumeFirstLoadMarker();
         constants.put("isFirstTime", isFirstTime);
-        if (isFirstTime) {
-            updateContext.clearFirstTime();
-        }
         String rolledBackVersion = updateContext.rolledBackVersion();
         constants.put("rolledBackVersion", rolledBackVersion);
         if (rolledBackVersion != null) {

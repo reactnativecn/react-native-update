@@ -6,6 +6,7 @@ const { spawnSync } = require('child_process');
 
 const projectRoot = path.resolve(__dirname, '..');
 const androidJniDir = path.join(projectRoot, 'android', 'jni');
+const patchCoreDir = path.join(projectRoot, 'cpp', 'patch_core');
 const harmonyModuleDir = path.join(projectRoot, 'harmony', 'pushy');
 const harmonyBuildDir = path.join(harmonyModuleDir, 'build');
 const harmonyNativeStageDir = path.join(
@@ -16,6 +17,10 @@ const harmonyNativeStageDir = path.join(
   'android-generated',
 );
 const harmonyNativeStageJniDir = path.join(harmonyNativeStageDir, 'jni');
+const harmonyNativeStagePatchCoreDir = path.join(
+  harmonyNativeStageDir,
+  'patch_core',
+);
 const wrapperProjectDir = path.join(projectRoot, 'harmony', 'har-wrapper');
 const defaultOutputPath = path.join(projectRoot, 'harmony', 'pushy.har');
 const wrapperProjectFiles = [
@@ -197,6 +202,12 @@ function syncHarmonyNativeSources() {
       path.join(androidJniDir, 'lzma', 'C'),
     )}`,
   );
+  ensureFileExists(
+    path.join(patchCoreDir, 'patch_core.cpp'),
+    `Missing shared patch core source: ${relativeToProject(
+      path.join(patchCoreDir, 'patch_core.cpp'),
+    )}`,
+  );
 
   fs.rmSync(harmonyNativeStageDir, { recursive: true, force: true });
   fs.mkdirSync(path.join(harmonyNativeStageJniDir, 'lzma'), {
@@ -219,6 +230,7 @@ function syncHarmonyNativeSources() {
     path.join(androidJniDir, 'lzma', 'C'),
     path.join(harmonyNativeStageJniDir, 'lzma', 'C'),
   );
+  copyPath(patchCoreDir, harmonyNativeStagePatchCoreDir);
 }
 
 function cleanupHarmonyNativeSources() {

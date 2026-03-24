@@ -98,11 +98,57 @@ async function modifyPackageJson({
   console.log('package.json has been modified for publishing');
 }
 
+function isGitHubCI(): boolean {
+  return process.env.GITHUB_ACTIONS === 'true';
+}
+
+function shouldSkipNativeBuild(): boolean {
+  return process.argv.includes('--skip') || process.env.SKIP_NATIVE_BUILD === '1';
+}
+
+async function buildNativeArtifacts(): Promise<void> {
+  console.log('Building Harmony HAR...');
+  const harResult = Bun.spawnSync(['npm', 'run', 'build:harmony-har'], {
+    cwd: path.join(__dirname, '..'),
+    stdio: ['inherit', 'inherit', 'inherit'],
+  });
+  if (harResult.exitCode !== 0) {
+    throw new Error(
+      `Harmony HAR build failed with exit code ${harResult.exitCode}`,
+    );
+  }
+
+  console.log('Building Android SO...');
+  const soResult = Bun.spawnSync(['npm', 'run', 'build:so'], {
+    cwd: path.join(__dirname, '..'),
+    stdio: ['inherit', 'inherit', 'inherit'],
+  });
+  if (soResult.exitCode !== 0) {
+    throw new Error(
+      `Android SO build failed with exit code ${soResult.exitCode}`,
+    );
+  }
+}
+
 async function main(): Promise<void> {
   try {
-    const version = await resolveVersion();
-    console.log(`Using publish version ${version}`);
-    await modifyPackageJson({ version });
+    if (isGitHubCI()) {
+      const version = await resolveVersion();
+      console.log(`Using publish version ${version}`);
+      await modifyPackageJson({ version });
+    } else {
+      console.log(
+        'ℹ️  Not in GitHub CI, skipping version resolution and package.json modification',
+      );
+      if (shouldSkipNativeBuild()) {
+        console.log(
+          'ℹ️  --skip flag detected, skipping native artifacts build',
+        );
+      } else {
+        await buildNativeArtifacts();
+      }
+    }
+
     console.log('✅ Prepublish script completed successfully');
   } catch (error) {
     console.error('❌ Prepublish script failed:', error);

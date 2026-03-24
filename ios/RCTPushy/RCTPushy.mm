@@ -1,6 +1,9 @@
 #import "RCTPushy.h"
 #import "RCTPushyDownloader.h"
 #import "RCTPushyManager.h"
+#include "../../cpp/patch_core/archive_patch_core.h"
+#include "../../cpp/patch_core/patch_core.h"
+#include "../../cpp/patch_core/state_core.h"
 
 #if __has_include("RCTReloadCommand.h")
 #import "RCTReloadCommand.h"
@@ -58,6 +61,112 @@ typedef NS_ENUM(NSInteger, PushyType) {
 
 static BOOL ignoreRollback = false;
 
+static std::string PushyToStdString(NSString *value) {
+    if (value == nil) {
+        return std::string();
+    }
+    return std::string([value UTF8String]);
+}
+
+static NSError *PushyNSErrorFromStatus(const pushy::patch::Status &status) {
+    return [NSError errorWithDomain:@"cn.reactnative.pushy"
+                               code:-1
+                           userInfo:@{ NSLocalizedDescriptionKey: [NSString stringWithUTF8String:status.message.c_str()] }];
+}
+
+static NSString *PushyFromStdString(const std::string &value) {
+    if (value.empty()) {
+        return nil;
+    }
+    return [NSString stringWithUTF8String:value.c_str()];
+}
+
+static void PushySetNullableString(NSUserDefaults *defaults, NSString *key, NSString *value) {
+    if (value != nil) {
+        [defaults setObject:value forKey:key];
+    } else {
+        [defaults removeObjectForKey:key];
+    }
+}
+
+static pushy::patch::PatchManifest PushyPatchManifestFromJson(NSDictionary *json) {
+    pushy::patch::PatchManifest manifest;
+
+    NSDictionary *copies = json[@"copies"];
+    for (NSString *to in copies) {
+        NSString *from = copies[to];
+        if (from.length <= 0) {
+            from = to;
+        }
+        manifest.copies.push_back(pushy::patch::CopyOperation{
+            PushyToStdString(from),
+            PushyToStdString(to),
+        });
+    }
+
+    NSDictionary *deletes = json[@"deletes"];
+    for (NSString *path in deletes) {
+        manifest.deletes.push_back(PushyToStdString(path));
+    }
+
+    return manifest;
+}
+
+static pushy::state::State PushyStateFromDefaults(NSUserDefaults *defaults) {
+    pushy::state::State state;
+    state.package_version = PushyToStdString([defaults stringForKey:paramPackageVersion]);
+    state.build_time = PushyToStdString([defaults stringForKey:paramBuildTime]);
+    NSDictionary *pushyInfo = [defaults dictionaryForKey:keyPushyInfo];
+    if (pushyInfo != nil) {
+        state.current_version = PushyToStdString(pushyInfo[paramCurrentVersion]);
+        state.last_version = PushyToStdString(pushyInfo[paramLastVersion]);
+        state.first_time = [pushyInfo[paramIsFirstTime] boolValue];
+        id firstLoadOk = pushyInfo[paramIsFirstLoadOk];
+        state.first_time_ok = firstLoadOk == nil ? true : [firstLoadOk boolValue];
+    }
+    state.rolled_back_version = PushyToStdString([defaults stringForKey:keyRolledBackMarked]);
+    return state;
+}
+
+static void PushyApplyStateToDefaults(NSUserDefaults *defaults, const pushy::state::State &state) {
+    PushySetNullableString(defaults, paramPackageVersion, PushyFromStdString(state.package_version));
+    PushySetNullableString(defaults, paramBuildTime, PushyFromStdString(state.build_time));
+
+    BOOL hasPushyInfo = !state.current_version.empty() || !state.last_version.empty() || state.first_time || !state.first_time_ok;
+    if (hasPushyInfo) {
+        NSMutableDictionary *newInfo = [[NSMutableDictionary alloc] init];
+        if (!state.current_version.empty()) {
+            newInfo[paramCurrentVersion] = PushyFromStdString(state.current_version);
+        }
+        if (!state.last_version.empty()) {
+            newInfo[paramLastVersion] = PushyFromStdString(state.last_version);
+        }
+        newInfo[paramIsFirstTime] = @(state.first_time);
+        newInfo[paramIsFirstLoadOk] = @(state.first_time_ok);
+        [defaults setObject:newInfo forKey:keyPushyInfo];
+    } else {
+        [defaults removeObjectForKey:keyPushyInfo];
+    }
+
+    PushySetNullableString(
+        defaults,
+        keyRolledBackMarked,
+        PushyFromStdString(state.rolled_back_version));
+}
+
+@interface RCTPushy ()
+- (void)_dopatch:(NSString *)hash
+            type:(PushyType)type
+      fromBundle:(NSString *)bundleOrigin
+          source:(NSString *)sourceOrigin
+        callback:(void (^)(NSError *error))callback;
+- (void)patch:(NSString *)hash
+         type:(PushyType)type
+   fromBundle:(NSString *)bundleOrigin
+       source:(NSString *)sourceOrigin
+     callback:(void (^)(NSError *error))callback;
+@end
+
 @implementation RCTPushy {
     RCTPushyManager *_fileManager;
     bool hasListeners;
@@ -77,51 +186,49 @@ RCT_EXPORT_MODULE(RCTPushy);
     NSString *storedPackageVersion = [defaults stringForKey:paramPackageVersion];
     NSString *storedBuildTime = [defaults stringForKey:paramBuildTime];
     
-    BOOL packageVersionChanged = !storedPackageVersion || ![curPackageVersion isEqualToString:storedPackageVersion];
-    BOOL buildTimeChanged = !storedBuildTime || ![curBuildTime isEqualToString:storedBuildTime];
-    
-    if (packageVersionChanged || buildTimeChanged) {
-        // Clear all update data and store new versions
-        [defaults setObject:nil forKey:keyPushyInfo];
-        [defaults setObject:nil forKey:keyHashInfo];
+    pushy::state::State state = PushyStateFromDefaults(defaults);
+    pushy::state::BinaryVersionSyncResult sync = pushy::state::SyncBinaryVersion(
+        state,
+        PushyToStdString(curPackageVersion),
+        PushyToStdString(curBuildTime)
+    );
+    if (sync.changed) {
         [defaults setObject:@(YES) forKey:KeyPackageUpdatedMarked];
-        [defaults setObject:curPackageVersion forKey:paramPackageVersion];
-        [defaults setObject:curBuildTime forKey:paramBuildTime];
+        state = sync.state;
+        PushyApplyStateToDefaults(defaults, state);
     }
-    
-    NSDictionary *pushyInfo = [defaults dictionaryForKey:keyPushyInfo];
-    if (pushyInfo) {
-            NSString *curVersion = pushyInfo[paramCurrentVersion];
-            
-            BOOL isFirstTime = [pushyInfo[paramIsFirstTime] boolValue];
-            BOOL isFirstLoadOK = [pushyInfo[paramIsFirstLoadOk] boolValue];
-            
-            NSString *loadVersion = curVersion;
-            BOOL needRollback = (!ignoreRollback && isFirstTime == NO && isFirstLoadOK == NO) || loadVersion.length<=0;
-            if (needRollback) {
-                loadVersion = [self rollback];
-            } else if (isFirstTime && !ignoreRollback){
-                // bundleURL may be called many times, ignore rollbacks before process restarted again.
-                ignoreRollback = true;
 
-                NSMutableDictionary *newInfo = [[NSMutableDictionary alloc] initWithDictionary:pushyInfo];
-                newInfo[paramIsFirstTime] = @(NO);
-                [defaults setObject:newInfo forKey:keyPushyInfo];
-                [defaults setObject:@(YES) forKey:keyFirstLoadMarked];
-                
+    if (!state.current_version.empty()) {
+        pushy::state::LaunchDecision decision = pushy::state::ResolveLaunchState(
+            state,
+            ignoreRollback,
+            true
+        );
+        state = decision.state;
+
+        if (decision.did_rollback || decision.consumed_first_time) {
+            PushyApplyStateToDefaults(defaults, state);
+        }
+        if (decision.consumed_first_time) {
+            // bundleURL may be called many times, ignore rollbacks before process restarted again.
+            ignoreRollback = true;
+            [defaults setObject:@(YES) forKey:keyFirstLoadMarked];
+        }
+
+        NSString *loadVersion = PushyFromStdString(decision.load_version);
+        NSString *downloadDir = [RCTPushy downloadDir];
+        while (loadVersion.length) {
+            NSString *bundlePath = [[downloadDir stringByAppendingPathComponent:loadVersion] stringByAppendingPathComponent:BUNDLE_FILE_NAME];
+            if ([[NSFileManager defaultManager] fileExistsAtPath:bundlePath isDirectory:NULL]) {
+                NSURL *bundleURL = [NSURL fileURLWithPath:bundlePath];
+                return bundleURL;
+            } else {
+                RCTLogError(@"RCTPushy -- bundle version %@ not found", loadVersion);
+                state = pushy::state::Rollback(state);
+                PushyApplyStateToDefaults(defaults, state);
+                loadVersion = PushyFromStdString(state.current_version);
             }
-            
-            NSString *downloadDir = [RCTPushy downloadDir];
-            while (loadVersion.length) {
-                NSString *bundlePath = [[downloadDir stringByAppendingPathComponent:loadVersion] stringByAppendingPathComponent:BUNDLE_FILE_NAME];
-                if ([[NSFileManager defaultManager] fileExistsAtPath:bundlePath isDirectory:NULL]) {
-                    NSURL *bundleURL = [NSURL fileURLWithPath:bundlePath];
-                    return bundleURL;
-                } else {
-                    RCTLogError(@"RCTPushy -- bundle version %@ not found", loadVersion);
-                    loadVersion = [self rollback];
-                }
-            }
+        }
     }
     
     return [RCTPushy binaryBundleURL];
@@ -129,24 +236,9 @@ RCT_EXPORT_MODULE(RCTPushy);
 
 + (NSString *) rollback {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    
-    NSDictionary *pushyInfo = [defaults dictionaryForKey:keyPushyInfo];
-    NSString *lastVersion = pushyInfo[paramLastVersion];
-    NSString *curVersion = pushyInfo[paramCurrentVersion]; 
-    if (lastVersion.length) {
-        // roll back to last version
-        [defaults setObject:@{paramCurrentVersion:lastVersion,
-                              paramIsFirstTime:@(NO),
-                              paramIsFirstLoadOk:@(YES)}
-                     forKey:keyPushyInfo];
-    }
-    else {
-        // roll back to bundle
-        [defaults setObject:nil forKey:keyPushyInfo];
-    }
-    [defaults setObject:curVersion forKey:keyRolledBackMarked];
-    
-    return lastVersion;
+    pushy::state::State state = pushy::state::Rollback(PushyStateFromDefaults(defaults));
+    PushyApplyStateToDefaults(defaults, state);
+    return PushyFromStdString(state.current_version);
 }
 
 + (BOOL)requiresMainQueueSetup {
@@ -293,20 +385,11 @@ RCT_EXPORT_METHOD(setNeedUpdate:(NSDictionary *)options
     
     if (hash.length) {
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-        NSString *lastVersion = nil;
-        NSDictionary *pushyInfo = [defaults objectForKey:keyPushyInfo];
-        if (pushyInfo) {
-            lastVersion = pushyInfo[paramCurrentVersion];
-        }
-        
-        NSMutableDictionary *newInfo = [[NSMutableDictionary alloc] init];
-        newInfo[paramCurrentVersion] = hash;
-        newInfo[paramLastVersion] = lastVersion;
-        newInfo[paramIsFirstTime] = @(YES);
-        newInfo[paramIsFirstLoadOk] = @(NO);
-        [defaults setObject:newInfo forKey:keyPushyInfo];
-        
-        
+        pushy::state::State next = pushy::state::SwitchVersion(
+            PushyStateFromDefaults(defaults),
+            PushyToStdString(hash)
+        );
+        PushyApplyStateToDefaults(defaults, next);
         resolve(@true);
     } else {
         reject(@"执行报错", nil, nil);
@@ -373,19 +456,13 @@ RCT_EXPORT_METHOD(markSuccess:(RCTPromiseResolveBlock)resolve
     #else
     
     @try {
-        // up package info
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-        NSMutableDictionary *pushyInfo = [[NSMutableDictionary alloc] initWithDictionary:[defaults objectForKey:keyPushyInfo]];
-        [pushyInfo setObject:@(NO) forKey:paramIsFirstTime];
-        [pushyInfo setObject:@(YES) forKey:paramIsFirstLoadOk];
-        
-        NSString *lastVersion = pushyInfo[paramLastVersion];
-        NSString *curVersion = pushyInfo[paramCurrentVersion];
-        if (lastVersion != nil && ![lastVersion isEqualToString:curVersion]) {
-            [pushyInfo removeObjectForKey:[keyHashInfo stringByAppendingString:lastVersion]];
+        pushy::state::MarkSuccessResult result =
+            pushy::state::MarkSuccess(PushyStateFromDefaults(defaults));
+        if (!result.stale_version_to_delete.empty()) {
+            [defaults removeObjectForKey:[keyHashInfo stringByAppendingString:PushyFromStdString(result.stale_version_to_delete)]];
         }
-        [defaults setObject:pushyInfo forKey:keyPushyInfo];
-        
+        PushyApplyStateToDefaults(defaults, result.state);
         
         // clear other package dir
         [self clearInvalidFiles];
@@ -496,7 +573,7 @@ RCT_EXPORT_METHOD(markSuccess:(RCTPromiseResolveBlock)resolve
                             {
                                 NSString *sourceOrigin = [[NSBundle mainBundle] resourcePath];
                                 NSString *bundleOrigin = [[RCTPushy binaryBundleURL] path];
-                                [self patch:hash fromBundle:bundleOrigin source:sourceOrigin callback:callback];
+                                [self patch:hash type:type fromBundle:bundleOrigin source:sourceOrigin callback:callback];
                             }
                                 break;
                             case PushyTypePatchFromPpk:
@@ -505,7 +582,7 @@ RCT_EXPORT_METHOD(markSuccess:(RCTPromiseResolveBlock)resolve
                                 
                                 NSString *sourceOrigin = lastVersionDir;
                                 NSString *bundleOrigin = [lastVersionDir stringByAppendingPathComponent:BUNDLE_FILE_NAME];
-                                [self patch:hash fromBundle:bundleOrigin source:sourceOrigin callback:callback];
+                                [self patch:hash type:type fromBundle:bundleOrigin source:sourceOrigin callback:callback];
                             }
                                 break;
                             default:
@@ -519,7 +596,10 @@ RCT_EXPORT_METHOD(markSuccess:(RCTPromiseResolveBlock)resolve
     }];
 }
 
-- (void)_dopatch:(NSString *)hash fromBundle:(NSString *)bundleOrigin source:(NSString *)sourceOrigin
+- (void)_dopatch:(NSString *)hash
+            type:(PushyType)type
+      fromBundle:(NSString *)bundleOrigin
+          source:(NSString *)sourceOrigin
         callback:(void (^)(NSError *error))callback
 {
     NSString *unzipDir = [[RCTPushy downloadDir] stringByAppendingPathComponent:hash];
@@ -527,73 +607,83 @@ RCT_EXPORT_METHOD(markSuccess:(RCTPromiseResolveBlock)resolve
     NSString *bundlePatch = [unzipDir stringByAppendingPathComponent:BUNDLE_PATCH_NAME];
     
     NSString *destination = [unzipDir stringByAppendingPathComponent:BUNDLE_FILE_NAME];
-    void (^completionHandler)(BOOL success) = ^(BOOL success) {
-        if (success) {
-            NSData *data = [NSData dataWithContentsOfFile:sourcePatch];
-            NSError *error = nil;
-            NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingAllowFragments error:&error];
-            if (error) {
-                callback(error);
-                return;
-            }
-            
-            NSDictionary *copies = json[@"copies"];
-            NSDictionary *deletes = json[@"deletes"];
+    NSData *data = [NSData dataWithContentsOfFile:sourcePatch];
+    NSError *error = nil;
+    NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingAllowFragments error:&error];
+    if (error) {
+        callback(error);
+        return;
+    }
 
-            [self->_fileManager copyFiles:copies fromDir:sourceOrigin toDir:unzipDir deletes:deletes completionHandler:^(NSError *error) {
-                if (error) {
-                    callback(error);
-                }
-                else {
-                    callback(nil);
-                }
-            }];
-        }
-        else {
-            callback([self errorWithMessage:ERROR_HDIFFPATCH]);
-        }
-    };
-    
-    @try {
-        [_fileManager hdiffFileAtPath:bundlePatch fromOrigin:bundleOrigin toDestination:destination completionHandler:completionHandler];
+    std::vector<std::string> entryNames;
+    if ([[NSFileManager defaultManager] fileExistsAtPath:sourcePatch isDirectory:NULL]) {
+        entryNames.push_back(PushyToStdString(SOURCE_PATCH_NAME));
     }
-    @catch (NSException *exception) {
-        NSLog(@"Pushy _dopatch error: exception occurred during hdiffFileAtPath: %@, reason: %@", 
-              exception.name, exception.reason);
-        callback([self errorWithMessage:ERROR_HDIFFPATCH]);
+    if ([[NSFileManager defaultManager] fileExistsAtPath:bundlePatch isDirectory:NULL]) {
+        entryNames.push_back(PushyToStdString(BUNDLE_PATCH_NAME));
     }
+
+    pushy::archive_patch::ArchivePatchPlan plan;
+    pushy::patch::Status planStatus = pushy::archive_patch::BuildArchivePatchPlan(
+        type == PushyTypePatchFromPackage
+            ? pushy::archive_patch::ArchivePatchType::kPatchFromPackage
+            : pushy::archive_patch::ArchivePatchType::kPatchFromPpk,
+        PushyPatchManifestFromJson(json),
+        entryNames,
+        &plan
+    );
+    if (!planStatus.ok) {
+        callback(PushyNSErrorFromStatus(planStatus));
+        return;
+    }
+
+    pushy::patch::FileSourcePatchOptions options;
+    pushy::patch::Status optionStatus = pushy::archive_patch::BuildFileSourcePatchOptions(
+        plan,
+        PushyToStdString(sourceOrigin),
+        PushyToStdString(unzipDir),
+        PushyToStdString(bundleOrigin),
+        PushyToStdString(bundlePatch),
+        PushyToStdString(destination),
+        &options
+    );
+    if (!optionStatus.ok) {
+        callback(PushyNSErrorFromStatus(optionStatus));
+        return;
+    }
+
+    pushy::patch::Status status = pushy::patch::ApplyPatchFromFileSource(options);
+    if (!status.ok) {
+        callback(PushyNSErrorFromStatus(status));
+        return;
+    }
+
+    callback(nil);
 }
 
-- (void)patch:(NSString *)hash fromBundle:(NSString *)bundleOrigin source:(NSString *)sourceOrigin callback:(void (^)(NSError *error))callback
+- (void)patch:(NSString *)hash
+         type:(PushyType)type
+   fromBundle:(NSString *)bundleOrigin
+       source:(NSString *)sourceOrigin
+     callback:(void (^)(NSError *error))callback
 {
-    [self _dopatch:hash fromBundle:bundleOrigin source:sourceOrigin callback:callback];
+    [self _dopatch:hash type:type fromBundle:bundleOrigin source:sourceOrigin callback:callback];
 }
 
 - (void)clearInvalidFiles
 {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    NSDictionary *pushyInfo = [defaults objectForKey:keyPushyInfo];
-    NSString *curVersion = [pushyInfo objectForKey:paramCurrentVersion];
+    pushy::state::State state = PushyStateFromDefaults(defaults);
     
     NSString *downloadDir = [RCTPushy downloadDir];
-    NSError *error = nil;
-    NSArray *list = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:downloadDir error:&error];
-    if (error) {
-        return;
-    }
-    
-    for(NSString *fileName in list) {
-        if (![fileName isEqualToString:curVersion]) {
-            NSString *filePath = [downloadDir stringByAppendingPathComponent:fileName];
-            NSDictionary *attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:filePath error:&error];
-            if (error) {
-                continue;
-            }
-            NSDate *modificationDate = [attributes fileModificationDate];
-            if ([[NSDate date] timeIntervalSinceDate:modificationDate] > 7 * 24 * 60 * 60) {
-                [_fileManager removeFile:filePath completionHandler:nil];
-            }
-        }
+    pushy::patch::Status status = pushy::patch::CleanupOldEntries(
+        PushyToStdString(downloadDir),
+        state.current_version,
+        state.last_version,
+        7
+    );
+    if (!status.ok) {
+        NSLog(@"Pushy cleanup error: %s", status.message.c_str());
     }
 }
 

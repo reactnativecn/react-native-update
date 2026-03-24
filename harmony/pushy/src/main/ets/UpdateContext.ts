@@ -1,9 +1,17 @@
 import preferences from '@ohos.data.preferences';
-import bundleManager from '@ohos.bundle.bundleManager';
 import fileIo from '@ohos.file.fs';
 import { DownloadTask } from './DownloadTask';
 import common from '@ohos.app.ability.common';
 import { DownloadTaskParams } from './DownloadTaskParams';
+import NativePatchCore, {
+  STATE_OP_CLEAR_FIRST_TIME,
+  STATE_OP_CLEAR_ROLLBACK_MARK,
+  STATE_OP_MARK_SUCCESS,
+  STATE_OP_RESOLVE_LAUNCH,
+  STATE_OP_ROLLBACK,
+  STATE_OP_SWITCH_VERSION,
+  StateCoreResult,
+} from './NativePatchCore';
 
 export class UpdateContext {
   private context: common.UIAbilityContext;
@@ -31,20 +39,106 @@ export class UpdateContext {
       this.preferences = preferences.getPreferencesSync(this.context, {
         name: 'update',
       });
-      const packageVersion = this.getPackageVersion();
-      const storedVersion = this.preferences.getSync('packageVersion', '');
-      if (!storedVersion) {
-        this.preferences.putSync('packageVersion', packageVersion);
-        this.preferences.flush();
-      } else if (storedVersion && packageVersion !== storedVersion) {
-        this.cleanUp();
-        this.preferences.clear();
-        this.preferences.putSync('packageVersion', packageVersion);
-        this.preferences.flush();
-      }
     } catch (e) {
       console.error('Failed to init preferences:', e);
     }
+  }
+
+  private readString(key: string): string {
+    const value = this.preferences.getSync(key, '') as
+      | string
+      | boolean
+      | number
+      | null
+      | undefined;
+    if (typeof value === 'string') {
+      return value;
+    }
+    if (typeof value === 'number') {
+      return String(value);
+    }
+    if (typeof value === 'boolean') {
+      return value ? 'true' : 'false';
+    }
+    return '';
+  }
+
+  private readBoolean(key: string, defaultValue: boolean): boolean {
+    const value = this.preferences.getSync(key, defaultValue) as
+      | string
+      | boolean
+      | number
+      | null
+      | undefined;
+    if (typeof value === 'boolean') {
+      return value;
+    }
+    if (typeof value === 'string') {
+      if (value === 'true') {
+        return true;
+      }
+      if (value === 'false') {
+        return false;
+      }
+    }
+    if (typeof value === 'number') {
+      return value !== 0;
+    }
+    return defaultValue;
+  }
+
+  private putNullableString(key: string, value?: string): void {
+    if (value) {
+      this.preferences.putSync(key, value);
+      return;
+    }
+    this.preferences.deleteSync(key);
+  }
+
+  private getBundlePath(hash: string): string {
+    return `${this.rootDir}/${hash}/bundle.harmony.js`;
+  }
+
+  private getStateSnapshot(): StateCoreResult {
+    return {
+      packageVersion: this.readString('packageVersion'),
+      buildTime: this.readString('buildTime'),
+      currentVersion: this.readString('currentVersion'),
+      lastVersion: this.readString('lastVersion'),
+      firstTime: this.readBoolean('firstTime', false),
+      firstTimeOk: this.readBoolean('firstTimeOk', true),
+      rolledBackVersion: this.readString('rolledBackVersion'),
+    };
+  }
+
+  private applyState(state: StateCoreResult): void {
+    this.putNullableString('packageVersion', state.packageVersion);
+    this.putNullableString('buildTime', state.buildTime);
+    this.putNullableString('currentVersion', state.currentVersion);
+    this.putNullableString('lastVersion', state.lastVersion);
+    this.preferences.putSync('firstTime', !!state.firstTime);
+    this.preferences.putSync('firstTimeOk', state.firstTimeOk !== false);
+    this.putNullableString('rolledBackVersion', state.rolledBackVersion);
+  }
+
+  public syncStateWithBinaryVersion(
+    packageVersion: string,
+    buildTime: string,
+  ): void {
+    const currentState = this.getStateSnapshot();
+    const nextState = NativePatchCore.syncStateWithBinaryVersion(
+      packageVersion,
+      buildTime,
+      currentState,
+    );
+    if (!nextState.changed) {
+      return;
+    }
+
+    this.cleanUp();
+    this.preferences.clear();
+    this.applyState(nextState);
+    this.preferences.flush();
   }
 
   public setKv(key: string, value: string): void {
@@ -53,38 +147,50 @@ export class UpdateContext {
   }
 
   public getKv(key: string): string {
-    return this.preferences.getSync(key, '') as string;
+    return this.readString(key);
   }
 
   public isFirstTime(): boolean {
-    return this.preferences.getSync('firstTime', false) as boolean;
+    return this.getStateSnapshot().firstTime;
   }
 
   public rolledBackVersion(): string {
-    return this.preferences.getSync('rolledBackVersion', '') as string;
+    return this.getStateSnapshot().rolledBackVersion || '';
   }
 
   public markSuccess(): void {
-    this.preferences.putSync('firstTimeOk', true);
-    const lastVersion = this.preferences.getSync('lastVersion', '') as string;
-    const curVersion = this.preferences.getSync('currentVersion', '') as string;
+    if (UpdateContext.DEBUG) {
+      return;
+    }
 
-    if (lastVersion && lastVersion !== curVersion) {
-      this.preferences.deleteSync('lastVersion');
-      this.preferences.deleteSync(`hash_${lastVersion}`);
+    const nextState = NativePatchCore.runStateCore(
+      STATE_OP_MARK_SUCCESS,
+      this.getStateSnapshot(),
+    );
+    this.applyState(nextState);
+    if (nextState.staleVersionToDelete) {
+      this.preferences.deleteSync(`hash_${nextState.staleVersionToDelete}`);
     }
     this.preferences.flush();
     this.cleanUp();
   }
 
   public clearFirstTime(): void {
-    this.preferences.putSync('firstTime', false);
+    const nextState = NativePatchCore.runStateCore(
+      STATE_OP_CLEAR_FIRST_TIME,
+      this.getStateSnapshot(),
+    );
+    this.applyState(nextState);
     this.preferences.flush();
     this.cleanUp();
   }
 
   public clearRollbackMark(): void {
-    this.preferences.putSync('rolledBackVersion', null);
+    const nextState = NativePatchCore.runStateCore(
+      STATE_OP_CLEAR_ROLLBACK_MARK,
+      this.getStateSnapshot(),
+    );
+    this.applyState(nextState);
     this.preferences.flush();
     this.cleanUp();
   }
@@ -160,20 +266,18 @@ export class UpdateContext {
 
   public switchVersion(hash: string): void {
     try {
-      const bundlePath = `${this.rootDir}/${hash}/bundle.harmony.js`;
+      const bundlePath = this.getBundlePath(hash);
       if (!fileIo.accessSync(bundlePath)) {
         throw Error(`Bundle version ${hash} not found.`);
       }
 
-      const lastVersion = this.getKv('currentVersion');
-      this.setKv('currentVersion', hash);
-      if (lastVersion && lastVersion !== hash) {
-        this.setKv('lastVersion', lastVersion);
-      }
-
-      this.setKv('firstTime', 'true');
-      this.setKv('firstTimeOk', 'false');
-      this.setKv('rolledBackVersion', '');
+      const nextState = NativePatchCore.runStateCore(
+        STATE_OP_SWITCH_VERSION,
+        this.getStateSnapshot(),
+        hash,
+      );
+      this.applyState(nextState);
+      this.preferences.flush();
     } catch (e) {
       console.error('Failed to switch version:', e);
       throw e;
@@ -182,18 +286,21 @@ export class UpdateContext {
 
   public getBundleUrl() {
     UpdateContext.isUsingBundleUrl = true;
-    const currentVersion = this.getCurrentVersion();
-    if (!currentVersion) {
-      return '';
+    const launchState = NativePatchCore.runStateCore(
+      STATE_OP_RESOLVE_LAUNCH,
+      this.getStateSnapshot(),
+      '',
+      false,
+      false,
+    );
+    if (launchState.didRollback || launchState.consumedFirstTime) {
+      this.applyState(launchState);
+      this.preferences.flush();
     }
-    if (!this.isFirstTime()) {
-      if (!this.preferences.getSync('firstTimeOk', true)) {
-        return this.rollBack();
-      }
-    }
-    let version = currentVersion;
+
+    let version = launchState.loadVersion || '';
     while (version) {
-      const bundleFile = `${this.rootDir}/${version}/bundle.harmony.js`;
+      const bundleFile = this.getBundlePath(version);
       try {
         if (!fileIo.accessSync(bundleFile)) {
           console.error(`Bundle version ${version} not found.`);
@@ -209,51 +316,28 @@ export class UpdateContext {
     return '';
   }
 
-  getPackageVersion(): string {
-    let bundleFlags =
-      bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_REQUESTED_PERMISSION;
-    let packageVersion = '';
-    try {
-      const bundleInfo = bundleManager.getBundleInfoForSelfSync(bundleFlags);
-      packageVersion = bundleInfo?.versionName || 'Unknown';
-    } catch (error) {
-      console.error('获取包信息失败:', error);
-    }
-    return packageVersion;
-  }
-
   public getCurrentVersion(): string {
-    const currentVersion = this.getKv('currentVersion');
-    return currentVersion;
+    return this.getStateSnapshot().currentVersion || '';
   }
 
   private rollBack(): string {
-    const lastVersion = this.preferences.getSync('lastVersion', '') as string;
-    const currentVersion = this.preferences.getSync(
-      'currentVersion',
-      '',
-    ) as string;
-    if (!lastVersion) {
-      this.preferences.deleteSync('currentVersion');
-    } else {
-      this.preferences.deleteSync('lastVersion');
-      this.preferences.putSync('currentVersion', lastVersion);
-    }
-    this.preferences.putSync('firstTimeOk', true);
-    this.preferences.putSync('firstTime', false);
-    this.preferences.putSync('rolledBackVersion', currentVersion);
+    const nextState = NativePatchCore.runStateCore(
+      STATE_OP_ROLLBACK,
+      this.getStateSnapshot(),
+    );
+    this.applyState(nextState);
     this.preferences.flush();
-    return lastVersion;
+    return nextState.currentVersion || '';
   }
 
-  public async cleanUp() {
-    const params = new DownloadTaskParams();
-    params.type = DownloadTaskParams.TASK_TYPE_CLEANUP;
-    params.hash = this.preferences.getSync('currentVersion', '') as string;
-    params.originHash = this.preferences.getSync('lastVersion', '') as string;
-    params.unzipDirectory = this.rootDir;
-    const downloadTask = new DownloadTask(this.context);
-    await downloadTask.execute(params);
+  public cleanUp(): void {
+    const state = this.getStateSnapshot();
+    NativePatchCore.cleanupOldEntries(
+      this.rootDir,
+      state.currentVersion || '',
+      state.lastVersion || '',
+      7,
+    );
   }
 
   public getIsUsingBundleUrl(): boolean {

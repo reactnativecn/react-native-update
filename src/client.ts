@@ -42,8 +42,7 @@ import { dedupeEndpoints, executeEndpointFallback } from './endpoint';
 const SERVER_PRESETS = {
   // cn
   Pushy: {
-    main: 'https://update.react-native.cn/api',
-    backups: ['https://update.reactnative.cn/api'],
+    main: ['https://update.react-native.cn/api', 'https://update.reactnative.cn/api'],
     queryUrls: [
       'https://gitee.com/sunnylqm/react-native-pushy/raw/master/endpoints.json',
       'https://cdn.jsdelivr.net/gh/reactnativecn/react-native-update@master/endpoints.json',
@@ -51,12 +50,24 @@ const SERVER_PRESETS = {
   },
   // i18n
   Cresc: {
-    main: 'https://api.cresc.dev',
-    backups: ['https://api.cresc.app'],
+    main: ['https://api.cresc.dev', 'https://api.cresc.app'],
     queryUrls: [
       'https://cdn.jsdelivr.net/gh/reactnativecn/react-native-update@master/endpoints_cresc.json',
     ],
   },
+};
+
+const cloneServerConfig = (server: UpdateServerConfig): UpdateServerConfig => ({
+  main: dedupeEndpoints([...(server.main || [])]),
+  queryUrls: server.queryUrls ? [...server.queryUrls] : undefined,
+});
+
+const excludeConfiguredEndpoints = (
+  endpoints: string[],
+  configuredEndpoints: string[],
+) => {
+  const configured = new Set(configuredEndpoints);
+  return endpoints.filter(endpoint => !configured.has(endpoint));
 };
 
 assertWeb();
@@ -69,19 +80,6 @@ const defaultClientOptions: ClientOptions = {
   logger: noop,
   debug: false,
   throwError: false,
-};
-
-const cloneServerConfig = (
-  server?: UpdateServerConfig,
-): UpdateServerConfig | undefined => {
-  if (!server) {
-    return undefined;
-  }
-  return {
-    main: server.main,
-    backups: server.backups ? [...server.backups] : undefined,
-    queryUrls: server.queryUrls ? [...server.queryUrls] : undefined,
-  };
 };
 
 export const sharedState: {
@@ -209,7 +207,7 @@ export class Pushy {
       throw e;
     }
   };
-  getCheckUrl = (endpoint: string = this.options.server!.main) => {
+  getCheckUrl = (endpoint: string) => {
     return `${endpoint}/checkUpdate/${this.options.appKey}`;
   };
   getConfiguredCheckEndpoints = () => {
@@ -217,7 +215,7 @@ export class Pushy {
     if (!server) {
       return [];
     }
-    return dedupeEndpoints([server.main, ...(server.backups || [])]);
+    return dedupeEndpoints(server.main);
   };
   getRemoteEndpoints = async () => {
     const { server } = this.options;
@@ -233,16 +231,14 @@ export class Pushy {
       const remoteEndpoints = await resp.json();
       log('fetch endpoints:', remoteEndpoints);
       if (Array.isArray(remoteEndpoints)) {
-        const normalizedRemoteEndpoints = dedupeEndpoints(
+        return excludeConfiguredEndpoints(
+          dedupeEndpoints(
           remoteEndpoints.filter(
             (endpoint): endpoint is string => typeof endpoint === 'string',
           ),
-        ).filter(endpoint => endpoint !== server.main);
-        server.backups = dedupeEndpoints([
-          ...(server.backups || []),
-          ...normalizedRemoteEndpoints,
-        ]).filter(endpoint => endpoint !== server.main);
-        return normalizedRemoteEndpoints;
+          ),
+          this.getConfiguredCheckEndpoints(),
+        );
       }
     } catch (e) {
       log('failed to fetch endpoints from: ', server.queryUrls, e);
@@ -410,8 +406,9 @@ export class Pushy {
       return [];
     }
     const remoteEndpoints = await this.getRemoteEndpoints();
-    return dedupeEndpoints([...(server.backups || []), ...remoteEndpoints]).filter(
-      endpoint => endpoint !== server.main,
+    return excludeConfiguredEndpoints(
+      dedupeEndpoints(remoteEndpoints),
+      this.getConfiguredCheckEndpoints(),
     );
   };
   downloadUpdate = async (

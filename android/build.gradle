@@ -162,6 +162,10 @@ android {
             resValue("string", "pushy_build_time", "0")
         }
     }
+
+    packagingOptions {
+        exclude "**/libc++_shared.so"
+    }
     
     lintOptions {
         abortOnError false

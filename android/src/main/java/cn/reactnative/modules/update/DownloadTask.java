@@ -47,7 +47,7 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
     }
 
     static {
-        System.loadLibrary("rnupdate");
+        NativeUpdateCore.ensureLoaded();
     }
 
     private void removeDirectory(File file) throws IOException {
@@ -131,7 +131,35 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
 
     byte[] buffer = new byte[1024*4];
 
-    private static native byte[] hdiffPatch(byte[] origin, byte[] patch);
+    private static native void applyPatchFromFileSource(
+        String sourceRoot,
+        String targetRoot,
+        String originBundlePath,
+        String bundlePatchPath,
+        String bundleOutputPath,
+        String mergeSourceSubdir,
+        boolean enableMerge,
+        String[] copyFroms,
+        String[] copyTos,
+        String[] deletes
+    );
+    private static native void cleanupOldEntries(
+        String rootDir,
+        String keepCurrent,
+        String keepPrevious,
+        int maxAgeDays
+    );
+    private static native ArchivePatchPlanResult buildArchivePatchPlan(
+        int patchType,
+        String[] entryNames,
+        String[] copyFroms,
+        String[] copyTos,
+        String[] deletes
+    );
+    private static native CopyGroupResult[] buildCopyGroups(
+        String[] copyFroms,
+        String[] copyTos
+    );
 
 
     private void copyFile(File from, File fmd) throws IOException {
@@ -163,66 +191,76 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
         return fout.toByteArray();
     }
 
-    private byte[] readOriginBundle()  throws IOException {
-        InputStream in;
-        try {
-            in = context.getAssets().open("index.android.bundle");
-        } catch (Exception e) {
-            return new byte[0];
-        }
-        int count;
-
-        ByteArrayOutputStream fout = new ByteArrayOutputStream();
-        while ((count = in.read(buffer)) != -1)
-        {
-            fout.write(buffer, 0, count);
-        }
-
-        fout.close();
-        in.close();
-        return fout.toByteArray();
-    }
-
-    private byte[] readFile(File file)  throws IOException {
-        InputStream in = new FileInputStream(file);
-        int count;
-
-        ByteArrayOutputStream fout = new ByteArrayOutputStream();
-        while ((count = in.read(buffer)) != -1)
-        {
-            fout.write(buffer, 0, count);
+    private void appendManifestEntries(
+        JSONObject manifest,
+        ArrayList<String> copyFroms,
+        ArrayList<String> copyTos,
+        ArrayList<String> deletes,
+        HashMap<String, String> copiesMap
+    ) throws JSONException {
+        JSONObject copies = manifest.optJSONObject("copies");
+        if (copies != null) {
+            Iterator<?> keys = copies.keys();
+            while (keys.hasNext()) {
+                String to = (String) keys.next();
+                String from = copies.getString(to);
+                if (from.isEmpty()) {
+                    from = to;
+                }
+                copyFroms.add(from);
+                copyTos.add(to);
+                if (copiesMap != null) {
+                    copiesMap.put(to, from);
+                }
+            }
         }
 
-        fout.close();
-        in.close();
-        return fout.toByteArray();
-    }
-
-    private void copyFilesWithBlacklist(String current, File from, File to, JSONObject blackList) throws IOException {
-        File[] files = from.listFiles();
-        for (File file : files) {
-            if (file.isDirectory()) {
-                String subName = current + file.getName() + '/';
-                if (blackList.has(subName)) {
-                    continue;
-                }
-                File toFile = new File(to, file.getName());
-                if (!toFile.exists()) {
-                    toFile.mkdir();
-                }
-                copyFilesWithBlacklist(subName, file, toFile, blackList);
-            } else if (!blackList.has(current + file.getName())) {
-                // Copy file.
-                File toFile = new File(to, file.getName());
-                if (!toFile.exists()) {
-                    copyFile(file, toFile);
-                }
+        JSONObject deleteMap = manifest.optJSONObject("deletes");
+        if (deleteMap != null) {
+            Iterator<?> deleteKeys = deleteMap.keys();
+            while (deleteKeys.hasNext()) {
+                deletes.add((String) deleteKeys.next());
             }
         }
     }
 
-    private void copyFilesWithBlacklist(File from, File to, JSONObject blackList) throws IOException {
-        copyFilesWithBlacklist("", from, to, blackList);
+    private void copyBundledAssetToFile(String assetName, File destination) throws IOException {
+        InputStream in = context.getAssets().open(assetName);
+        FileOutputStream fout = new FileOutputStream(destination);
+        int count;
+        while ((count = in.read(buffer)) != -1) {
+            fout.write(buffer, 0, count);
+        }
+        fout.close();
+        in.close();
+    }
+
+    private HashMap<String, ArrayList<File>> buildCopyList(
+        File unzipDirectory,
+        CopyGroupResult[] groups
+    ) throws IOException {
+        HashMap<String, ArrayList<File>> copyList = new HashMap<String, ArrayList<File>>();
+        if (groups == null) {
+            return copyList;
+        }
+
+        String rootPath = unzipDirectory.getCanonicalPath() + File.separator;
+        for (CopyGroupResult group : groups) {
+            ArrayList<File> targets = new ArrayList<File>();
+            if (group.toPaths != null) {
+                for (String to : group.toPaths) {
+                    File toFile = new File(unzipDirectory, to);
+                    String canonicalPath = toFile.getCanonicalPath();
+                    if (!canonicalPath.startsWith(rootPath)) {
+                        throw new SecurityException("Illegal name: " + to);
+                    }
+                    targets.add(toFile);
+                }
+            }
+            copyList.put(group.from, targets);
+        }
+
+        return copyList;
     }
 
     private void doFullPatch(DownloadTaskParams param) throws IOException {
@@ -457,78 +495,64 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
 
         removeDirectory(param.unzipDirectory);
         param.unzipDirectory.mkdirs();
-        HashMap<String, ArrayList<File>> copyList = new HashMap<String, ArrayList<File>>();
         HashMap<String, String> copiesMap = new HashMap<String, String>(); // to -> from 映射
-
-        boolean foundDiff = false;
-        boolean foundBundlePatch = false;
+        ArrayList<String> entryNames = new ArrayList<String>();
+        ArrayList<String> copyFroms = new ArrayList<String>();
+        ArrayList<String> copyTos = new ArrayList<String>();
+        ArrayList<String> deletes = new ArrayList<String>();
 
         SafeZipFile zipFile = new SafeZipFile(param.targetFile);
         Enumeration<? extends ZipEntry> entries = zipFile.entries();
         while (entries.hasMoreElements()) {
             ZipEntry ze = entries.nextElement();
             String fn = ze.getName();
+            entryNames.add(fn);
 
             if (fn.equals("__diff.json")) {
-                foundDiff = true;
                 // copy files from assets
                 byte[] bytes = readBytes(zipFile.getInputStream(ze));
                 String json = new String(bytes, "UTF-8");
                 JSONObject obj = (JSONObject)new JSONTokener(json).nextValue();
-
-                JSONObject copies = obj.getJSONObject("copies");
-                Iterator<?> keys = copies.keys();
-                while( keys.hasNext() ) {
-                    String to = (String)keys.next();
-                    String from = copies.getString(to);
-                    if (from.isEmpty()) {
-                        from = to;
-                    }
-                    // 保存 copies 映射关系（to -> from）
-                    copiesMap.put(to, from);
-                    
-                    ArrayList<File> target = null;
-                    if (!copyList.containsKey(from)) {
-                        target = new ArrayList<File>();
-                        copyList.put(from, target);
-                    } else {
-                        target = copyList.get((from));
-                    }
-                    File toFile = new File(param.unzipDirectory, to);
-
-                    // Fixing a Zip Path Traversal Vulnerability
-                    // https://support.google.com/faqs/answer/9294009
-                    String canonicalPath = toFile.getCanonicalPath();
-                    if (!canonicalPath.startsWith(param.unzipDirectory.getCanonicalPath() + File.separator)) {
-                        throw new SecurityException("Illegal name: " + to);
-                    }
-                    target.add(toFile);
-                }
+                appendManifestEntries(obj, copyFroms, copyTos, deletes, copiesMap);
                 continue;
             }
-            if (fn.equals("index.bundlejs.patch")) {
-                foundBundlePatch = true;
-
-                byte[] patched = hdiffPatch(readOriginBundle(), readBytes(zipFile.getInputStream(ze)));
-
-                FileOutputStream fout = new FileOutputStream(new File(param.unzipDirectory, "index.bundlejs"));
-                fout.write(patched);
-                fout.close();
-                continue;
-            }
-
-
             zipFile.unzipToPath(ze, param.unzipDirectory);
         }
 
         zipFile.close();
 
+        buildArchivePatchPlan(
+            DownloadTaskParams.TASK_TYPE_PATCH_FROM_APK,
+            entryNames.toArray(new String[0]),
+            copyFroms.toArray(new String[0]),
+            copyTos.toArray(new String[0]),
+            deletes.toArray(new String[0])
+        );
+        HashMap<String, ArrayList<File>> copyList = buildCopyList(
+            param.unzipDirectory,
+            buildCopyGroups(
+                copyFroms.toArray(new String[0]),
+                copyTos.toArray(new String[0])
+            )
+        );
 
-        if (!foundDiff) {
-            throw new Error("diff.json not found");
-        }
-        if (!foundBundlePatch) {
-            throw new Error("bundle patch not found");
+        File originBundleFile = new File(param.unzipDirectory, ".origin.bundle");
+        copyBundledAssetToFile("index.android.bundle", originBundleFile);
+        try {
+            applyPatchFromFileSource(
+                param.unzipDirectory.getAbsolutePath(),
+                param.unzipDirectory.getAbsolutePath(),
+                originBundleFile.getAbsolutePath(),
+                new File(param.unzipDirectory, "index.bundlejs.patch").getAbsolutePath(),
+                new File(param.unzipDirectory, "index.bundlejs").getAbsolutePath(),
+                "",
+                false,
+                new String[0],
+                new String[0],
+                new String[0]
+            );
+        } finally {
+            originBundleFile.delete();
         }
 
         if (UpdateContext.DEBUG) {
@@ -552,10 +576,10 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
         removeDirectory(param.unzipDirectory);
         param.unzipDirectory.mkdirs();
 
-        int count;
-        String filename;
-        boolean foundDiff = false;
-        boolean foundBundlePatch = false;
+        ArrayList<String> entryNames = new ArrayList<String>();
+        ArrayList<String> copyFroms = new ArrayList<String>();
+        ArrayList<String> copyTos = new ArrayList<String>();
+        ArrayList<String> deletes = new ArrayList<String>();
 
 
         SafeZipFile zipFile = new SafeZipFile(param.targetFile);
@@ -563,49 +587,42 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
         while (entries.hasMoreElements()) {
             ZipEntry ze = entries.nextElement();
             String fn = ze.getName();
+            entryNames.add(fn);
 
             if (fn.equals("__diff.json")) {
-                foundDiff = true;
                 // copy files from assets
                 byte[] bytes = readBytes(zipFile.getInputStream(ze));
                 String json = new String(bytes, "UTF-8");
                 JSONObject obj = (JSONObject)new JSONTokener(json).nextValue();
-
-                JSONObject copies = obj.getJSONObject("copies");
-                Iterator<?> keys = copies.keys();
-                while( keys.hasNext() ) {
-                    String to = (String)keys.next();
-                    String from = copies.getString(to);
-                    if (from.isEmpty()) {
-                        from = to;
-                    }
-                    copyFile(new File(param.originDirectory, from), new File(param.unzipDirectory, to));
-                }
-                JSONObject blackList = obj.getJSONObject("deletes");
-                copyFilesWithBlacklist(param.originDirectory, param.unzipDirectory, blackList);
+                appendManifestEntries(obj, copyFroms, copyTos, deletes, null);
                 continue;
             }
-            if (fn.equals("index.bundlejs.patch")) {
-                foundBundlePatch = true;
-                byte[] patched = hdiffPatch(readFile(new File(param.originDirectory, "index.bundlejs")), readBytes(zipFile.getInputStream(ze)));
-
-                FileOutputStream fout = new FileOutputStream(new File(param.unzipDirectory, "index.bundlejs"));
-                fout.write(patched);
-                fout.close();
-                continue;
-            }
-
             zipFile.unzipToPath(ze, param.unzipDirectory);
         }
 
         zipFile.close();
 
-        if (!foundDiff) {
-            throw new Error("diff.json not found");
-        }
-        if (!foundBundlePatch) {
-            throw new Error("bundle patch not found");
-        }
+        ArchivePatchPlanResult plan = buildArchivePatchPlan(
+            DownloadTaskParams.TASK_TYPE_PATCH_FROM_PPK,
+            entryNames.toArray(new String[0]),
+            copyFroms.toArray(new String[0]),
+            copyTos.toArray(new String[0]),
+            deletes.toArray(new String[0])
+        );
+
+        applyPatchFromFileSource(
+            param.originDirectory.getAbsolutePath(),
+            param.unzipDirectory.getAbsolutePath(),
+            new File(param.originDirectory, "index.bundlejs").getAbsolutePath(),
+            new File(param.unzipDirectory, "index.bundlejs.patch").getAbsolutePath(),
+            new File(param.unzipDirectory, "index.bundlejs").getAbsolutePath(),
+            plan.mergeSourceSubdir,
+            plan.enableMerge,
+            copyFroms.toArray(new String[0]),
+            copyTos.toArray(new String[0]),
+            deletes.toArray(new String[0])
+        );
+
         if (UpdateContext.DEBUG) {
             Log.d("react-native-update", "Unzip finished");
         }
@@ -614,30 +631,12 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
         if (UpdateContext.DEBUG) {
             Log.d("react-native-update", "Start cleaning up");
         }
-        File root = param.unzipDirectory;
-        for (File sub : root.listFiles()) {
-            if (sub.getName().charAt(0) == '.') {
-                continue;
-            }
-            if (isFileUpdatedWithinDays(sub, 7)) {
-                continue;
-            }
-            if (sub.isFile()) {
-                sub.delete();
-            } else {
-                if (sub.getName().equals(param.hash) || sub.getName().equals(param.originHash)) {
-                    continue;
-                }
-                removeDirectory(sub);
-            }
-        }
-    }
-
-    private boolean isFileUpdatedWithinDays(File file, int days) {
-        long currentTime = System.currentTimeMillis();
-        long lastModified = file.lastModified();
-        long daysInMillis = days * 24 * 60 * 60 * 1000L;
-        return (currentTime - lastModified) < daysInMillis;
+        cleanupOldEntries(
+            param.unzipDirectory.getAbsolutePath(),
+            param.hash,
+            param.originHash,
+            7
+        );
     }
 
     @Override

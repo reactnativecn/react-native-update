@@ -77,8 +77,7 @@ export type UpdateEventsLogger = ({
 }) => void;
 
 export interface UpdateServerConfig {
-  main: string;
-  backups?: string[];
+  main: string[];
   queryUrls?: string[];
 }
 
