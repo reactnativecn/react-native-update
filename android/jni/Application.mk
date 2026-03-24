@@ -1,4 +1,4 @@
-APP_PLATFORM := android-16
+APP_PLATFORM := android-21
 APP_CFLAGS += -Wno-error=format-security
 APP_CFLAGS += -fvisibility=hidden -fvisibility-inlines-hidden
 APP_CFLAGS += -ffunction-sections -fdata-sections

@@ -39,6 +39,7 @@ project.xcworkspace
 local.properties
 android/build
 android/obj
+.project
 
 # node.js
 #
@@ -47,6 +48,8 @@ npm-debug.log
 Example
 yarn.lock
 bun.lock
+*.test.ts
+*.test.js
 
 domains.json
 endpoints.json
@@ -55,3 +58,14 @@ endpoints_cresc.json
 tea.yaml
 
 e2e/
+
+harmony/**
+!harmony/pushy.har
+
+.tmp
+.cursor
+
+android/jni/lzma/bin
+android/jni/lzma/DOC
+
+

@@ -102,6 +102,10 @@ function isGitHubCI(): boolean {
   return process.env.GITHUB_ACTIONS === 'true';
 }
 
+function shouldSkipNativeBuild(): boolean {
+  return process.argv.includes('--skip') || process.env.SKIP_NATIVE_BUILD === '1';
+}
+
 async function buildNativeArtifacts(): Promise<void> {
   console.log('Building Harmony HAR...');
   const harResult = Bun.spawnSync(['npm', 'run', 'build:harmony-har'], {
@@ -136,7 +140,13 @@ async function main(): Promise<void> {
       console.log(
         'ℹ️  Not in GitHub CI, skipping version resolution and package.json modification',
       );
-      await buildNativeArtifacts();
+      if (shouldSkipNativeBuild()) {
+        console.log(
+          'ℹ️  --skip flag detected, skipping native artifacts build',
+        );
+      } else {
+        await buildNativeArtifacts();
+      }
     }
 
     console.log('✅ Prepublish script completed successfully');

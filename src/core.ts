@@ -1,6 +1,7 @@
 import { NativeEventEmitter, NativeModules, Platform } from 'react-native';
 import { emptyModule, error, log } from './utils';
 import i18n from './i18n';
+/* eslint-disable @react-native/no-deep-imports */
 const {
   version: v,
 } = require('react-native/Libraries/Core/ReactNativeVersion');
