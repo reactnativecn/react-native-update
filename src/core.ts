@@ -47,7 +47,7 @@ if (currentVersionInfoString) {
       delete _currentVersionInfo.debugChannel;
       setLocalHashInfo(currentVersion, _currentVersionInfo);
     }
-  } catch (err) {
+  } catch {
     error(
       i18n.t('error_parse_version_info', { info: currentVersionInfoString }),
     );
