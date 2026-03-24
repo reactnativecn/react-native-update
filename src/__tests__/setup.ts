@@ -6,6 +6,9 @@ mock.module('react-native', () => {
       OS: 'ios',
       Version: 13,
     },
+    DeviceEventEmitter: {
+      addListener: () => ({ remove: () => {} }),
+    },
     NativeModules: {
       Pushy: {
         currentVersionInfo: '{}',
