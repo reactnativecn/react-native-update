@@ -4,27 +4,19 @@
 
 `react-native-update` provides over-the-air update capabilities for React Native apps. For full documentation, visit:
 
-- China service: <https://pushy.reactnative.cn>
 - Global service: <https://cresc.dev>
 
-## Regional Service Notice
-
-- **Pushy** (<https://pushy.reactnative.cn>) is the China service, operated by **Wuhan Qingluo Network Technology Co., Ltd.**, with servers and user data hosted in mainland China.
-- **Cresc** (<https://cresc.dev>) is the global service, operated by **CHARMLOT PTE. LTD.**, with servers and user data hosted in Singapore.
-- Pushy and Cresc are operated by different legal entities with separate infrastructure, data storage, and admin systems. Developers outside mainland China should use Cresc directly.
-
-**HarmonyOS and React Native New Architecture are supported.**
+**React Native New Architecture is supported.**
 
 ## Quick Start
 
 See the docs:
 
-- Chinese docs: <https://pushy.reactnative.cn/docs/getting-started.html>
 - English docs: <https://cresc.dev/docs/getting-started>
 
 ## Advantages
 
-1. For users in China, updates are distributed through Alibaba Cloud CDN for high stability and excellent delivery success. For developers outside mainland China, Cresc provides a dedicated global service with fast and reliable worldwide delivery.
+1. react-native-update provides a dedicated global service with fast and reliable worldwide delivery.
 2. **Tiny update packages** generated with bsdiff/hdiff are typically only tens to hundreds of KB, instead of the tens of MB usually required by full-bundle update systems.
 3. The library tracks new React Native stable releases closely, supports Hermes bytecode, and supports the new architecture. Note: Android RN 0.73.0 to 0.76.0 new architecture is unavailable because of upstream issues; versions below 0.73 or above 0.76.1 are supported.
 4. When updating across multiple versions, clients only need to download **one update package** instead of applying every intermediate version in sequence.
@@ -39,7 +31,6 @@ See the docs:
 |---------|---------------------|-------------|------------------------|
 | **Price / Cost** | Free tier with multiple paid plans (starting at about CNY 66/month), bandwidth included | Free tier with multiple paid plans (starting at about CNY 136/month), extra bandwidth charges apply | ❌ **Discontinued** (Microsoft App Center shut down on March 31, 2025) |
 | **Package Size** | ⭐⭐⭐⭐⭐ Tens to hundreds of KB (incremental) | ⭐⭐⭐ Full bundle updates (usually tens of MB) | ❌ **Discontinued** |
-| **China Access Speed** | ⭐⭐⭐⭐⭐ Alibaba Cloud CDN, very fast | ⭐⭐ Overseas servers, may be slower | ❌ **Discontinued** |
 | **iOS Support** | ✅ Supported | ✅ Supported | ❌ **Discontinued** |
 | **Android Support** | ✅ Supported | ✅ Supported | ❌ **Discontinued** |
 | **HarmonyOS Support** | ✅ Supported | ❌ Not supported | ❌ **Discontinued** |
@@ -56,7 +47,6 @@ See the docs:
 | **Server Deployment** | ✅ Hosted service or paid private deployment | ✅ Hosted by Expo (EAS Update) | ❌ **Discontinued** |
 | **Update Strategy** | Flexible configuration (silent / prompted / immediate / delayed) | More fixed workflow | ❌ **Discontinued** |
 | **Bandwidth Usage** | ⭐⭐⭐⭐⭐ Very low (incremental) | ⭐⭐⭐ Higher (full bundle) | ❌ **Discontinued** |
-| **Update Success Rate** | ⭐⭐⭐⭐⭐ Excellent, especially in China | ⭐⭐⭐ Moderate | ❌ **Discontinued** |
 
 ## Local Development
 
