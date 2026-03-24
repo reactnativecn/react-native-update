@@ -191,6 +191,39 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
         return fout.toByteArray();
     }
 
+    private void appendManifestEntries(
+        JSONObject manifest,
+        ArrayList<String> copyFroms,
+        ArrayList<String> copyTos,
+        ArrayList<String> deletes,
+        HashMap<String, String> copiesMap
+    ) throws JSONException {
+        JSONObject copies = manifest.optJSONObject("copies");
+        if (copies != null) {
+            Iterator<?> keys = copies.keys();
+            while (keys.hasNext()) {
+                String to = (String) keys.next();
+                String from = copies.getString(to);
+                if (from.isEmpty()) {
+                    from = to;
+                }
+                copyFroms.add(from);
+                copyTos.add(to);
+                if (copiesMap != null) {
+                    copiesMap.put(to, from);
+                }
+            }
+        }
+
+        JSONObject deleteMap = manifest.optJSONObject("deletes");
+        if (deleteMap != null) {
+            Iterator<?> deleteKeys = deleteMap.keys();
+            while (deleteKeys.hasNext()) {
+                deletes.add((String) deleteKeys.next());
+            }
+        }
+    }
+
     private void copyBundledAssetToFile(String assetName, File destination) throws IOException {
         InputStream in = context.getAssets().open(assetName);
         FileOutputStream fout = new FileOutputStream(destination);
@@ -480,25 +513,7 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
                 byte[] bytes = readBytes(zipFile.getInputStream(ze));
                 String json = new String(bytes, "UTF-8");
                 JSONObject obj = (JSONObject)new JSONTokener(json).nextValue();
-
-                JSONObject copies = obj.getJSONObject("copies");
-                Iterator<?> keys = copies.keys();
-                while( keys.hasNext() ) {
-                    String to = (String)keys.next();
-                    String from = copies.getString(to);
-                    if (from.isEmpty()) {
-                        from = to;
-                    }
-                    copyFroms.add(from);
-                    copyTos.add(to);
-                    // 保存 copies 映射关系（to -> from）
-                    copiesMap.put(to, from);
-                }
-                JSONObject blackList = obj.getJSONObject("deletes");
-                Iterator<?> deleteKeys = blackList.keys();
-                while (deleteKeys.hasNext()) {
-                    deletes.add((String)deleteKeys.next());
-                }
+                appendManifestEntries(obj, copyFroms, copyTos, deletes, copiesMap);
                 continue;
             }
             zipFile.unzipToPath(ze, param.unzipDirectory);
@@ -579,23 +594,7 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
                 byte[] bytes = readBytes(zipFile.getInputStream(ze));
                 String json = new String(bytes, "UTF-8");
                 JSONObject obj = (JSONObject)new JSONTokener(json).nextValue();
-
-                JSONObject copies = obj.getJSONObject("copies");
-                Iterator<?> keys = copies.keys();
-                while( keys.hasNext() ) {
-                    String to = (String)keys.next();
-                    String from = copies.getString(to);
-                    if (from.isEmpty()) {
-                        from = to;
-                    }
-                    copyFroms.add(from);
-                    copyTos.add(to);
-                }
-                JSONObject blackList = obj.getJSONObject("deletes");
-                Iterator<?> deleteKeys = blackList.keys();
-                while (deleteKeys.hasNext()) {
-                    deletes.add((String)deleteKeys.next());
-                }
+                appendManifestEntries(obj, copyFroms, copyTos, deletes, null);
                 continue;
             }
             zipFile.unzipToPath(ze, param.unzipDirectory);
