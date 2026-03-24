@@ -12,22 +12,16 @@ import NativePatchCore, {
   CopyGroupResult,
 } from './NativePatchCore';
 
-interface ZipEntry {
-  filename: string;
-  content: ArrayBuffer;
-}
-
-interface ZipFile {
-  entries: ZipEntry[];
-}
-
 interface PatchManifestArrays {
   copyFroms: string[];
   copyTos: string[];
   deletes: string[];
 }
 
+const DIFF_MANIFEST_ENTRY = '__diff.json';
 const HARMONY_BUNDLE_PATCH_ENTRY = 'bundle.harmony.js.patch';
+const TEMP_ORIGIN_BUNDLE_ENTRY = '.origin.bundle.harmony.js';
+const FILE_COPY_BUFFER_SIZE = 64 * 1024;
 
 export class DownloadTask {
   private context: common.Context;
@@ -104,18 +98,31 @@ export class DownloadTask {
     }
   }
 
-  private toUint8Array(content: ArrayBuffer | Uint8Array): Uint8Array {
-    if (content instanceof Uint8Array) {
-      return content;
+  private async listEntryNames(directory: string): Promise<string[]> {
+    const entryNames: string[] = [];
+    const files = await fileIo.listFile(directory);
+
+    for (const file of files) {
+      if (file === '.' || file === '..') {
+        continue;
+      }
+
+      const filePath = `${directory}/${file}`;
+      const stat = await fileIo.stat(filePath);
+      if (!stat.isDirectory()) {
+        entryNames.push(file);
+      }
     }
-    return new Uint8Array(content);
+
+    return entryNames;
   }
 
   private async writeFileContent(
     targetFile: string,
     content: ArrayBuffer | Uint8Array,
   ): Promise<void> {
-    const payload = this.toUint8Array(content);
+    const payload =
+      content instanceof Uint8Array ? content : new Uint8Array(content);
     await this.ensureParentDirectory(targetFile);
     if (fileIo.accessSync(targetFile)) {
       await fileIo.unlink(targetFile);
@@ -127,11 +134,11 @@ export class DownloadTask {
         targetFile,
         fileIo.OpenMode.CREATE | fileIo.OpenMode.WRITE_ONLY,
       );
-      const chunkSize = 4096;
+      const chunkSize = FILE_COPY_BUFFER_SIZE;
       let bytesWritten = 0;
 
       while (bytesWritten < payload.byteLength) {
-        const chunk = payload.slice(bytesWritten, bytesWritten + chunkSize);
+        const chunk = payload.subarray(bytesWritten, bytesWritten + chunkSize);
         await fileIo.write(writer.fd, chunk);
         bytesWritten += chunk.byteLength;
       }
@@ -146,6 +153,25 @@ export class DownloadTask {
     return JSON.parse(
       new util.TextDecoder().decodeToString(new Uint8Array(content)),
     ) as Record<string, any>;
+  }
+
+  private async readManifestArrays(
+    directory: string,
+    normalizeResourceCopies: boolean,
+  ): Promise<PatchManifestArrays> {
+    const manifestPath = `${directory}/${DIFF_MANIFEST_ENTRY}`;
+    if (!fileIo.accessSync(manifestPath)) {
+      return {
+        copyFroms: [],
+        copyTos: [],
+        deletes: [],
+      };
+    }
+
+    return this.manifestToArrays(
+      this.parseJsonEntry(await this.readFileContent(manifestPath)),
+      normalizeResourceCopies,
+    );
   }
 
   private manifestToArrays(
@@ -181,20 +207,79 @@ export class DownloadTask {
     };
   }
 
-  private async applyBundlePatch(
-    originContent: ArrayBuffer | Uint8Array,
-    patchContent: ArrayBuffer | Uint8Array,
+  private async applyBundlePatchFromFileSource(
+    originContent: ArrayBuffer,
+    workingDirectory: string,
+    bundlePatchPath: string,
     outputFile: string,
   ): Promise<void> {
+    const originBundlePath = `${workingDirectory}/${TEMP_ORIGIN_BUNDLE_ENTRY}`;
     try {
-      const patched = await NativePatchCore.hdiffPatch(
-        this.toUint8Array(originContent),
-        this.toUint8Array(patchContent),
-      );
-      await this.writeFileContent(outputFile, patched);
+      await this.writeFileContent(originBundlePath, originContent);
+      NativePatchCore.applyPatchFromFileSource({
+        copyFroms: [],
+        copyTos: [],
+        deletes: [],
+        sourceRoot: workingDirectory,
+        targetRoot: workingDirectory,
+        originBundlePath,
+        bundlePatchPath,
+        bundleOutputPath: outputFile,
+        enableMerge: false,
+      });
     } catch (error) {
       error.message = `Failed to process bundle patch: ${error.message}`;
       throw error;
+    } finally {
+      if (fileIo.accessSync(originBundlePath)) {
+        await fileIo.unlink(originBundlePath);
+      }
+    }
+  }
+
+  private async copySandboxFile(
+    sourceFile: string,
+    targetFile: string,
+  ): Promise<void> {
+    let reader: fileIo.File | null = null;
+    let writer: fileIo.File | null = null;
+    const buffer = new ArrayBuffer(FILE_COPY_BUFFER_SIZE);
+    let offset = 0;
+
+    try {
+      reader = await fileIo.open(sourceFile, fileIo.OpenMode.READ_ONLY);
+      await this.ensureParentDirectory(targetFile);
+      if (fileIo.accessSync(targetFile)) {
+        await fileIo.unlink(targetFile);
+      }
+      writer = await fileIo.open(
+        targetFile,
+        fileIo.OpenMode.CREATE | fileIo.OpenMode.WRITE_ONLY,
+      );
+
+      while (true) {
+        const readLength = await fileIo.read(reader.fd, buffer, {
+          offset,
+          length: FILE_COPY_BUFFER_SIZE,
+        });
+        if (readLength <= 0) {
+          break;
+        }
+
+        await fileIo.write(writer.fd, new Uint8Array(buffer, 0, readLength));
+        offset += readLength;
+
+        if (readLength < FILE_COPY_BUFFER_SIZE) {
+          break;
+        }
+      }
+    } finally {
+      if (reader) {
+        await fileIo.close(reader);
+      }
+      if (writer) {
+        await fileIo.close(writer);
+      }
     }
   }
 
@@ -342,71 +427,16 @@ export class DownloadTask {
     await zlib.decompressFile(params.targetFile, params.unzipDirectory);
   }
 
-  private async processUnzippedFiles(directory: string): Promise<ZipFile> {
-    const entries: ZipEntry[] = [];
-    try {
-      const files = await fileIo.listFile(directory);
-      for (const file of files) {
-        if (file === '.' || file === '..') {
-          continue;
-        }
-
-        const filePath = `${directory}/${file}`;
-        const stat = await fileIo.stat(filePath);
-
-        if (!stat.isDirectory()) {
-          const reader = await fileIo.open(filePath, fileIo.OpenMode.READ_ONLY);
-          const fileSize = stat.size;
-          const content = new ArrayBuffer(fileSize);
-
-          try {
-            await fileIo.read(reader.fd, content);
-            entries.push({
-              filename: file,
-              content: content,
-            });
-          } finally {
-            await fileIo.close(reader);
-          }
-        }
-      }
-
-      return { entries };
-    } catch (error) {
-      error.message = 'Failed to process unzipped files:' + error.message;
-      console.error(error);
-      throw error;
-    }
-  }
-
   private async doPatchFromApp(params: DownloadTaskParams): Promise<void> {
     await this.downloadFile(params);
     await this.recreateDirectory(params.unzipDirectory);
 
     await zlib.decompressFile(params.targetFile, params.unzipDirectory);
-    const zipFile = await this.processUnzippedFiles(params.unzipDirectory);
-    const entryNames = zipFile.entries.map(entry => entry.filename);
-    let bundlePatchContent: ArrayBuffer | null = null;
-    let manifestArrays: PatchManifestArrays = {
-      copyFroms: [],
-      copyTos: [],
-      deletes: [],
-    };
-
-    for (const entry of zipFile.entries) {
-      const fn = entry.filename;
-
-      if (fn === '__diff.json') {
-        manifestArrays = this.manifestToArrays(
-          this.parseJsonEntry(entry.content),
-          true,
-        );
-        continue;
-      }
-      if (fn === HARMONY_BUNDLE_PATCH_ENTRY) {
-        bundlePatchContent = entry.content;
-      }
-    }
+    const entryNames = await this.listEntryNames(params.unzipDirectory);
+    const manifestArrays = await this.readManifestArrays(
+      params.unzipDirectory,
+      true,
+    );
 
     NativePatchCore.buildArchivePatchPlan(
       ARCHIVE_PATCH_TYPE_FROM_PACKAGE,
@@ -416,16 +446,19 @@ export class DownloadTask {
       manifestArrays.deletes,
       HARMONY_BUNDLE_PATCH_ENTRY,
     );
-    if (!bundlePatchContent) {
+
+    const bundlePatchPath = `${params.unzipDirectory}/${HARMONY_BUNDLE_PATCH_ENTRY}`;
+    if (!fileIo.accessSync(bundlePatchPath)) {
       throw Error('bundle patch not found');
     }
     const resourceManager = this.context.resourceManager;
     const originContent = await resourceManager.getRawFileContent(
       'bundle.harmony.js',
     );
-    await this.applyBundlePatch(
+    await this.applyBundlePatchFromFileSource(
       originContent,
-      bundlePatchContent,
+      params.unzipDirectory,
+      bundlePatchPath,
       `${params.unzipDirectory}/bundle.harmony.js`,
     );
     await this.copyFromResource(
@@ -442,22 +475,11 @@ export class DownloadTask {
     await this.recreateDirectory(params.unzipDirectory);
 
     await zlib.decompressFile(params.targetFile, params.unzipDirectory);
-    const zipFile = await this.processUnzippedFiles(params.unzipDirectory);
-    const entryNames = zipFile.entries.map(entry => entry.filename);
-    let manifestArrays: PatchManifestArrays = {
-      copyFroms: [],
-      copyTos: [],
-      deletes: [],
-    };
-
-    for (const entry of zipFile.entries) {
-      if (entry.filename === '__diff.json') {
-        manifestArrays = this.manifestToArrays(
-          this.parseJsonEntry(entry.content),
-          false,
-        );
-      }
-    }
+    const entryNames = await this.listEntryNames(params.unzipDirectory);
+    const manifestArrays = await this.readManifestArrays(
+      params.unzipDirectory,
+      false,
+    );
 
     const plan = NativePatchCore.buildArchivePatchPlan(
       ARCHIVE_PATCH_TYPE_FROM_PPK,
@@ -493,23 +515,31 @@ export class DownloadTask {
       for (const group of copyGroups) {
         currentFrom = group.from;
         const targets = group.toPaths.map(path => `${targetRoot}/${path}`);
+        if (targets.length === 0) {
+          continue;
+        }
+
         if (currentFrom.startsWith('resources/base/media/')) {
           const mediaName = currentFrom
             .replace('resources/base/media/', '')
             .split('.')[0];
           const mediaBuffer = await resourceManager.getMediaByName(mediaName);
-          for (const target of targets) {
-            await this.ensureParentDirectory(target);
-            const fileStream = fileIo.createStreamSync(target, 'w+');
-            fileStream.writeSync(mediaBuffer.buffer);
-            fileStream.close();
+          const [firstTarget, ...restTargets] = targets;
+          await this.writeFileContent(firstTarget, mediaBuffer.buffer);
+          for (const target of restTargets) {
+            await this.copySandboxFile(firstTarget, target);
           }
           continue;
         }
         const fromContent = await resourceManager.getRawFd(currentFrom);
-        for (const target of targets) {
-          await this.ensureParentDirectory(target);
-          saveFileToSandbox(fromContent, target);
+        const [firstTarget, ...restTargets] = targets;
+        await this.ensureParentDirectory(firstTarget);
+        if (fileIo.accessSync(firstTarget)) {
+          await fileIo.unlink(firstTarget);
+        }
+        saveFileToSandbox(fromContent, firstTarget);
+        for (const target of restTargets) {
+          await this.copySandboxFile(firstTarget, target);
         }
       }
     } catch (error) {

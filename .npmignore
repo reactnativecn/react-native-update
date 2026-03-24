@@ -61,6 +61,7 @@ e2e/
 
 harmony/**
 !harmony/pushy.har
+!harmony/pushy/hvigor-plugin.ts
 
 .tmp
 .cursor

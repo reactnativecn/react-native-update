@@ -4,7 +4,7 @@ import path from 'path';
 export function reactNativeUpdatePlugin() {
   return {
     pluginId: 'reactNativeUpdatePlugin',
-    apply(_node) {
+    apply() {
       const cwd = process.cwd();
       const metaFilePath = path.resolve(
         cwd,
