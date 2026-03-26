@@ -114,6 +114,7 @@ export class Pushy {
   clientType: 'Pushy' | 'Cresc' = 'Pushy';
   lastChecking?: number;
   lastRespJson?: Promise<CheckResult>;
+  lastCheckError?: Error;
 
   version = cInfo.rnu;
   loggerPromise = (() => {
@@ -328,6 +329,8 @@ export class Pushy {
     }
   };
   checkUpdate = async (extra?: Record<string, any>) => {
+    // 新一轮检查开始前先清掉旧错误，避免跳过场景误复用上次失败状态。
+    this.lastCheckError = undefined;
     if (!this.assertDebug('checkUpdate()')) {
       return;
     }
@@ -384,19 +387,24 @@ export class Pushy {
       const respJsonPromise = this.fetchCheckResult(fetchPayload);
       this.lastRespJson = respJsonPromise;
       const result: CheckResult = await respJsonPromise;
+      this.lastCheckError = undefined;
 
       log('checking result:', result);
 
       return result;
     } catch (e: any) {
       this.lastRespJson = previousRespJson;
-      const errorMessage =
-        e?.message || this.t('error_cannot_connect_server');
+      // 保持旧返回约定的同时，把真实失败记录给 Provider 判断状态。
+      this.lastCheckError =
+        e instanceof Error
+          ? e
+          : Error(e?.message || this.t('error_cannot_connect_server'));
+      const errorMessage = this.lastCheckError.message;
       this.report({
         type: 'errorChecking',
         message: errorMessage,
       });
-      this.throwIfEnabled(e);
+      this.throwIfEnabled(this.lastCheckError);
       return previousRespJson ? await previousRespJson : emptyObj;
     }
   };

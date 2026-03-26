@@ -29,6 +29,21 @@ export type CheckResult = RootResult &
     expVersion?: VersionInfo;
   };
 
+// 记录最近一次检查调用的状态，区分完成、跳过和出错。
+export const UPDATE_CHECK_STATUS = {
+  IDLE: 'idle',
+  CHECKING: 'checking',
+  COMPLETED: 'completed',
+  SKIPPED: 'skipped',
+  ERROR: 'error',
+} as const;
+
+export interface UpdateCheckState {
+  status: (typeof UPDATE_CHECK_STATUS)[keyof typeof UPDATE_CHECK_STATUS];
+  result?: CheckResult;
+  error?: Error;
+}
+
 export interface ProgressData {
   hash: string;
   received: number;

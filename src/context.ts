@@ -1,5 +1,10 @@
 import { createContext, useContext } from 'react';
-import { CheckResult, ProgressData } from './type';
+import {
+  CheckResult,
+  ProgressData,
+  UpdateCheckState,
+  UPDATE_CHECK_STATUS,
+} from './type';
 import { Pushy, Cresc } from './client';
 import i18n from './i18n';
 
@@ -20,6 +25,9 @@ export const defaultContext = {
   currentHash: '',
   packageVersion: '',
   currentVersionInfo: {},
+  checkState: {
+    status: UPDATE_CHECK_STATUS.IDLE,
+  },
 };
 
 export const UpdateContext = createContext<{
@@ -49,6 +57,8 @@ export const UpdateContext = createContext<{
   progress?: ProgressData;
   updateInfo?: CheckResult;
   lastError?: Error;
+  // 最近一次检查调用的完整快照，状态、结果和错误会一起更新。
+  checkState: UpdateCheckState;
 }>(defaultContext);
 
 export const useUpdate = __DEV__ ? () => {

@@ -22,6 +22,8 @@ import {
 import {
   CheckResult,
   ProgressData,
+  UpdateCheckState,
+  UPDATE_CHECK_STATUS,
   UpdateTestPayload,
   VersionInfo,
 } from './type';
@@ -45,7 +47,16 @@ export const UpdateProvider = ({
   const updateInfoRef = useRef(updateInfo);
   const [progress, setProgress] = useState<ProgressData>();
   const [lastError, setLastError] = useState<Error>();
+  const [checkState, setCheckStateState] = useState<UpdateCheckState>({
+    status: UPDATE_CHECK_STATUS.IDLE,
+  });
+  const checkStateRef = useRef(checkState);
   const lastChecking = useRef(0);
+
+  const setCheckState = useCallback((nextState: UpdateCheckState) => {
+    checkStateRef.current = nextState;
+    setCheckStateState(nextState);
+  }, []);
 
   const throwErrorIfEnabled = useCallback(
     (e: Error) => {
@@ -58,7 +69,13 @@ export const UpdateProvider = ({
 
   const dismissError = useCallback(() => {
     setLastError(undefined);
-  }, []);
+    if (checkStateRef.current.error) {
+      setCheckState({
+        ...checkStateRef.current,
+        error: undefined,
+      });
+    }
+  }, [setCheckState]);
 
   const alertUpdate = useCallback(
     (...args: Parameters<typeof Alert.alert>) => {
@@ -164,20 +181,56 @@ export const UpdateProvider = ({
   const checkUpdate = useCallback(
     async ({ extra }: { extra?: Partial<{ toHash: string }> } = {}) => {
       const now = Date.now();
+      // 频繁重复触发时不再发起新检查，但需要把本次调用标记为跳过。
       if (lastChecking.current && now - lastChecking.current < 1000) {
+        if (checkStateRef.current.status !== UPDATE_CHECK_STATUS.CHECKING) {
+          setCheckState({
+            status: UPDATE_CHECK_STATUS.SKIPPED,
+          });
+        }
         return;
       }
       lastChecking.current = now;
+      setCheckState({
+        status: UPDATE_CHECK_STATUS.CHECKING,
+      });
+      let result: CheckResult | void;
       let rootInfo: CheckResult | undefined;
       try {
-        rootInfo = { ...(await client.checkUpdate(extra)) };
+        result = await client.checkUpdate(extra);
+        rootInfo = { ...result };
       } catch (e: any) {
         setLastError(e);
+        setCheckState({
+          status: UPDATE_CHECK_STATUS.ERROR,
+          error: e,
+        });
         alertError(client.t('error_update_check_failed'), e.message);
         throwErrorIfEnabled(e);
         return;
       }
+      let nextCheckStatus: UpdateCheckState['status'];
+      let nextCheckError: Error | undefined;
+      // client.checkUpdate 默认会兜底返回旧结果或空对象，这里只额外标记状态，不截断原有流程。
+      if (client.lastCheckError) {
+        nextCheckStatus = UPDATE_CHECK_STATUS.ERROR;
+        nextCheckError = client.lastCheckError;
+        setLastError(client.lastCheckError);
+        alertError(
+          client.t('error_update_check_failed'),
+          client.lastCheckError.message,
+        );
+      } else if (!result) {
+        // undefined 表示本次调用被内部策略跳过，例如 beforeCheckUpdate 返回 false。
+        nextCheckStatus = UPDATE_CHECK_STATUS.SKIPPED;
+      } else {
+        nextCheckStatus = UPDATE_CHECK_STATUS.COMPLETED;
+      }
       if (!rootInfo) {
+        setCheckState({
+          status: nextCheckStatus,
+          error: nextCheckError,
+        });
         return;
       }
       const versions = [rootInfo.expVersion, rootInfo].filter(
@@ -202,6 +255,18 @@ export const UpdateProvider = ({
         }
         updateInfoRef.current = info;
         setUpdateInfo(info);
+        if (nextCheckStatus === UPDATE_CHECK_STATUS.COMPLETED) {
+          setCheckState({
+            status: nextCheckStatus,
+            result: info,
+            error: nextCheckError,
+          });
+        } else {
+          setCheckState({
+            status: nextCheckStatus,
+            error: nextCheckError,
+          });
+        }
         if (info.expired) {
           if (
             options.onPackageExpired &&
@@ -268,11 +333,16 @@ export const UpdateProvider = ({
         }
         return info;
       }
+      setCheckState({
+        status: nextCheckStatus,
+        error: nextCheckError,
+      });
     },
     [
       client,
       alertError,
       throwErrorIfEnabled,
+      setCheckState,
       options,
       alertUpdate,
       downloadAndInstallApk,
@@ -414,6 +484,7 @@ export const UpdateProvider = ({
         currentVersionInfo,
         parseTestQrCode,
         restartApp,
+        checkState,
       }}>
       {children}
     </UpdateContext.Provider>

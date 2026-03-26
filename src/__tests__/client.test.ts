@@ -135,4 +135,71 @@ describe('Pushy server config', () => {
     ]);
     expect(client.options.server?.queryUrls).toEqual(['https://q.example.com']);
   });
+
+  test('stores lastCheckError on failed check and clears it after a successful retry', async () => {
+    setupClientMocks();
+    let shouldFail = true;
+    (globalThis as any).fetch = mock(async (url: string) => {
+      if (url.includes('/checkUpdate/')) {
+        if (shouldFail) {
+          throw new Error('network down');
+        }
+        return createJsonResponse({ upToDate: true });
+      }
+      return createJsonResponse([]);
+    });
+
+    const { Pushy } = await importFreshClient('check-error-state');
+    const client = new Pushy({
+      appKey: 'demo-app',
+      server: {
+        main: ['https://a.example.com'],
+        queryUrls: [],
+      },
+    });
+
+    const failedResult = await client.checkUpdate();
+
+    expect(failedResult).toEqual({});
+    expect(client.lastCheckError).toBeInstanceOf(Error);
+    expect(client.lastCheckError?.message).toContain('network down');
+
+    shouldFail = false;
+
+    const successResult = await client.checkUpdate();
+
+    expect(successResult).toEqual({ upToDate: true });
+    expect(client.lastCheckError).toBeUndefined();
+  });
+
+  test('clears stale lastCheckError when check is skipped by beforeCheckUpdate', async () => {
+    setupClientMocks();
+    (globalThis as any).fetch = mock(async (url: string) => {
+      if (url.includes('/checkUpdate/')) {
+        throw new Error('network down');
+      }
+      return createJsonResponse([]);
+    });
+
+    const { Pushy } = await importFreshClient('clear-error-on-skip');
+    const client = new Pushy({
+      appKey: 'demo-app',
+      server: {
+        main: ['https://a.example.com'],
+        queryUrls: [],
+      },
+    });
+
+    await client.checkUpdate();
+    expect(client.lastCheckError).toBeInstanceOf(Error);
+
+    client.setOptions({
+      beforeCheckUpdate: () => false,
+    });
+
+    const skippedResult = await client.checkUpdate();
+
+    expect(skippedResult).toBeUndefined();
+    expect(client.lastCheckError).toBeUndefined();
+  });
 });
