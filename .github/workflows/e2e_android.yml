@@ -33,7 +33,7 @@ jobs:
           node-version: 20
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: latest
 
@@ -57,7 +57,7 @@ jobs:
         run: node -e "console.log('AVD_NAME=' + require('./Example/testHotUpdate/.detoxrc').devices.emulator.device.avdName)" >> $GITHUB_OUTPUT
 
       - name: Detox test (android.emu.release)
-        uses: reactivecircus/android-emulator-runner@v2
+        uses: reactivecircus/android-emulator-runner@e89f39f1abbbd05b1113a29cf4db69e7540cae5a # v2
         env:
           RNU_CLI_ROOT: ${{ github.workspace }}/react-native-update-cli
         with:
