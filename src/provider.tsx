@@ -165,6 +165,7 @@ export const UpdateProvider = ({
     async ({ extra }: { extra?: Partial<{ toHash: string }> } = {}) => {
       const now = Date.now();
       if (lastChecking.current && now - lastChecking.current < 1000) {
+        client.notifyAfterCheckUpdate({ status: 'skipped' });
         return;
       }
       lastChecking.current = now;

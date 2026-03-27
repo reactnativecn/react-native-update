@@ -22,6 +22,7 @@ import {
   ClientOptions,
   EventType,
   ProgressData,
+  UpdateCheckState,
   UpdateServerConfig,
 } from './type';
 import {
@@ -207,6 +208,16 @@ export class Pushy {
       throw e;
     }
   };
+  notifyAfterCheckUpdate = (state: UpdateCheckState) => {
+    const { afterCheckUpdate } = this.options;
+    if (!afterCheckUpdate) {
+      return;
+    }
+    // 这里仅做状态通知，不阻塞原有检查流程
+    Promise.resolve(afterCheckUpdate(state)).catch((error: any) => {
+      log('afterCheckUpdate failed:', error?.message || error);
+    });
+  };
   getCheckUrl = (endpoint: string) => {
     return `${endpoint}/checkUpdate/${this.options.appKey}`;
   };
@@ -329,9 +340,11 @@ export class Pushy {
   };
   checkUpdate = async (extra?: Record<string, any>) => {
     if (!this.assertDebug('checkUpdate()')) {
+      this.notifyAfterCheckUpdate({ status: 'skipped' });
       return;
     }
     if (!assertWeb()) {
+      this.notifyAfterCheckUpdate({ status: 'skipped' });
       return;
     }
     if (
@@ -339,6 +352,7 @@ export class Pushy {
       (await this.options.beforeCheckUpdate()) === false
     ) {
       log('beforeCheckUpdate returned false, skipping check');
+      this.notifyAfterCheckUpdate({ status: 'skipped' });
       return;
     }
     const now = Date.now();
@@ -347,7 +361,9 @@ export class Pushy {
       this.lastChecking &&
       now - this.lastChecking < 1000 * 5
     ) {
-      return await this.lastRespJson;
+      const result = await this.lastRespJson;
+      this.notifyAfterCheckUpdate({ status: 'completed', result });
+      return result;
     }
     this.lastChecking = now;
     const fetchBody = {
@@ -387,6 +403,7 @@ export class Pushy {
 
       log('checking result:', result);
 
+      this.notifyAfterCheckUpdate({ status: 'completed', result });
       return result;
     } catch (e: any) {
       this.lastRespJson = previousRespJson;
@@ -396,6 +413,7 @@ export class Pushy {
         type: 'errorChecking',
         message: errorMessage,
       });
+      this.notifyAfterCheckUpdate({ status: 'error', error: e });
       this.throwIfEnabled(e);
       return previousRespJson ? await previousRespJson : emptyObj;
     }

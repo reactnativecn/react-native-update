@@ -135,4 +135,68 @@ describe('Pushy server config', () => {
     ]);
     expect(client.options.server?.queryUrls).toEqual(['https://q.example.com']);
   });
+
+  test('calls afterCheckUpdate with skipped when beforeCheckUpdate returns false', async () => {
+    setupClientMocks();
+    const beforeCheckUpdate = mock(() => false);
+    const afterCheckUpdate = mock(() => {});
+
+    const { Pushy } = await importFreshClient('after-check-update-skipped');
+    const client = new Pushy({
+      appKey: 'demo-app',
+      beforeCheckUpdate,
+      afterCheckUpdate,
+    });
+
+    expect(await client.checkUpdate()).toBeUndefined();
+    expect(afterCheckUpdate).toHaveBeenCalledWith({
+      status: 'skipped',
+    });
+  });
+
+  test('calls afterCheckUpdate with completed and result when check succeeds', async () => {
+    setupClientMocks();
+    const afterCheckUpdate = mock(() => {});
+    const checkResult = {
+      update: true as const,
+      name: '1.0.1',
+      hash: 'next-hash',
+      description: 'bugfix',
+    };
+    (globalThis as any).fetch = mock(async () => createJsonResponse(checkResult));
+
+    const { Pushy } = await importFreshClient('after-check-update-completed');
+    const client = new Pushy({
+      appKey: 'demo-app',
+      afterCheckUpdate,
+    });
+
+    expect(await client.checkUpdate()).toEqual(checkResult);
+    expect(afterCheckUpdate).toHaveBeenCalledWith({
+      status: 'completed',
+      result: checkResult,
+    });
+  });
+
+  test('calls afterCheckUpdate with error before rethrowing when throwError is enabled', async () => {
+    setupClientMocks();
+    const afterCheckUpdate = mock(() => {});
+    const fetchError = new Error('boom');
+    (globalThis as any).fetch = mock(async () => {
+      throw fetchError;
+    });
+
+    const { Pushy } = await importFreshClient('after-check-update-error');
+    const client = new Pushy({
+      appKey: 'demo-app',
+      throwError: true,
+      afterCheckUpdate,
+    });
+
+    await expect(client.checkUpdate()).rejects.toThrow('boom');
+    expect(afterCheckUpdate).toHaveBeenCalledWith({
+      status: 'error',
+      error: fetchError,
+    });
+  });
 });
