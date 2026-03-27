@@ -35,6 +35,13 @@ export interface ProgressData {
   total: number;
 }
 
+// 用于描述一次检查结束后的最终状态，便于业务侧感知成功、跳过或失败
+export interface UpdateCheckState {
+  status: 'completed' | 'skipped' | 'error';
+  result?: CheckResult;
+  error?: Error;
+}
+
 export type EventType =
   | 'rollback'
   | 'errorChecking'
@@ -98,6 +105,8 @@ export interface ClientOptions {
   debug?: boolean;
   throwError?: boolean;
   beforeCheckUpdate?: () => Promise<boolean> | boolean;
+  // 每次检查结束后都会触发，不影响原有检查流程
+  afterCheckUpdate?: (state: UpdateCheckState) => Promise<void> | void;
   beforeDownloadUpdate?: (info: CheckResult) => Promise<boolean> | boolean;
   afterDownloadUpdate?: (info: CheckResult) => Promise<boolean> | boolean;
   onPackageExpired?: (info: CheckResult) => Promise<boolean> | boolean;
