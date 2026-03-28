@@ -1,4 +1,4 @@
-import { PushyFileJSBundleProvider  } from 'pushy/src/main/ets/PushyFileJSBundleProvider';
+import { PushyFileJSBundleProvider } from 'pushy';
 import { ComponentBuilderContext, RNOHCoreContext,RNAbility,
   MetroJSBundleProvider } from '@rnoh/react-native-openharmony';
 import {

@@ -1,6 +1,6 @@
 import {
-  TurboModule,
-  TurboModuleContext,
+  UITurboModule,
+  UITurboModuleContext,
 } from '@rnoh/react-native-openharmony/ts';
 import common from '@ohos.app.ability.common';
 import { bundleManager } from '@kit.AbilityKit';
@@ -12,11 +12,13 @@ import { util } from '@kit.ArkTS';
 
 const TAG = 'PushyTurboModule';
 
-export class PushyTurboModule extends TurboModule {
+export class PushyTurboModule extends UITurboModule {
+  public static readonly NAME = 'Pushy';
+
   mUiCtx: common.UIAbilityContext;
   context: UpdateContext;
 
-  constructor(protected ctx: TurboModuleContext) {
+  constructor(protected ctx: UITurboModuleContext) {
     super(ctx);
     logger.debug(TAG, ',PushyTurboModule constructor');
     this.mUiCtx = ctx.uiAbilityContext;

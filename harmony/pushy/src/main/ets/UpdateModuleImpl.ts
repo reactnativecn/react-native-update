@@ -1,4 +1,4 @@
-import bundleManager from '@ohos.bundle.bundleManager';
+import { bundleManager } from '@kit.AbilityKit';
 import common from '@ohos.app.ability.common';
 import { UpdateContext } from './UpdateContext';
 import logger from './Logger';
