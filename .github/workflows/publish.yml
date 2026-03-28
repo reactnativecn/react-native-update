@@ -32,6 +32,7 @@ jobs:
       - name: Verify Harmony HAR artifact
         run: test -f harmony/pushy.har
       - name: Publish to npm
+        shell: bash
         run: |
           if [[ "${{ github.event.release.tag_name }}" == *"beta"* ]]; then
             npm publish --provenance --access public --tag beta
