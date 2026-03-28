@@ -91,9 +91,8 @@ Pod::Spec.new do |s|
   s.source = { :git => 'https://github.com/reactnativecn/react-native-update.git', :tag => '#{s.version}' }
 
   s.libraries = 'bz2', 'z'
-  s.vendored_libraries = 'RCTPushy/libRCTPushy.a'
   s.pod_target_xcconfig = { 
-    'USER_HEADER_SEARCH_PATHS' => "#{podspec_dir}/ios", 
+    'USER_HEADER_SEARCH_PATHS' => "#{podspec_dir}/ios \"$(PODS_ROOT)/Headers/Public/SSZipArchive\" \"$(PODS_ROOT)/Headers/Public/React-Codegen/RCTPushySpec\"", 
     "DEFINES_MODULE" => "YES" 
   }
   s.resource = 'ios/pushy_build_time.txt'
