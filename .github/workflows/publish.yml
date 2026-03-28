@@ -27,12 +27,14 @@ jobs:
           node-version: 24
           registry-url: 'https://registry.npmjs.org'
       - run: bun install --frozen-lockfile
-      - name: Verify Harmony build tools
-        run: |
-          command -v hvigorw >/dev/null 2>&1 || (echo "Missing hvigorw in the Harmony container image." >&2; exit 1)
-          command -v ohpm >/dev/null 2>&1 || (echo "Missing ohpm in the Harmony container image." >&2; exit 1)
       - name: Build Harmony HAR
         run: npm run build:harmony-har -- --build-mode release
       - name: Verify Harmony HAR artifact
         run: test -f harmony/pushy.har
-      - run: npm publish --provenance --access public
+      - name: Publish to npm
+        run: |
+          if [[ "${{ github.event.release.tag_name }}" == *"beta"* ]]; then
+            npm publish --provenance --access public --tag beta
+          else
+            npm publish --provenance --access public
+          fi
