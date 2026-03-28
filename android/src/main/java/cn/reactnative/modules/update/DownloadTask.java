@@ -29,6 +29,8 @@ import java.util.Enumeration;
 import java.util.Iterator;
 import java.util.zip.ZipEntry;
 import java.util.HashMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import okio.BufferedSink;
 import okio.BufferedSource;
@@ -285,7 +287,16 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
         }
     }
 
-    private String findDrawableFallback(String originalToPath, HashMap<String, String> copiesMap, HashMap<String, ZipEntry> availableEntries) {
+    // Pattern to strip -vN version qualifiers from resource directory paths
+    // e.g., "res/drawable-xxhdpi-v4/img.png" → "res/drawable-xxhdpi/img.png"
+    private static final Pattern VERSION_QUALIFIER_PATTERN =
+        Pattern.compile("-v\\d+(?=/)");
+
+    private String normalizeResPath(String path) {
+        return VERSION_QUALIFIER_PATTERN.matcher(path).replaceAll("");
+    }
+
+    private String findDrawableFallback(String originalToPath, HashMap<String, String> copiesMap, HashMap<String, ZipEntry> availableEntries, HashMap<String, String> normalizedEntryMap) {
         // 检查是否是 drawable 路径
         if (!originalToPath.contains("drawable")) {
             return null;
@@ -309,12 +320,21 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
             // 检查这个 key 是否在 copies 映射中
             if (copiesMap.containsKey(fallbackToPath)) {
                 String fallbackFromPath = copiesMap.get(fallbackToPath);
-                // 检查对应的 value 路径是否在 APK 中存在
+                // 检查对应的 value 路径是否在 APK 中存在（精确匹配）
                 if (availableEntries.containsKey(fallbackFromPath)) {
                     if (UpdateContext.DEBUG) {
                         Log.d("react-native-update", "Found fallback for " + originalToPath + ": " + fallbackToPath + " -> " + fallbackFromPath);
                     }
                     return fallbackFromPath;
+                }
+                // 尝试版本限定符无关匹配（APK ↔ AAB 兼容）
+                String normalizedFallback = normalizeResPath(fallbackFromPath);
+                String actualEntry = normalizedEntryMap.get(normalizedFallback);
+                if (actualEntry != null) {
+                    if (UpdateContext.DEBUG) {
+                        Log.d("react-native-update", "Found normalized fallback for " + originalToPath + ": " + fallbackToPath + " -> " + actualEntry);
+                    }
+                    return actualEntry;
                 }
             }
         }
@@ -369,6 +389,14 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
             }
         }
         
+        // 构建规范化路径映射，用于 APK ↔ AAB 版本限定符无关匹配
+        // 例如 "res/drawable-xxhdpi-v4/img.png" → "res/drawable-xxhdpi/img.png"
+        HashMap<String, String> normalizedEntryMap = new HashMap<>();
+        for (String entryName : availableEntries.keySet()) {
+            String normalized = normalizeResPath(entryName);
+            normalizedEntryMap.putIfAbsent(normalized, entryName);
+        }
+        
         // 使用基础 APK 的 ZipFile 作为主要操作对象
         SafeZipFile zipFile = zipFileMap.get(context.getPackageResourcePath());
         
@@ -387,7 +415,21 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
             ZipEntry ze = availableEntries.get(fromPath);
             String actualSourcePath = fromPath;
             
-            // 如果文件不存在，尝试 fallback
+            // 如果精确匹配找不到，尝试版本限定符无关匹配（APK ↔ AAB 兼容）
+            // 例如 __diff.json 中的 "res/drawable-xxhdpi-v4/img.png" 匹配设备上的 "res/drawable-xxhdpi/img.png"
+            if (ze == null) {
+                String normalizedFrom = normalizeResPath(fromPath);
+                String actualEntry = normalizedEntryMap.get(normalizedFrom);
+                if (actualEntry != null) {
+                    ze = availableEntries.get(actualEntry);
+                    actualSourcePath = actualEntry;
+                    if (UpdateContext.DEBUG) {
+                        Log.d("react-native-update", "Normalized match: " + fromPath + " -> " + actualEntry);
+                    }
+                }
+            }
+            
+            // 如果仍然找不到，尝试 drawable 密度降级 fallback
             if (ze == null) {
                 if (UpdateContext.DEBUG) {
                     Log.d("react-native-update", "File not found in APK: " + fromPath + ", trying fallback");
@@ -405,28 +447,10 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
                     if (UpdateContext.DEBUG) {
                         Log.d("react-native-update", "Found toPath: " + toPath + " for fromPath: " + fromPath);
                     }
-                    String fallbackFromPath = findDrawableFallback(toPath, copiesMap, availableEntries);
+                    String fallbackFromPath = findDrawableFallback(toPath, copiesMap, availableEntries, normalizedEntryMap);
                     if (fallbackFromPath != null) {
                         ze = availableEntries.get(fallbackFromPath);
                         actualSourcePath = fallbackFromPath;
-                        // 确保 fallback 路径也在 entryToZipFileMap 中
-                        if (!entryToZipFileMap.containsKey(fallbackFromPath)) {
-                            // 查找包含该 fallback 路径的 ZipFile
-                            for (String apkPath : apkPaths) {
-                                SafeZipFile testZipFile = zipFileMap.get(apkPath);
-                                if (testZipFile != null) {
-                                    try {
-                                        ZipEntry testEntry = testZipFile.getEntry(fallbackFromPath);
-                                        if (testEntry != null) {
-                                            entryToZipFileMap.put(fallbackFromPath, testZipFile);
-                                            break;
-                                        }
-                                    } catch (Exception e) {
-                                        // 继续查找
-                                    }
-                                }
-                            }
-                        }
                         if (UpdateContext.DEBUG) {
                             Log.w("react-native-update", "Using fallback: " + fallbackFromPath + " for " + fromPath);
                         }
