@@ -68,7 +68,13 @@ export class DownloadTask {
     }
 
     if (!fileIo.accessSync(path)) {
-      await fileIo.mkdir(path);
+      try {
+        await fileIo.mkdir(path);
+      } catch (error) {
+        if (!fileIo.accessSync(path)) {
+          throw error;
+        }
+      }
     }
   }
 
@@ -514,6 +520,14 @@ export class DownloadTask {
             .replace('resources/base/media/', '')
             .split('.')[0];
           const mediaBuffer = await resourceManager.getMediaByName(mediaName);
+          const parentDirs = [
+            ...new Set(
+              targets.map(t => t.substring(0, t.lastIndexOf('/'))).filter(Boolean),
+            ),
+          ];
+          for (const dir of parentDirs) {
+            await this.ensureDirectory(dir);
+          }
           await Promise.all(
             targets.map(target => this.writeFileContent(target, mediaBuffer.buffer)),
           );
@@ -521,7 +535,14 @@ export class DownloadTask {
         }
         const fromContent = await resourceManager.getRawFd(currentFrom);
         const [firstTarget, ...restTargets] = targets;
-        await this.ensureParentDirectory(firstTarget);
+        const parentDirs = [
+          ...new Set(
+            targets.map(t => t.substring(0, t.lastIndexOf('/'))).filter(Boolean),
+          ),
+        ];
+        for (const dir of parentDirs) {
+          await this.ensureDirectory(dir);
+        }
         if (fileIo.accessSync(firstTarget)) {
           await fileIo.unlink(firstTarget);
         }
