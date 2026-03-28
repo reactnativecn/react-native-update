@@ -124,12 +124,6 @@ export const fetchWithTimeout = (
   });
 };
 
-// export const isAndroid70AndBelow = () => {
-//   // android 7.0 and below devices do not support letsencrypt cert
-//   // https://letsencrypt.org/2023/07/10/cross-sign-expiration/
-//   return Platform.OS === 'android' && Platform.Version <= 24;
-// };
-
 export const enhancedFetch = async (
   url: string,
   params: Parameters<typeof fetch>[1],
