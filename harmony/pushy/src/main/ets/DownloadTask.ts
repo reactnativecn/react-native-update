@@ -68,7 +68,13 @@ export class DownloadTask {
     }
 
     if (!fileIo.accessSync(path)) {
-      await fileIo.mkdir(path);
+      try {
+        await fileIo.mkdir(path);
+      } catch (error) {
+        if (!fileIo.accessSync(path)) {
+          throw error;
+        }
+      }
     }
   }
 
@@ -99,22 +105,14 @@ export class DownloadTask {
   }
 
   private async listEntryNames(directory: string): Promise<string[]> {
-    const entryNames: string[] = [];
     const files = await fileIo.listFile(directory);
+    const validFiles = files.filter(file => file !== '.' && file !== '..');
 
-    for (const file of files) {
-      if (file === '.' || file === '..') {
-        continue;
-      }
+    const stats = await Promise.all(
+      validFiles.map(file => fileIo.stat(`${directory}/${file}`)),
+    );
 
-      const filePath = `${directory}/${file}`;
-      const stat = await fileIo.stat(filePath);
-      if (!stat.isDirectory()) {
-        entryNames.push(file);
-      }
-    }
-
-    return entryNames;
+    return validFiles.filter((_, index) => !stats[index].isDirectory());
   }
 
   private async writeFileContent(
@@ -432,11 +430,10 @@ export class DownloadTask {
     await this.recreateDirectory(params.unzipDirectory);
 
     await zlib.decompressFile(params.targetFile, params.unzipDirectory);
-    const entryNames = await this.listEntryNames(params.unzipDirectory);
-    const manifestArrays = await this.readManifestArrays(
-      params.unzipDirectory,
-      true,
-    );
+    const [entryNames, manifestArrays] = await Promise.all([
+      this.listEntryNames(params.unzipDirectory),
+      this.readManifestArrays(params.unzipDirectory, true),
+    ]);
 
     NativePatchCore.buildArchivePatchPlan(
       ARCHIVE_PATCH_TYPE_FROM_PACKAGE,
@@ -475,11 +472,10 @@ export class DownloadTask {
     await this.recreateDirectory(params.unzipDirectory);
 
     await zlib.decompressFile(params.targetFile, params.unzipDirectory);
-    const entryNames = await this.listEntryNames(params.unzipDirectory);
-    const manifestArrays = await this.readManifestArrays(
-      params.unzipDirectory,
-      false,
-    );
+    const [entryNames, manifestArrays] = await Promise.all([
+      this.listEntryNames(params.unzipDirectory),
+      this.readManifestArrays(params.unzipDirectory, false),
+    ]);
 
     const plan = NativePatchCore.buildArchivePatchPlan(
       ARCHIVE_PATCH_TYPE_FROM_PPK,
@@ -524,23 +520,36 @@ export class DownloadTask {
             .replace('resources/base/media/', '')
             .split('.')[0];
           const mediaBuffer = await resourceManager.getMediaByName(mediaName);
-          const [firstTarget, ...restTargets] = targets;
-          await this.writeFileContent(firstTarget, mediaBuffer.buffer);
-          for (const target of restTargets) {
-            await this.copySandboxFile(firstTarget, target);
+          const parentDirs = [
+            ...new Set(
+              targets.map(t => t.substring(0, t.lastIndexOf('/'))).filter(Boolean),
+            ),
+          ];
+          for (const dir of parentDirs) {
+            await this.ensureDirectory(dir);
           }
+          await Promise.all(
+            targets.map(target => this.writeFileContent(target, mediaBuffer.buffer)),
+          );
           continue;
         }
         const fromContent = await resourceManager.getRawFd(currentFrom);
         const [firstTarget, ...restTargets] = targets;
-        await this.ensureParentDirectory(firstTarget);
+        const parentDirs = [
+          ...new Set(
+            targets.map(t => t.substring(0, t.lastIndexOf('/'))).filter(Boolean),
+          ),
+        ];
+        for (const dir of parentDirs) {
+          await this.ensureDirectory(dir);
+        }
         if (fileIo.accessSync(firstTarget)) {
           await fileIo.unlink(firstTarget);
         }
         saveFileToSandbox(fromContent, firstTarget);
-        for (const target of restTargets) {
-          await this.copySandboxFile(firstTarget, target);
-        }
+        await Promise.all(
+          restTargets.map(target => this.copySandboxFile(firstTarget, target)),
+        );
       }
     } catch (error) {
       error.message =
