@@ -350,23 +350,27 @@ export class DownloadTask {
         );
 
         const { copies, deletes } = obj;
-        for (const [to, from] of Object.entries(copies)) {
-          await fileIo
-            .copyFile(
-              `${params.originDirectory}/${from}`,
-              `${params.unzipDirectory}/${to}`,
-            )
-            .catch(error => {
-              console.error('copy error:', error);
-            });
-        }
-        for (const fileToDelete of Object.keys(deletes)) {
-          await fileIo
-            .unlink(`${params.unzipDirectory}/${fileToDelete}`)
-            .catch(error => {
-              console.error('delete error:', error);
-            });
-        }
+        await Promise.all(
+          Object.entries(copies as Record<string, string>).map(([to, from]) =>
+            fileIo
+              .copyFile(
+                `${params.originDirectory}/${from}`,
+                `${params.unzipDirectory}/${to}`,
+              )
+              .catch(error => {
+                console.error('copy error:', error);
+              }),
+          ),
+        );
+        await Promise.all(
+          Object.keys(deletes as Record<string, string>).map(fileToDelete =>
+            fileIo
+              .unlink(`${params.unzipDirectory}/${fileToDelete}`)
+              .catch(error => {
+                console.error('delete error:', error);
+              }),
+          ),
+        );
         continue;
       }
       if (fn === 'bundle.harmony.js.patch') {
