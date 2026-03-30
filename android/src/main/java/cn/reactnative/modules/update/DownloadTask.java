@@ -291,9 +291,16 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
     // e.g., "res/drawable-xxhdpi-v4/img.png" → "res/drawable-xxhdpi/img.png"
     private static final Pattern VERSION_QUALIFIER_PATTERN =
         Pattern.compile("-v\\d+(?=/)");
+    // AAB internal paths are prefixed with "base/" (e.g., "base/res/drawable-xxhdpi/img.png")
+    // which does not exist in standard APK layout
+    private static final String AAB_BASE_PREFIX = "base/";
 
     private String normalizeResPath(String path) {
-        return VERSION_QUALIFIER_PATTERN.matcher(path).replaceAll("");
+        String result = path;
+        if (result.startsWith(AAB_BASE_PREFIX)) {
+            result = result.substring(AAB_BASE_PREFIX.length());
+        }
+        return VERSION_QUALIFIER_PATTERN.matcher(result).replaceAll("");
     }
 
     private String findDrawableFallback(String originalToPath, HashMap<String, String> copiesMap, HashMap<String, ZipEntry> availableEntries, HashMap<String, String> normalizedEntryMap) {
