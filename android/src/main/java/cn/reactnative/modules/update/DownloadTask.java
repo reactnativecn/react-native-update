@@ -3,9 +3,12 @@ package cn.reactnative.modules.update;
 import android.content.Context;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.content.res.Resources;
 import android.os.AsyncTask;
 import android.os.Build;
+import android.util.DisplayMetrics;
 import android.util.Log;
+import android.util.TypedValue;
 import com.facebook.react.bridge.Arguments;
 import com.facebook.react.bridge.WritableMap;
 
@@ -29,7 +32,6 @@ import java.util.Enumeration;
 import java.util.Iterator;
 import java.util.zip.ZipEntry;
 import java.util.HashMap;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import okio.BufferedSink;
@@ -197,8 +199,7 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
         JSONObject manifest,
         ArrayList<String> copyFroms,
         ArrayList<String> copyTos,
-        ArrayList<String> deletes,
-        HashMap<String, String> copiesMap
+        ArrayList<String> deletes
     ) throws JSONException {
         JSONObject copies = manifest.optJSONObject("copies");
         if (copies != null) {
@@ -211,9 +212,6 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
                 }
                 copyFroms.add(from);
                 copyTos.add(to);
-                if (copiesMap != null) {
-                    copiesMap.put(to, from);
-                }
             }
         }
 
@@ -228,13 +226,20 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
 
     private void copyBundledAssetToFile(String assetName, File destination) throws IOException {
         InputStream in = context.getAssets().open(assetName);
+        copyInputStreamToFile(in, destination);
+    }
+
+    private void copyInputStreamToFile(InputStream in, File destination) throws IOException {
         FileOutputStream fout = new FileOutputStream(destination);
-        int count;
-        while ((count = in.read(buffer)) != -1) {
-            fout.write(buffer, 0, count);
+        try {
+            int count;
+            while ((count = in.read(buffer)) != -1) {
+                fout.write(buffer, 0, count);
+            }
+        } finally {
+            fout.close();
+            in.close();
         }
-        fout.close();
-        in.close();
     }
 
     private HashMap<String, ArrayList<File>> buildCopyList(
@@ -303,53 +308,127 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
         return VERSION_QUALIFIER_PATTERN.matcher(result).replaceAll("");
     }
 
-    private String findDrawableFallback(String originalToPath, HashMap<String, String> copiesMap, HashMap<String, ZipEntry> availableEntries, HashMap<String, String> normalizedEntryMap) {
-        // 检查是否是 drawable 路径
-        if (!originalToPath.contains("drawable")) {
-            return null;
-        }
+    private static class ResolvedResourceSource {
+        final int resourceId;
+        final String assetPath;
 
-        // 提取文件名（路径的最后部分）
-        int lastSlash = originalToPath.lastIndexOf('/');
-        if (lastSlash == -1) {
-            return null;
+        ResolvedResourceSource(int resourceId, String assetPath) {
+            this.resourceId = resourceId;
+            this.assetPath = assetPath;
         }
-        String fileName = originalToPath.substring(lastSlash + 1);
-        
-        // 定义密度优先级（从高到低）
-        String[] densities = {"xxxhdpi", "xxhdpi", "xhdpi", "hdpi", "mdpi", "ldpi"};
-        
-        // 尝试找到相同文件名但不同密度的 key
-        for (String density : densities) {
-            // 构建可能的 key 路径（替换密度部分）
-            String fallbackToPath = originalToPath.replaceFirst("drawable-[^/]+", "drawable-" + density);
-            
-            // 检查这个 key 是否在 copies 映射中
-            if (copiesMap.containsKey(fallbackToPath)) {
-                String fallbackFromPath = copiesMap.get(fallbackToPath);
-                // 检查对应的 value 路径是否在 APK 中存在（精确匹配）
-                if (availableEntries.containsKey(fallbackFromPath)) {
-                    if (UpdateContext.DEBUG) {
-                        Log.d("react-native-update", "Found fallback for " + originalToPath + ": " + fallbackToPath + " -> " + fallbackFromPath);
-                    }
-                    return fallbackFromPath;
-                }
-                // 尝试版本限定符无关匹配（APK ↔ AAB 兼容）
-                String normalizedFallback = normalizeResPath(fallbackFromPath);
-                String actualEntry = normalizedEntryMap.get(normalizedFallback);
-                if (actualEntry != null) {
-                    if (UpdateContext.DEBUG) {
-                        Log.d("react-native-update", "Found normalized fallback for " + originalToPath + ": " + fallbackToPath + " -> " + actualEntry);
-                    }
-                    return actualEntry;
-                }
+    }
+
+    private String extractResourceType(String directoryName) {
+        int qualifierIndex = directoryName.indexOf('-');
+        if (qualifierIndex == -1) {
+            return directoryName;
+        }
+        return directoryName.substring(0, qualifierIndex);
+    }
+
+    private String extractResourceName(String fileName) {
+        if (fileName.endsWith(".9.png")) {
+            return fileName.substring(0, fileName.length() - ".9.png".length());
+        }
+        int extensionIndex = fileName.lastIndexOf('.');
+        if (extensionIndex == -1) {
+            return fileName;
+        }
+        return fileName.substring(0, extensionIndex);
+    }
+
+    private Integer parseDensityQualifier(String directoryName) {
+        String[] qualifiers = directoryName.split("-");
+        for (String qualifier : qualifiers) {
+            if ("ldpi".equals(qualifier)) {
+                return DisplayMetrics.DENSITY_LOW;
+            }
+            if ("mdpi".equals(qualifier)) {
+                return DisplayMetrics.DENSITY_MEDIUM;
+            }
+            if ("hdpi".equals(qualifier)) {
+                return DisplayMetrics.DENSITY_HIGH;
+            }
+            if ("xhdpi".equals(qualifier)) {
+                return DisplayMetrics.DENSITY_XHIGH;
+            }
+            if ("xxhdpi".equals(qualifier)) {
+                return DisplayMetrics.DENSITY_XXHIGH;
+            }
+            if ("xxxhdpi".equals(qualifier)) {
+                return DisplayMetrics.DENSITY_XXXHIGH;
+            }
+            if ("tvdpi".equals(qualifier)) {
+                return DisplayMetrics.DENSITY_TV;
             }
         }
-        
         return null;
     }
 
-    private void copyFromResource(HashMap<String, ArrayList<File> > resToCopy, HashMap<String, String> copiesMap) throws IOException {
+    private ResolvedResourceSource resolveBundledResource(String resourcePath) {
+        String normalizedPath = normalizeResPath(resourcePath);
+        if (normalizedPath.startsWith("res/")) {
+            normalizedPath = normalizedPath.substring("res/".length());
+        }
+
+        int slash = normalizedPath.indexOf('/');
+        if (slash == -1 || slash == normalizedPath.length() - 1) {
+            return null;
+        }
+
+        String directoryName = normalizedPath.substring(0, slash);
+        String fileName = normalizedPath.substring(slash + 1);
+        String resourceType = extractResourceType(directoryName);
+        String resourceName = extractResourceName(fileName);
+        if (resourceType == null || resourceType.isEmpty() || resourceName.isEmpty()) {
+            return null;
+        }
+
+        Resources resources = context.getResources();
+        int resourceId = resources.getIdentifier(resourceName, resourceType, context.getPackageName());
+        if (resourceId == 0) {
+            return null;
+        }
+
+        TypedValue typedValue = new TypedValue();
+        try {
+            Integer density = parseDensityQualifier(directoryName);
+            if (density != null) {
+                resources.getValueForDensity(resourceId, density, typedValue, true);
+            } else {
+                resources.getValue(resourceId, typedValue, true);
+            }
+        } catch (Resources.NotFoundException e) {
+            if (UpdateContext.DEBUG) {
+                Log.d("react-native-update", "Failed to resolve resource value for " + resourcePath + ": " + e.getMessage());
+            }
+            return null;
+        }
+
+        if (typedValue.string == null) {
+            return null;
+        }
+
+        String assetPath = typedValue.string.toString();
+        if (assetPath.startsWith("/")) {
+            assetPath = assetPath.substring(1);
+        }
+
+        if (UpdateContext.DEBUG) {
+            Log.d("react-native-update", "Resolved resource path " + resourcePath + " -> " + assetPath);
+        }
+        return new ResolvedResourceSource(resourceId, assetPath);
+    }
+
+    private InputStream openResolvedResourceStream(ResolvedResourceSource source) throws IOException {
+        try {
+            return context.getResources().openRawResource(source.resourceId);
+        } catch (Resources.NotFoundException e) {
+            throw new IOException("Unable to open resolved resource: " + source.assetPath, e);
+        }
+    }
+
+    private void copyFromResource(HashMap<String, ArrayList<File> > resToCopy) throws IOException {
         if (UpdateContext.DEBUG) {
             Log.d("react-native-update", "copyFromResource called, resToCopy size: " + resToCopy.size());
         }
@@ -421,6 +500,7 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
             
             ZipEntry ze = availableEntries.get(fromPath);
             String actualSourcePath = fromPath;
+            ResolvedResourceSource resolvedResource = null;
             
             // 如果精确匹配找不到，尝试版本限定符无关匹配（APK ↔ AAB 兼容）
             // 例如 __diff.json 中的 "res/drawable-xxhdpi-v4/img.png" 匹配设备上的 "res/drawable-xxhdpi/img.png"
@@ -435,45 +515,17 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
                     }
                 }
             }
-            
-            // 如果仍然找不到，尝试 drawable 密度降级 fallback
+
+            // release APK 可能会将资源 entry 名压缩为 res/9w.png 之类的短路径；
+            // 这时通过 Resources 解析逻辑资源名，再直接读取资源内容。
             if (ze == null) {
-                if (UpdateContext.DEBUG) {
-                    Log.d("react-native-update", "File not found in APK: " + fromPath + ", trying fallback");
-                }
-                // 找到对应的 to 路径（从 copiesMap 的反向查找）
-                String toPath = null;
-                for (String to : copiesMap.keySet()) {
-                    if (copiesMap.get(to).equals(fromPath)) {
-                        toPath = to;
-                        break;
-                    }
-                }
-                
-                if (toPath != null) {
-                    if (UpdateContext.DEBUG) {
-                        Log.d("react-native-update", "Found toPath: " + toPath + " for fromPath: " + fromPath);
-                    }
-                    String fallbackFromPath = findDrawableFallback(toPath, copiesMap, availableEntries, normalizedEntryMap);
-                    if (fallbackFromPath != null) {
-                        ze = availableEntries.get(fallbackFromPath);
-                        actualSourcePath = fallbackFromPath;
-                        if (UpdateContext.DEBUG) {
-                            Log.w("react-native-update", "Using fallback: " + fallbackFromPath + " for " + fromPath);
-                        }
-                    } else {
-                        if (UpdateContext.DEBUG) {
-                            Log.w("react-native-update", "No fallback found for: " + fromPath + " (toPath: " + toPath + ")");
-                        }
-                    }
-                } else {
-                    if (UpdateContext.DEBUG) {
-                        Log.w("react-native-update", "No toPath found for fromPath: " + fromPath);
-                    }
+                resolvedResource = resolveBundledResource(fromPath);
+                if (resolvedResource != null) {
+                    actualSourcePath = resolvedResource.assetPath;
                 }
             }
             
-            if (ze != null) {
+            if (ze != null || resolvedResource != null) {
                 File lastTarget = null;
                 for (File target: targets) {
                     if (UpdateContext.DEBUG) {
@@ -489,12 +541,17 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
                         if (lastTarget != null) {
                             copyFile(lastTarget, target);
                         } else {
-                            // 从保存的映射中获取包含该条目的 ZipFile
-                            SafeZipFile sourceZipFile = entryToZipFileMap.get(actualSourcePath);
-                            if (sourceZipFile == null) {
-                                sourceZipFile = zipFile; // 回退到基础 APK
+                            if (ze != null) {
+                                // 从保存的映射中获取包含该条目的 ZipFile
+                                SafeZipFile sourceZipFile = entryToZipFileMap.get(actualSourcePath);
+                                if (sourceZipFile == null) {
+                                    sourceZipFile = zipFile; // 回退到基础 APK
+                                }
+                                sourceZipFile.unzipToFile(ze, target);
+                            } else {
+                                InputStream in = openResolvedResourceStream(resolvedResource);
+                                copyInputStreamToFile(in, target);
                             }
-                            sourceZipFile.unzipToFile(ze, target);
                             lastTarget = target;
                         }
                     } catch (IOException e) {
@@ -526,7 +583,6 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
 
         removeDirectory(param.unzipDirectory);
         param.unzipDirectory.mkdirs();
-        HashMap<String, String> copiesMap = new HashMap<String, String>(); // to -> from 映射
         ArrayList<String> entryNames = new ArrayList<String>();
         ArrayList<String> copyFroms = new ArrayList<String>();
         ArrayList<String> copyTos = new ArrayList<String>();
@@ -544,7 +600,7 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
                 byte[] bytes = readBytes(zipFile.getInputStream(ze));
                 String json = new String(bytes, "UTF-8");
                 JSONObject obj = (JSONObject)new JSONTokener(json).nextValue();
-                appendManifestEntries(obj, copyFroms, copyTos, deletes, copiesMap);
+                appendManifestEntries(obj, copyFroms, copyTos, deletes);
                 continue;
             }
             zipFile.unzipToPath(ze, param.unzipDirectory);
@@ -587,13 +643,13 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
         }
 
         if (UpdateContext.DEBUG) {
-            Log.d("react-native-update", "copyList size: " + copyList.size() + ", copiesMap size: " + copiesMap.size());
+            Log.d("react-native-update", "copyList size: " + copyList.size());
             for (String from : copyList.keySet()) {
                 Log.d("react-native-update", "copyList entry: " + from + " -> " + copyList.get(from).size() + " targets");
             }
         }
 
-        copyFromResource(copyList, copiesMap);
+        copyFromResource(copyList);
 
         if (UpdateContext.DEBUG) {
             Log.d("react-native-update", "Unzip finished");
@@ -625,7 +681,7 @@ class DownloadTask extends AsyncTask<DownloadTaskParams, long[], Void> {
                 byte[] bytes = readBytes(zipFile.getInputStream(ze));
                 String json = new String(bytes, "UTF-8");
                 JSONObject obj = (JSONObject)new JSONTokener(json).nextValue();
-                appendManifestEntries(obj, copyFroms, copyTos, deletes, null);
+                appendManifestEntries(obj, copyFroms, copyTos, deletes);
                 continue;
             }
             zipFile.unzipToPath(ze, param.unzipDirectory);
