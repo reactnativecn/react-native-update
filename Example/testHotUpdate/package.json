@@ -12,7 +12,8 @@
     "lint": "eslint .",
     "postinstall": "patch-package",
     "apk": "cd android && ./gradlew assembleRelease",
-    "aab": "cd android && ./gradlew bundleRelease"
+    "aab": "cd android && ./gradlew bundleRelease",
+    "aa": "cd android && ./gradlew assembleRelease bundleRelease"
   },
   "dependencies": {
     "form-data": "^4.0.5",
@@ -23,7 +24,7 @@
     "react-native-paper": "^5.15.0",
     "react-native-safe-area-context": "^5.7.0",
     "react-native-svg": "^15.15.4",
-    "react-native-update": "^10.38.0-beta.3",
+    "react-native-update": "^10.39.0-beta.3",
     "react-native-vector-icons": "^10.3.0"
   },
   "devDependencies": {
