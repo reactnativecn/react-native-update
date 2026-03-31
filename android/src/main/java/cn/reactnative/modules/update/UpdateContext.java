@@ -8,25 +8,26 @@ import android.os.Build;
 import android.os.Environment;
 import android.util.Log;
 import com.facebook.react.ReactInstanceManager;
-import java.util.HashMap;
-import java.util.Map;
+import java.io.File;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
-import java.io.File;
 
 public class UpdateContext {
     static {
         NativeUpdateCore.ensureLoaded();
     }
 
-    private Context context;
-    private File rootDir;
-    private Executor executor;
+    static final String TAG = "react-native-update";
+    static final boolean DEBUG = BuildConfig.DEBUG;
 
-    public static boolean DEBUG = true;
-    private static ReactInstanceManager mReactInstanceManager;
-    private static boolean isUsingBundleUrl = false;
-    private static boolean ignoreRollback = false;
+    private final Context context;
+    private final File rootDir;
+    private final Executor executor;
+    private final SharedPreferences sp;
+
+    private ReactInstanceManager reactInstanceManager;
+    private boolean isUsingBundleUrl;
+    private boolean ignoreRollback;
     private static final int STATE_OP_SWITCH_VERSION = 1;
     private static final int STATE_OP_MARK_SUCCESS = 2;
     private static final int STATE_OP_ROLLBACK = 3;
@@ -38,6 +39,7 @@ public class UpdateContext {
     // Singleton instance
     private static UpdateContext sInstance;
     private static final Object sLock = new Object();
+    private static ReactInstanceManager pendingReactInstanceManager;
 
     private static native StateCoreResult syncStateWithBinaryVersion(
         String packageVersion,
@@ -54,16 +56,17 @@ public class UpdateContext {
     );
 
     public UpdateContext(Context context) {
-        this.context = context;
+        this.context = context.getApplicationContext();
         this.executor = Executors.newSingleThreadExecutor();
 
-        this.rootDir = new File(context.getFilesDir(), "_update");
+        this.rootDir = new File(this.context.getFilesDir(), "_update");
 
-        if (!rootDir.exists()) {
-            rootDir.mkdir();
+        if (!rootDir.exists() && !rootDir.mkdirs() && !rootDir.exists()) {
+            throw new IllegalStateException("Failed to create update root dir: " + rootDir);
         }
 
-        this.sp = context.getSharedPreferences("update", Context.MODE_PRIVATE);
+        this.sp = this.context.getSharedPreferences("update", Context.MODE_PRIVATE);
+        this.reactInstanceManager = pendingReactInstanceManager;
 
         String packageVersion = getPackageVersion();
         String buildTime = getBuildTime();
@@ -107,6 +110,10 @@ public class UpdateContext {
         return isUsingBundleUrl;
     }
 
+    private void enqueue(DownloadTaskParams params) {
+        executor.execute(new DownloadTask(context, params));
+    }
+
     public interface DownloadFileListener {
         void onDownloadCompleted(DownloadTaskParams params);
         void onDownloadFailed(Throwable error);
@@ -120,7 +127,7 @@ public class UpdateContext {
         params.listener = listener;
         params.targetFile = new File(rootDir, hash + ".ppk");
         params.unzipDirectory = new File(rootDir, hash);
-        new DownloadTask(context).executeOnExecutor(this.executor, params);
+        enqueue(params);
     }
 
     public void downloadFile(String url, String hash, String fileName, DownloadFileListener listener) {
@@ -138,7 +145,7 @@ public class UpdateContext {
 
         }
 //        params.unzipDirectory = new File(rootDir, hash);
-        new DownloadTask(context).executeOnExecutor(this.executor, params);
+        enqueue(params);
     }
 
     public void downloadPatchFromApk(String url, String hash, DownloadFileListener listener) {
@@ -149,7 +156,7 @@ public class UpdateContext {
         params.listener = listener;
         params.targetFile = new File(rootDir, hash + ".apk.patch");
         params.unzipDirectory = new File(rootDir, hash);
-        new DownloadTask(context).executeOnExecutor(this.executor, params);
+        enqueue(params);
     }
 
     public void downloadPatchFromPpk(String url, String hash, String originHash, DownloadFileListener listener) {
@@ -162,10 +169,8 @@ public class UpdateContext {
         params.targetFile = new File(rootDir, originHash + "-" + hash + ".ppk.patch");
         params.unzipDirectory = new File(rootDir, hash);
         params.originDirectory = new File(rootDir, originHash);
-        new DownloadTask(context).executeOnExecutor(this.executor, params);
+        enqueue(params);
     }
-
-    private SharedPreferences sp;
 
     private StateCoreResult getStateSnapshot() {
         StateCoreResult state = new StateCoreResult();
@@ -203,7 +208,7 @@ public class UpdateContext {
 
     private void persistEditor(SharedPreferences.Editor editor, String reason) {
         if (!editor.commit() && DEBUG) {
-            Log.w("react-native-update", "Failed to persist update state for " + reason);
+            Log.w(TAG, "Failed to persist update state for " + reason);
         }
     }
 
@@ -314,11 +319,16 @@ public class UpdateContext {
 
 
     public static void setCustomInstanceManager(ReactInstanceManager instanceManager) {
-        mReactInstanceManager = instanceManager;
+        synchronized (sLock) {
+            pendingReactInstanceManager = instanceManager;
+            if (sInstance != null) {
+                sInstance.reactInstanceManager = instanceManager;
+            }
+        }
     }
 
     public ReactInstanceManager getCustomReactInstanceManager() {
-        return mReactInstanceManager;
+        return reactInstanceManager;
     }
 
     /**
@@ -378,7 +388,7 @@ public class UpdateContext {
         while (currentVersion != null) {
             File bundleFile = new File(rootDir, currentVersion+"/index.bundlejs");
             if (!bundleFile.exists()) {
-                Log.e("getBundleUrl", "Bundle version " + currentVersion + " not found.");
+                Log.e(TAG, "Bundle version " + currentVersion + " not found.");
                 currentVersion = this.rollBack();
                 continue;
             }
@@ -409,6 +419,6 @@ public class UpdateContext {
         params.hash = sp.getString("currentVersion", null);
         params.originHash = sp.getString("lastVersion", null);
         params.unzipDirectory = rootDir;
-        new DownloadTask(context).executeOnExecutor(this.executor, params);
+        enqueue(params);
     }
 }

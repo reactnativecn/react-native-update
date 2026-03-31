@@ -66,8 +66,9 @@ public class SafeZipFile extends ZipFile {
             throw new SecurityException("Illegal name: " + name);
         }
 
-        
-        Log.d("react-native-update", "Unzipping " + name);
+        if (UpdateContext.DEBUG) {
+            Log.d(UpdateContext.TAG, "Unzipping " + name);
+        }
 
         if (ze.isDirectory()) {
             target.mkdirs();
@@ -77,6 +78,11 @@ public class SafeZipFile extends ZipFile {
     }
 
     public void unzipToFile(ZipEntry ze, File target) throws IOException {
+        File parent = target.getParentFile();
+        if (parent != null && !parent.exists() && !parent.mkdirs() && !parent.exists()) {
+            throw new IOException("Failed to create parent dir for " + target);
+        }
+
         try (InputStream inputStream = getInputStream(ze)) {
             try (BufferedOutputStream output = new BufferedOutputStream(new FileOutputStream(target));
                  BufferedInputStream input = new BufferedInputStream(inputStream)) {

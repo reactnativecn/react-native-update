@@ -13,11 +13,7 @@ public class UpdatePackage extends TurboReactPackage {
     @Nullable
     @Override
     public NativeModule getModule(String name, ReactApplicationContext reactContext) {
-        if (name.equals(UpdateModuleImpl.NAME)) {
-            return new UpdateModule(reactContext);
-        } else {
-            return null;
-        }
+        return name.equals(UpdateModuleImpl.NAME) ? new UpdateModule(reactContext) : null;
     }
 
     @Override

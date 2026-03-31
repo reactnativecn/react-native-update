@@ -176,7 +176,6 @@ repositories {
 
 dependencies {
     implementation 'com.facebook.react:react-native:+'
-    implementation 'com.fasterxml.jackson.core:jackson-databind:2.13.0'
 }
 if (isNewArchitectureEnabled()) {
     react {
