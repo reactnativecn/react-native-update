@@ -1,5 +1,6 @@
 .vscode
 android/build
+android/.cxx
 android/obj
 *.iml
 
