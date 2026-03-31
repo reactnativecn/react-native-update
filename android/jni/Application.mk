@@ -7,4 +7,4 @@ APP_CPPFLAGS += -std=c++17 -Oz -fno-exceptions -fno-rtti -fno-unwind-tables -fno
 APP_LDFLAGS += -Wl,--gc-sections -Wl,--exclude-libs,ALL
 APP_BUILD_SCRIPT := Android.mk
 APP_ABI := armeabi-v7a arm64-v8a x86 x86_64
-APP_STL := c++_shared
+APP_STL := c++_static
