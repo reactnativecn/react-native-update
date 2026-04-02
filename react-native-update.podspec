@@ -108,7 +108,7 @@ Pod::Spec.new do |s|
   end
 
   s.subspec 'RCTPushy' do |ss|
-    ss.source_files = ['ios/**/*.{h,m,mm,c}',
+    ss.source_files = ['ios/RCTPushy/*.{h,m,mm}',
                        'cpp/patch_core/archive_patch_core.{h,cpp}',
                        'cpp/patch_core/patch_core.{h,cpp}',
                        'cpp/patch_core/state_core.{h,cpp}',
@@ -117,7 +117,7 @@ Pod::Spec.new do |s|
                        'android/jni/HDiffPatch/file_for_patch.{h,c}',
                        'android/jni/lzma/C/LzmaDec.{h,c}',
                        'android/jni/lzma/C/Lzma2Dec.{h,c}']
-    ss.public_header_files = ['ios/**/*.h']
+    ss.public_header_files = ['ios/RCTPushy/*.h']
   end
 
   # Conditionally add Expo subspec and check ExpoModulesCore version

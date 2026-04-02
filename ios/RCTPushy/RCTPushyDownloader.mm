@@ -1,10 +1,15 @@
 #import "RCTPushyDownloader.h"
 
-@interface RCTPushyDownloader()<NSURLSessionDelegate>
+static NSString *const RCTPushyDownloaderErrorDomain = @"cn.reactnative.pushy";
 
+@interface RCTPushyDownloader()<NSURLSessionDownloadDelegate>
+
+@property (nonatomic, strong) NSURLSession *session;
 @property (copy) void (^progressHandler)(long long, long long);
 @property (copy) void (^completionHandler)(NSString*, NSError*);
 @property (copy) NSString *savePath;
+@property (nonatomic, strong) NSError *fileError;
+@property (nonatomic, assign) BOOL finished;
 @end
 
 @implementation RCTPushyDownloader
@@ -21,25 +26,48 @@ completionHandler:(void (^)(NSString *path, NSError *error))completionHandler
     downloader.completionHandler = completionHandler;
     downloader.savePath = savePath;
 
-    [downloader download:downloadPath];
+    [downloader startDownload:downloadPath];
 }
 
-- (void)dealloc
-{
-}
-
-- (void)download:(NSString *)path
+- (void)startDownload:(NSString *)path
 {
     NSURL *url = [NSURL URLWithString:path];
-    
+    if (url == nil) {
+        [self completeWithError:[NSError errorWithDomain:RCTPushyDownloaderErrorDomain
+                                                    code:-1
+                                                userInfo:@{
+                                                    NSLocalizedDescriptionKey: @"invalid download url",
+                                                }]];
+        return;
+    }
+
     NSURLSessionConfiguration *sessionConfig = [NSURLSessionConfiguration defaultSessionConfiguration];
-    NSURLSession *session = [NSURLSession sessionWithConfiguration:sessionConfig
-                                                          delegate:self
-                                                     delegateQueue:nil];
-    
-    NSURLSessionDownloadTask *task = [session downloadTaskWithURL:url];
-    [session downloadTaskWithURL:url];
+    self.session = [NSURLSession sessionWithConfiguration:sessionConfig
+                                                 delegate:self
+                                            delegateQueue:nil];
+
+    NSURLSessionDownloadTask *task = [self.session downloadTaskWithURL:url];
     [task resume];
+}
+
+- (void)completeWithError:(NSError *)error
+{
+    if (self.finished) {
+        return;
+    }
+    self.finished = YES;
+
+    void (^completionHandler)(NSString *, NSError *) = self.completionHandler;
+    self.progressHandler = nil;
+    self.completionHandler = nil;
+    self.fileError = nil;
+
+    [self.session finishTasksAndInvalidate];
+    self.session = nil;
+
+    if (completionHandler) {
+        completionHandler(error == nil ? self.savePath : nil, error);
+    }
 }
 
 #pragma mark - session delegate
@@ -61,23 +89,22 @@ totalBytesExpectedToWrite:(int64_t)totalBytesExpectedToWrite
 - (void)URLSession:(NSURLSession *)session downloadTask:(NSURLSessionDownloadTask *)downloadTask
 didFinishDownloadingToURL:(NSURL *)location
 {
-    NSData *data = [NSData dataWithContentsOfURL:location];
-    NSError *error;
-    [data writeToFile:self.savePath options:NSDataWritingAtomic error:&error];
-    if (error) {
-        if (self.completionHandler) {
-            self.completionHandler(nil, error);
-            self.completionHandler = nil;
-        }
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    [fileManager removeItemAtPath:self.savePath error:nil];
+
+    NSError *fileError = nil;
+    [fileManager moveItemAtURL:location
+                         toURL:[NSURL fileURLWithPath:self.savePath]
+                         error:&fileError];
+    if (fileError != nil) {
+        self.fileError = fileError;
     }
 }
 
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task
 didCompleteWithError:(NSError *)error
 {
-    if (self.completionHandler) {
-        self.completionHandler(self.savePath, error);
-    }
+    [self completeWithError:error ?: self.fileError];
 }
 
 @end
