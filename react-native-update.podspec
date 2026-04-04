@@ -88,7 +88,7 @@ Pod::Spec.new do |s|
 
   s.cocoapods_version = '>= 1.6.0'
 
-  s.source = { :git => 'https://github.com/reactnativecn/react-native-update.git', :tag => '#{s.version}' }
+  s.source = { :git => 'https://github.com/reactnativecn/react-native-update.git', :tag => "#{s.version}" }
 
   s.libraries = 'bz2', 'z'
   s.pod_target_xcconfig = { 

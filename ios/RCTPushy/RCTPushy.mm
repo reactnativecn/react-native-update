@@ -8,14 +8,12 @@
 #if __has_include("RCTReloadCommand.h")
 #import "RCTReloadCommand.h"
 #endif
-// Thanks to this guard, we won't import this header when we build for the old architecture.
 #ifdef RCT_NEW_ARCH_ENABLED
 #import "RCTPushySpec.h"
 #endif
 
 #import <React/RCTConvert.h>
 #import <React/RCTLog.h>
-// #import <React/RCTReloadCommand.h>
 
 static NSString *const keyPushyInfo = @"REACTNATIVECN_PUSHY_INFO_KEY";
 static NSString *const paramPackageVersion = @"packageVersion";
@@ -42,7 +40,6 @@ static NSString * const ERROR_FILE_OPERATION = @"file operation error";
 
 // event def
 static NSString * const EVENT_PROGRESS_DOWNLOAD = @"RCTPushyDownloadProgress";
-// static NSString * const EVENT_PROGRESS_UNZIP = @"RCTPushyUnzipProgress";
 static NSString * const PARAM_PROGRESS_HASH = @"hash";
 static NSString * const PARAM_PROGRESS_RECEIVED = @"received";
 static NSString * const PARAM_PROGRESS_TOTAL = @"total";
@@ -70,6 +67,10 @@ static NSError *PushyNSErrorFromStatus(const pushy::patch::Status &status) {
                            userInfo:@{ NSLocalizedDescriptionKey: [NSString stringWithUTF8String:status.message.c_str()] }];
 }
 
+static NSUserDefaults *PushyDefaults(void) {
+    return [NSUserDefaults standardUserDefaults];
+}
+
 static NSString *PushyFromStdString(const std::string &value) {
     if (value.empty()) {
         return nil;
@@ -83,6 +84,14 @@ static void PushySetNullableString(NSUserDefaults *defaults, NSString *key, NSSt
     } else {
         [defaults removeObjectForKey:key];
     }
+}
+
+static NSString *PushyHashInfoKey(NSString *hash) {
+    return [keyHashInfo stringByAppendingString:hash ?: @""];
+}
+
+static NSString *PushyOptionString(NSDictionary *options, NSString *key) {
+    return [RCTConvert NSString:options[key]];
 }
 
 static BOOL PushyStringIsBlank(NSString *value) {
@@ -102,6 +111,10 @@ static NSError *PushyErrorWithMessage(NSString *message) {
                            userInfo:@{
                                NSLocalizedDescriptionKey: message ?: @"unknown error",
                            }];
+}
+
+static void PushyRejectMessage(RCTPromiseRejectBlock reject, NSString *message) {
+    PushyRejectError(reject, PushyErrorWithMessage(message));
 }
 
 static pushy::patch::PatchManifest PushyPatchManifestFromJson(NSDictionary *json) {
@@ -174,6 +187,9 @@ static void PushyApplyStateToDefaults(NSUserDefaults *defaults, const pushy::sta
                options:(NSDictionary *)options
               resolver:(RCTPromiseResolveBlock)resolve
               rejecter:(RCTPromiseRejectBlock)reject;
+- (void)performUpdate:(PushyType)type
+              options:(NSDictionary *)options
+             callback:(void (^)(NSError *error))callback;
 - (void)reloadBridgeWithReason:(NSString *)reason;
 - (void)unzipDownloadedPackage:(NSString *)zipFilePath
                           hash:(NSString *)hash
@@ -189,6 +205,7 @@ static void PushyApplyStateToDefaults(NSUserDefaults *defaults, const pushy::sta
                fromBundle:(NSString *)bundleOrigin
                    source:(NSString *)sourceOrigin
                  callback:(void (^)(NSError *error))callback;
+- (BOOL)switchVersion:(NSString *)hash error:(NSError **)error;
 - (BOOL)ensureDirectoryExistsAtPath:(NSString *)path;
 - (void)unzipFileAtPath:(NSString *)path
           toDestination:(NSString *)destination
@@ -200,13 +217,11 @@ static void PushyApplyStateToDefaults(NSUserDefaults *defaults, const pushy::sta
     bool hasListeners;
 }
 
-@synthesize methodQueue = _methodQueue;
-
 RCT_EXPORT_MODULE(RCTPushy);
 
 + (NSURL *)bundleURL
 {
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSUserDefaults *defaults = PushyDefaults();
     
     NSString *curPackageVersion = [RCTPushy packageVersion];
     NSString *curBuildTime = [RCTPushy buildTime];
@@ -260,20 +275,20 @@ RCT_EXPORT_MODULE(RCTPushy);
 }
 
 + (NSString *) rollback {
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSUserDefaults *defaults = PushyDefaults();
     pushy::state::State state = pushy::state::Rollback(PushyStateFromDefaults(defaults));
     PushyApplyStateToDefaults(defaults, state);
     return PushyFromStdString(state.current_version);
 }
 
-+ (BOOL)requiresMainQueueSetup {
-    // only set to YES if your module initialization relies on calling UIKit!
-	return NO;
++ (BOOL)requiresMainQueueSetup
+{
+    return NO;
 }
 
 - (NSDictionary *)constantsToExport
 {
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSUserDefaults *defaults = PushyDefaults();
     
     NSMutableDictionary *ret = [NSMutableDictionary new];
     ret[@"downloadRootDir"] = [RCTPushy downloadDir];
@@ -286,21 +301,18 @@ RCT_EXPORT_MODULE(RCTPushy);
     NSString *currentVersion = [pushyInfo objectForKey:paramCurrentVersion];
     ret[@"currentVersion"] = currentVersion;
     if (currentVersion != nil) {
-        ret[@"currentVersionInfo"] = [defaults objectForKey:[keyHashInfo stringByAppendingString:currentVersion]];
+        ret[@"currentVersionInfo"] = [defaults objectForKey:PushyHashInfoKey(currentVersion)];
     }
     
-    // clear isFirstTimemarked
     if (ret[@"isFirstTime"]) {
         [defaults removeObjectForKey:keyFirstLoadMarked];
     }
     
-    // clear rolledbackmark
     if (ret[@"rolledBackVersion"] != nil) {
         [defaults removeObjectForKey:keyRolledBackMarked];
         [self clearInvalidFiles];
     }
     
-    // clear packageupdatemarked
     if ([[defaults objectForKey:KeyPackageUpdatedMarked] boolValue]) {
         [defaults removeObjectForKey:KeyPackageUpdatedMarked];
         [self clearInvalidFiles];
@@ -327,7 +339,7 @@ RCT_EXPORT_METHOD(setUuid:(NSString *)uuid  resolver:(RCTPromiseResolveBlock)res
         return;
     }
 
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSUserDefaults *defaults = PushyDefaults();
     [defaults setObject:uuid forKey:keyUuid];
     resolve(@true);
 }
@@ -336,12 +348,17 @@ RCT_EXPORT_METHOD(setLocalHashInfo:(NSString *)hash
                   value:(NSString *)value resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 {
+    if (PushyStringIsBlank(hash) || PushyStringIsBlank(value)) {
+        PushyRejectMessage(reject, ERROR_OPTIONS);
+        return;
+    }
+
     NSData *data = [value dataUsingEncoding:NSUTF8StringEncoding];
     NSError *error = nil;
     id object = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
     if (object && [object isKindOfClass:[NSDictionary class]]) {
-        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-        [defaults setObject:value forKey:[keyHashInfo stringByAppendingString:hash]];
+        NSUserDefaults *defaults = PushyDefaults();
+        [defaults setObject:value forKey:PushyHashInfoKey(hash)];
         
         resolve(@true);
     } else {
@@ -355,8 +372,8 @@ RCT_EXPORT_METHOD(getLocalHashInfo:(NSString *)hash
                   rejecter:(RCTPromiseRejectBlock)reject)
 {
     
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    resolve([defaults stringForKey:[keyHashInfo stringByAppendingString:hash]]);
+    NSUserDefaults *defaults = PushyDefaults();
+    resolve([defaults stringForKey:PushyHashInfoKey(hash)]);
 }
 
 RCT_EXPORT_METHOD(downloadFullUpdate:(NSDictionary *)options
@@ -384,37 +401,27 @@ RCT_EXPORT_METHOD(setNeedUpdate:(NSDictionary *)options
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 {
-    NSString *hash = options[@"hash"];
-    
-    if (hash.length) {
-        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-        pushy::state::State next = pushy::state::SwitchVersion(
-            PushyStateFromDefaults(defaults),
-            PushyToStdString(hash)
-        );
-        PushyApplyStateToDefaults(defaults, next);
-        resolve(@true);
-    } else {
-        reject(@"执行报错", nil, nil);
+    NSError *error = nil;
+    if (![self switchVersion:PushyOptionString(options, @"hash") error:&error]) {
+        PushyRejectError(reject, error);
+        return;
     }
+
+    resolve(@true);
 }
 
 RCT_EXPORT_METHOD(reloadUpdate:(NSDictionary *)options
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 {
-    NSString *hash = options[@"hash"];
-    if (hash.length <= 0) {
-        reject(@"执行报错", nil, nil);
+    NSError *error = nil;
+    if (![self switchVersion:PushyOptionString(options, @"hash") error:&error]) {
+        PushyRejectError(reject, error);
         return;
     }
 
-    [self setNeedUpdate:options resolver:^(id result) {
-        [self reloadBridgeWithReason:@"pushy reloadUpdate"];
-        resolve(@true);
-    } rejecter:^(NSString *code, NSString *message, NSError *error) {
-        reject(code, message, error);
-    }];
+    [self reloadBridgeWithReason:@"pushy reloadUpdate"];
+    resolve(@true);
 }
 
 RCT_EXPORT_METHOD(restartApp:(RCTPromiseResolveBlock)resolve
@@ -431,11 +438,11 @@ RCT_EXPORT_METHOD(markSuccess:(RCTPromiseResolveBlock)resolve
     resolve(@true);
     #else
 
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSUserDefaults *defaults = PushyDefaults();
     pushy::state::MarkSuccessResult result =
         pushy::state::MarkSuccess(PushyStateFromDefaults(defaults));
     if (!result.stale_version_to_delete.empty()) {
-        [defaults removeObjectForKey:[keyHashInfo stringByAppendingString:PushyFromStdString(result.stale_version_to_delete)]];
+        [defaults removeObjectForKey:PushyHashInfoKey(PushyFromStdString(result.stale_version_to_delete))];
     }
     PushyApplyStateToDefaults(defaults, result.state);
 
@@ -450,21 +457,16 @@ RCT_EXPORT_METHOD(markSuccess:(RCTPromiseResolveBlock)resolve
 - (NSArray<NSString *> *)supportedEvents
 {
   return @[
-      EVENT_PROGRESS_DOWNLOAD, 
-    //   EVENT_PROGRESS_UNZIP
-      ];
+      EVENT_PROGRESS_DOWNLOAD,
+  ];
 }
 
-// Will be called when this module's first listener is added.
 -(void)startObserving {
     hasListeners = YES;
-    // Set up any upstream listeners or background tasks as necessary
 }
 
-// Will be called when this module's last listener is removed, or on dealloc.
 -(void)stopObserving {
     hasListeners = NO;
-    // Remove upstream listeners, stop unnecessary background tasks
 }
 
 - (void)downloadUpdate:(PushyType)type
@@ -472,7 +474,7 @@ RCT_EXPORT_METHOD(markSuccess:(RCTPromiseResolveBlock)resolve
               resolver:(RCTPromiseResolveBlock)resolve
               rejecter:(RCTPromiseRejectBlock)reject
 {
-    [self doPushy:type options:options callback:^(NSError *error) {
+    [self performUpdate:type options:options callback:^(NSError *error) {
         if (error != nil) {
             PushyRejectError(reject, error);
             return;
@@ -493,16 +495,16 @@ RCT_EXPORT_METHOD(markSuccess:(RCTPromiseResolveBlock)resolve
     });
 }
 
-- (void)doPushy:(PushyType)type options:(NSDictionary *)options callback:(void (^)(NSError *error))callback
+- (void)performUpdate:(PushyType)type options:(NSDictionary *)options callback:(void (^)(NSError *error))callback
 {
-    NSString *updateUrl = [RCTConvert NSString:options[@"updateUrl"]];
-    NSString *hash = [RCTConvert NSString:options[@"hash"]];
+    NSString *updateUrl = PushyOptionString(options, @"updateUrl");
+    NSString *hash = PushyOptionString(options, @"hash");
 
-    if (updateUrl.length <= 0 || hash.length <= 0) {
+    if (PushyStringIsBlank(updateUrl) || PushyStringIsBlank(hash)) {
         callback(PushyErrorWithMessage(ERROR_OPTIONS));
         return;
     }
-    NSString *originHash = [RCTConvert NSString:options[@"originHash"]];
+    NSString *originHash = PushyOptionString(options, @"originHash");
     if (type == PushyTypePatchFromPpk && PushyStringIsBlank(originHash)) {
         callback(PushyErrorWithMessage(ERROR_OPTIONS));
         return;
@@ -550,8 +552,7 @@ RCT_EXPORT_METHOD(markSuccess:(RCTPromiseResolveBlock)resolve
     [self unzipFileAtPath:zipFilePath
             toDestination:unzipFilePath
         completionHandler:^(NSError *error) {
-        dispatch_queue_t callbackQueue = self.methodQueue ?: dispatch_get_main_queue();
-        dispatch_async(callbackQueue, ^{
+        dispatch_async(self->_fileQueue, ^{
             if (error != nil) {
                 callback(error);
                 return;
@@ -601,12 +602,22 @@ RCT_EXPORT_METHOD(markSuccess:(RCTPromiseResolveBlock)resolve
     
     NSString *destination = [unzipDir stringByAppendingPathComponent:BUNDLE_FILE_NAME];
     NSData *data = [NSData dataWithContentsOfFile:sourcePatch];
+    if (data == nil) {
+        callback(PushyErrorWithMessage(@"missing patch manifest"));
+        return;
+    }
+
     NSError *error = nil;
-    NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingAllowFragments error:&error];
-    if (error) {
+    id jsonObject = [NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingAllowFragments error:&error];
+    if (error != nil) {
         callback(error);
         return;
     }
+    if (![jsonObject isKindOfClass:[NSDictionary class]]) {
+        callback(PushyErrorWithMessage(@"invalid patch manifest"));
+        return;
+    }
+    NSDictionary *json = (NSDictionary *)jsonObject;
 
     std::vector<std::string> entryNames;
     if ([[NSFileManager defaultManager] fileExistsAtPath:sourcePatch isDirectory:NULL]) {
@@ -654,6 +665,24 @@ RCT_EXPORT_METHOD(markSuccess:(RCTPromiseResolveBlock)resolve
     callback(nil);
 }
 
+- (BOOL)switchVersion:(NSString *)hash error:(NSError **)error
+{
+    if (PushyStringIsBlank(hash)) {
+        if (error != NULL) {
+            *error = PushyErrorWithMessage(ERROR_OPTIONS);
+        }
+        return NO;
+    }
+
+    NSUserDefaults *defaults = PushyDefaults();
+    pushy::state::State next = pushy::state::SwitchVersion(
+        PushyStateFromDefaults(defaults),
+        PushyToStdString(hash)
+    );
+    PushyApplyStateToDefaults(defaults, next);
+    return YES;
+}
+
 - (BOOL)ensureDirectoryExistsAtPath:(NSString *)path
 {
     __block BOOL success = NO;
@@ -672,7 +701,7 @@ RCT_EXPORT_METHOD(markSuccess:(RCTPromiseResolveBlock)resolve
                                           attributes:nil
                                                error:&error];
         if (!success && error != nil) {
-            NSLog(@"Pushy create directory error: %@", error.localizedDescription);
+            RCTLogWarn(@"Pushy create directory error: %@", error.localizedDescription);
         }
     });
 
@@ -709,19 +738,20 @@ RCT_EXPORT_METHOD(markSuccess:(RCTPromiseResolveBlock)resolve
 
 - (void)clearInvalidFiles
 {
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    pushy::state::State state = PushyStateFromDefaults(defaults);
-    
-    NSString *downloadDir = [RCTPushy downloadDir];
-    pushy::patch::Status status = pushy::patch::CleanupOldEntries(
-        PushyToStdString(downloadDir),
-        state.current_version,
-        state.last_version,
-        7
-    );
-    if (!status.ok) {
-        NSLog(@"Pushy cleanup error: %s", status.message.c_str());
-    }
+    dispatch_async(_fileQueue, ^{
+        NSUserDefaults *defaults = PushyDefaults();
+        pushy::state::State state = PushyStateFromDefaults(defaults);
+        NSString *downloadDir = [RCTPushy downloadDir];
+        pushy::patch::Status status = pushy::patch::CleanupOldEntries(
+            PushyToStdString(downloadDir),
+            state.current_version,
+            state.last_version,
+            7
+        );
+        if (!status.ok) {
+            RCTLogWarn(@"Pushy cleanup error: %s", status.message.c_str());
+        }
+    });
 }
 
 - (NSString *)zipExtension:(PushyType)type
@@ -741,15 +771,12 @@ RCT_EXPORT_METHOD(markSuccess:(RCTPromiseResolveBlock)resolve
 + (NSString *)downloadDir
 {
     NSString *directory = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES) firstObject];
-    NSString *downloadDir = [directory stringByAppendingPathComponent:@"rctpushy"];
-    
-    return downloadDir;
+    return [directory stringByAppendingPathComponent:@"rctpushy"];
 }
 
 + (NSURL *)binaryBundleURL
 {
-    NSURL *url = [[NSBundle mainBundle] URLForResource:@"main" withExtension:@"jsbundle"];
-    return url;
+    return [[NSBundle mainBundle] URLForResource:@"main" withExtension:@"jsbundle"];
 }
 
 + (NSString *)packageVersion
@@ -780,7 +807,6 @@ RCT_EXPORT_METHOD(markSuccess:(RCTPromiseResolveBlock)resolve
 #endif
 }
 
-// Thanks to this guard, we won't compile this code when we build for the old architecture.
 #ifdef RCT_NEW_ARCH_ENABLED
 - (std::shared_ptr<facebook::react::TurboModule>)getTurboModule:
     (const facebook::react::ObjCTurboModule::InitParams &)params

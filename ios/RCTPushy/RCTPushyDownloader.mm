@@ -77,10 +77,6 @@ completionHandler:(void (^)(NSString *path, NSError *error))completionHandler
  totalBytesWritten:(int64_t)totalBytesWritten
 totalBytesExpectedToWrite:(int64_t)totalBytesExpectedToWrite
 {
-#ifdef DEBUG
-    NSLog(@"download progress, %lld, %lld, %lld", bytesWritten, totalBytesWritten, totalBytesExpectedToWrite);
-#endif
-    
     if (self.progressHandler) {
         self.progressHandler(totalBytesWritten ,totalBytesExpectedToWrite);
     }
