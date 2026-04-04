@@ -1,142 +1,96 @@
-
 #include "PushyTurboModule.h"
 
-using namespace rnoh;
 using namespace facebook;
+using namespace rnoh;
 
-static jsi::Value _hostFunction_PushyTurboModule_getConstants(
+namespace {
+
+jsi::Value CallSync(
     jsi::Runtime &rt,
-    react::TurboModule & turboModule,
-    const jsi::Value* args,
-    size_t count)
-    {
-        return jsi::Value(static_cast<ArkTSTurboModule &> (turboModule).call(rt,"getConstants", args, count));
-    }
+    react::TurboModule &turboModule,
+    const char *methodName,
+    const jsi::Value *args,
+    size_t count) {
+  return jsi::Value(
+      static_cast<ArkTSTurboModule &>(turboModule).call(
+          rt, methodName, args, count));
+}
 
-static jsi::Value _hostFunction_PushyTurboModule_setLocalHashInfo(
+jsi::Value CallAsync(
     jsi::Runtime &rt,
-    react::TurboModule & turboModule,
-    const jsi::Value* args,
-    size_t count)
-    {
-        return jsi::Value(static_cast<ArkTSTurboModule &> (turboModule).call(rt,"setLocalHashInfo", args, count));
-    }
-    
-static jsi::Value _hostFunction_PushyTurboModule_getLocalHashInfo(
-    jsi::Runtime &rt,
-    react::TurboModule & turboModule,
-    const jsi::Value* args,
-    size_t count)
-    {
-        return jsi::Value(static_cast<ArkTSTurboModule &> (turboModule).call(rt,"getLocalHashInfo", args, count));
-    }
+    react::TurboModule &turboModule,
+    const char *methodName,
+    const jsi::Value *args,
+    size_t count) {
+  return jsi::Value(
+      static_cast<ArkTSTurboModule &>(turboModule).callAsync(
+          rt, methodName, args, count));
+}
 
-static jsi::Value _hostFunction_PushyTurboModule_setUuid(
-    jsi::Runtime &rt,
-    react::TurboModule & turboModule,
-    const jsi::Value* args,
-    size_t count)
-    {
-        return jsi::Value(static_cast<ArkTSTurboModule &> (turboModule).call(rt,"setUuid", args, count));
-    }
+#define PUSHY_SYNC_METHOD(method_name)                                   \
+  static jsi::Value HostFunction_##method_name(                          \
+      jsi::Runtime &rt,                                                  \
+      react::TurboModule &turboModule,                                   \
+      const jsi::Value *args,                                            \
+      size_t count) {                                                    \
+    return CallSync(rt, turboModule, #method_name, args, count);         \
+  }
 
-static jsi::Value _hostFunction_PushyTurboModule_reloadUpdate(
-    jsi::Runtime &rt,
-    react::TurboModule & turboModule,
-    const jsi::Value* args,
-    size_t count)
-    {
-        return jsi::Value(static_cast<ArkTSTurboModule &> (turboModule).call(rt,"reloadUpdate", args, count));
-    }
+#define PUSHY_ASYNC_METHOD(method_name)                                  \
+  static jsi::Value HostFunction_##method_name(                          \
+      jsi::Runtime &rt,                                                  \
+      react::TurboModule &turboModule,                                   \
+      const jsi::Value *args,                                            \
+      size_t count) {                                                    \
+    return CallAsync(rt, turboModule, #method_name, args, count);        \
+  }
 
-static jsi::Value _hostFunction_PushyTurboModule_setNeedUpdate(
-    jsi::Runtime &rt,
-    react::TurboModule & turboModule,
-    const jsi::Value* args,
-    size_t count)
-    {
-        return jsi::Value(static_cast<ArkTSTurboModule &> (turboModule).call(rt,"setNeedUpdate", args, count));
-    }
+PUSHY_SYNC_METHOD(getConstants)
+PUSHY_SYNC_METHOD(setLocalHashInfo)
+PUSHY_SYNC_METHOD(getLocalHashInfo)
+PUSHY_SYNC_METHOD(setUuid)
+PUSHY_SYNC_METHOD(setNeedUpdate)
+PUSHY_SYNC_METHOD(markSuccess)
+PUSHY_SYNC_METHOD(addListener)
+PUSHY_SYNC_METHOD(removeListeners)
 
-static jsi::Value _hostFunction_PushyTurboModule_markSuccess(
-    jsi::Runtime &rt,
-    react::TurboModule & turboModule,
-    const jsi::Value* args,
-    size_t count)
-    {
-        return jsi::Value(static_cast<ArkTSTurboModule &> (turboModule).call(rt,"markSuccess", args, count));
-    }
+PUSHY_ASYNC_METHOD(reloadUpdate)
+PUSHY_ASYNC_METHOD(restartApp)
+PUSHY_ASYNC_METHOD(downloadPatchFromPpk)
+PUSHY_ASYNC_METHOD(downloadPatchFromPackage)
+PUSHY_ASYNC_METHOD(downloadFullUpdate)
+PUSHY_ASYNC_METHOD(downloadAndInstallApk)
 
-static jsi::Value _hostFunction_PushyTurboModule_downloadPatchFromPpk(
-    jsi::Runtime &rt,
-    react::TurboModule & turboModule,
-    const jsi::Value* args,
-    size_t count)
-    {
-        return jsi::Value(static_cast<ArkTSTurboModule &> (turboModule).callAsync(rt,"downloadPatchFromPpk", args, count));
-    }
+#undef PUSHY_SYNC_METHOD
+#undef PUSHY_ASYNC_METHOD
 
-static jsi::Value _hostFunction_PushyTurboModule_downloadPatchFromPackage(
-    jsi::Runtime &rt,
-    react::TurboModule & turboModule,
-    const jsi::Value* args,
-    size_t count)
-    {
-        return jsi::Value(static_cast<ArkTSTurboModule &> (turboModule).callAsync(rt,"downloadPatchFromPackage", args, count));
-    }
+} // namespace
 
-static jsi::Value _hostFunction_PushyTurboModule_downloadFullUpdate(
-    jsi::Runtime &rt,
-    react::TurboModule & turboModule,
-    const jsi::Value* args,
-    size_t count)
-    {
-        return jsi::Value(static_cast<ArkTSTurboModule &> (turboModule).callAsync(rt,"downloadFullUpdate", args, count));
-    }
+PushyTurboModule::PushyTurboModule(
+    const ArkTSTurboModule::Context ctx,
+    const std::string name)
+    : ArkTSTurboModule(ctx, name) {
+  const auto registerMethod =
+      [this](const std::string &methodName,
+             size_t argCount,
+             auto hostFunction) {
+        methodMap_[methodName] = MethodMetadata{argCount, hostFunction};
+      };
 
-static jsi::Value _hostFunction_PushyTurboModule_downloadAndInstallApk(
-    jsi::Runtime &rt,
-    react::TurboModule & turboModule,
-    const jsi::Value* args,
-    size_t count)
-    {
-        return jsi::Value(static_cast<ArkTSTurboModule &> (turboModule).callAsync(rt,"downloadAndInstallApk", args, count));
-    }
-
-
-
-static jsi::Value _hostFunction_PushyTurboModule_addListener(
-    jsi::Runtime &rt,
-    react::TurboModule & turboModule,
-    const jsi::Value* args,
-    size_t count)
-    {
-        return jsi::Value(static_cast<ArkTSTurboModule &> (turboModule).call(rt,"addListener", args, count));
-    }
-
-static jsi::Value _hostFunction_PushyTurboModule_removeListeners(
-    jsi::Runtime &rt,
-    react::TurboModule & turboModule,
-    const jsi::Value* args,
-    size_t count)
-    {
-        return jsi::Value(static_cast<ArkTSTurboModule &> (turboModule).call(rt,"removeListeners", args, count));
-    }
-
-PushyTurboModule::PushyTurboModule(const ArkTSTurboModule::Context ctx, const std::string name)
-    : ArkTSTurboModule(ctx,name)
-{
-    methodMap_["getConstants"]= MethodMetadata{1, _hostFunction_PushyTurboModule_getConstants};
-    methodMap_["setLocalHashInfo"]= MethodMetadata{2, _hostFunction_PushyTurboModule_setLocalHashInfo};
-    methodMap_["getLocalHashInfo"]= MethodMetadata{3, _hostFunction_PushyTurboModule_getLocalHashInfo};
-    methodMap_["setUuid"]= MethodMetadata{1, _hostFunction_PushyTurboModule_setUuid};
-    methodMap_["reloadUpdate"]= MethodMetadata{0, _hostFunction_PushyTurboModule_reloadUpdate};
-    methodMap_["setNeedUpdate"]= MethodMetadata{0, _hostFunction_PushyTurboModule_setNeedUpdate};
-    methodMap_["markSuccess"]= MethodMetadata{0, _hostFunction_PushyTurboModule_markSuccess};
-    methodMap_["downloadPatchFromPpk"]= MethodMetadata{0, _hostFunction_PushyTurboModule_downloadPatchFromPpk};
-    methodMap_["downloadPatchFromPackage"]= MethodMetadata{0, _hostFunction_PushyTurboModule_downloadPatchFromPackage};
-    methodMap_["downloadFullUpdate"]= MethodMetadata{0, _hostFunction_PushyTurboModule_downloadFullUpdate};
-    methodMap_["downloadAndInstallApk"]= MethodMetadata{0, _hostFunction_PushyTurboModule_downloadAndInstallApk};
-    methodMap_["addListener"]= MethodMetadata{1, _hostFunction_PushyTurboModule_addListener};
-    methodMap_["removeListeners"]= MethodMetadata{1, _hostFunction_PushyTurboModule_removeListeners};
+  registerMethod("getConstants", 0, HostFunction_getConstants);
+  registerMethod("setLocalHashInfo", 2, HostFunction_setLocalHashInfo);
+  registerMethod("getLocalHashInfo", 1, HostFunction_getLocalHashInfo);
+  registerMethod("setUuid", 1, HostFunction_setUuid);
+  registerMethod("reloadUpdate", 1, HostFunction_reloadUpdate);
+  registerMethod("restartApp", 0, HostFunction_restartApp);
+  registerMethod("setNeedUpdate", 1, HostFunction_setNeedUpdate);
+  registerMethod("markSuccess", 0, HostFunction_markSuccess);
+  registerMethod("downloadPatchFromPpk", 1, HostFunction_downloadPatchFromPpk);
+  registerMethod(
+      "downloadPatchFromPackage", 1, HostFunction_downloadPatchFromPackage);
+  registerMethod("downloadFullUpdate", 1, HostFunction_downloadFullUpdate);
+  registerMethod(
+      "downloadAndInstallApk", 1, HostFunction_downloadAndInstallApk);
+  registerMethod("addListener", 1, HostFunction_addListener);
+  registerMethod("removeListeners", 1, HostFunction_removeListeners);
 }

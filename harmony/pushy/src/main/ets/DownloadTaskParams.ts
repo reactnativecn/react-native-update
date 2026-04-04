@@ -9,11 +9,11 @@ export class DownloadTaskParams {
   static readonly TASK_TYPE_PATCH_FROM_PPK: number = 3; // 从PPK补丁
   static readonly TASK_TYPE_PLAIN_DOWNLOAD: number = 4; // 普通下载
 
-  type: number; // 任务类型
-  url: string; // 下载URL
-  hash: string; // 文件哈希值
-  originHash: string; // 原始文件哈希值
-  targetFile: string; // 目标文件路径
-  unzipDirectory: string; // 解压目录路径
-  originDirectory: string; // 原始文件目录路径
+  type: number = DownloadTaskParams.TASK_TYPE_CLEANUP; // 任务类型
+  url: string = ''; // 下载URL
+  hash: string = ''; // 文件哈希值
+  originHash: string = ''; // 原始文件哈希值
+  targetFile: string = ''; // 目标文件路径
+  unzipDirectory: string = ''; // 解压目录路径
+  originDirectory: string = ''; // 原始文件目录路径
 }

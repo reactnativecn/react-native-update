@@ -5,7 +5,6 @@ import {
 import common from '@ohos.app.ability.common';
 import { bundleManager } from '@kit.AbilityKit';
 import logger from './Logger';
-import { UpdateModuleImpl } from './UpdateModuleImpl';
 import { UpdateContext } from './UpdateContext';
 import { EventHub } from './EventHub';
 import { util } from '@kit.ArkTS';
@@ -26,29 +25,78 @@ export class PushyTurboModule extends UITurboModule {
     EventHub.getInstance().setRNInstance(ctx.rnInstance);
   }
 
-  getConstants(): Object {
-    logger.debug(TAG, ',call getConstants');
-    const context = this.mUiCtx;
-    let bundleFlags =
-      bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_REQUESTED_PERMISSION;
-    let packageVersion = '';
+  private getBundleFlags(): bundleManager.BundleFlag {
+    return bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_REQUESTED_PERMISSION;
+  }
+
+  private getErrorMessage(error: any): string {
+    if (error && typeof error === 'object' && 'message' in error) {
+      return String(error.message);
+    }
+    return String(error);
+  }
+
+  private getPackageVersion(): string {
     try {
-      const bundleInfo = bundleManager.getBundleInfoForSelfSync(bundleFlags);
-      packageVersion = bundleInfo?.versionName || 'Unknown';
+      const bundleInfo = bundleManager.getBundleInfoForSelfSync(
+        this.getBundleFlags(),
+      );
+      return bundleInfo?.versionName || 'Unknown';
     } catch (error) {
       console.error('Failed to get bundle info:', error);
+      return '';
     }
-    let buildTime = '';
+  }
+
+  private getBuildTime(): string {
     try {
-      const resourceManager = this.mUiCtx.resourceManager;
-      const content = resourceManager.getRawFileContentSync('meta.json');
+      const content = this.mUiCtx.resourceManager.getRawFileContentSync(
+        'meta.json',
+      );
       const metaData = JSON.parse(
         new util.TextDecoder().decodeToString(content),
-      );
+      ) as Record<string, string | number | boolean | null | undefined>;
       if (metaData.pushy_build_time) {
-        buildTime = String(metaData.pushy_build_time);
+        return String(metaData.pushy_build_time);
       }
     } catch {}
+    return '';
+  }
+
+  private requireHash(hash: string, methodName: string): string {
+    if (!hash) {
+      throw Error(`${methodName}: empty hash`);
+    }
+    return hash;
+  }
+
+  private validateHashInfo(info: string): void {
+    try {
+      const parsed = JSON.parse(info);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw Error('invalid json string');
+      }
+    } catch {
+      throw Error('invalid json string');
+    }
+  }
+
+  private async restartAbility(): Promise<void> {
+    const bundleInfo = await bundleManager.getBundleInfoForSelf(
+      this.getBundleFlags(),
+    );
+    const want = {
+      bundleName: bundleInfo.name,
+      abilityName: this.mUiCtx.abilityInfo?.name,
+    };
+    await this.mUiCtx.terminateSelf();
+    await this.mUiCtx.startAbility(want);
+  }
+
+  getConstants(): Object {
+    logger.debug(TAG, ',call getConstants');
+    const packageVersion = this.getPackageVersion();
+    const buildTime = this.getBuildTime();
     this.context.syncStateWithBinaryVersion(packageVersion, buildTime);
 
     const currentVersion = this.context.getCurrentVersion();
@@ -65,7 +113,7 @@ export class PushyTurboModule extends UITurboModule {
     }
 
     return {
-      downloadRootDir: `${context.filesDir}/_update`,
+      downloadRootDir: `${this.mUiCtx.filesDir}/_update`,
       currentVersionInfo,
       packageVersion,
       currentVersion,
@@ -79,31 +127,67 @@ export class PushyTurboModule extends UITurboModule {
 
   setLocalHashInfo(hash: string, info: string): boolean {
     logger.debug(TAG, ',call setLocalHashInfo');
-    return UpdateModuleImpl.setLocalHashInfo(this.context, hash, info);
+    this.validateHashInfo(info);
+    this.context.setKv(`hash_${hash}`, info);
+    return true;
   }
 
   getLocalHashInfo(hash: string): string {
-    return UpdateModuleImpl.getLocalHashInfo(this.context, hash);
+    const value = this.context.getKv(`hash_${hash}`);
+    this.validateHashInfo(value);
+    return value;
   }
 
   async setUuid(uuid: string): Promise<void> {
     logger.debug(TAG, ',call setUuid');
-    return UpdateModuleImpl.setUuid(this.context, uuid);
+    this.context.setKv('uuid', uuid);
   }
 
   async reloadUpdate(options: { hash: string }): Promise<void> {
     logger.debug(TAG, ',call reloadUpdate');
-    return UpdateModuleImpl.reloadUpdate(this.context, this.mUiCtx, options);
+    const hash = this.requireHash(options.hash, 'reloadUpdate');
+
+    try {
+      this.context.switchVersion(hash);
+      await this.restartAbility();
+    } catch (error) {
+      logger.error(TAG, `reloadUpdate failed: ${this.getErrorMessage(error)}`);
+      throw Error(`switchVersion failed ${this.getErrorMessage(error)}`);
+    }
+  }
+
+  async restartApp(): Promise<void> {
+    logger.debug(TAG, ',call restartApp');
+    try {
+      await this.restartAbility();
+    } catch (error) {
+      logger.error(TAG, `restartApp failed: ${this.getErrorMessage(error)}`);
+      throw Error(`restartApp failed ${this.getErrorMessage(error)}`);
+    }
   }
 
   async setNeedUpdate(options: { hash: string }): Promise<boolean> {
     logger.debug(TAG, ',call setNeedUpdate');
-    return UpdateModuleImpl.setNeedUpdate(this.context, options);
+    const hash = this.requireHash(options.hash, 'setNeedUpdate');
+
+    try {
+      this.context.switchVersion(hash);
+      return true;
+    } catch (error) {
+      logger.error(TAG, `setNeedUpdate failed: ${this.getErrorMessage(error)}`);
+      throw Error(`switchVersionLater failed: ${this.getErrorMessage(error)}`);
+    }
   }
 
   async markSuccess(): Promise<boolean> {
     logger.debug(TAG, ',call markSuccess');
-    return UpdateModuleImpl.markSuccess(this.context);
+    try {
+      this.context.markSuccess();
+      return true;
+    } catch (error) {
+      logger.error(TAG, `markSuccess failed: ${this.getErrorMessage(error)}`);
+      throw error;
+    }
   }
 
   async downloadPatchFromPpk(options: {
@@ -112,7 +196,11 @@ export class PushyTurboModule extends UITurboModule {
     originHash: string;
   }): Promise<void> {
     logger.debug(TAG, ',call downloadPatchFromPpk');
-    return UpdateModuleImpl.downloadPatchFromPpk(this.context, options);
+    return this.context.downloadPatchFromPpk(
+      options.updateUrl,
+      options.hash,
+      options.originHash,
+    );
   }
 
   async downloadPatchFromPackage(options: {
@@ -120,7 +208,10 @@ export class PushyTurboModule extends UITurboModule {
     hash: string;
   }): Promise<void> {
     logger.debug(TAG, ',call downloadPatchFromPackage');
-    return UpdateModuleImpl.downloadPatchFromPackage(this.context, options);
+    return this.context.downloadPatchFromPackage(
+      options.updateUrl,
+      options.hash,
+    );
   }
 
   async downloadFullUpdate(options: {
@@ -128,7 +219,16 @@ export class PushyTurboModule extends UITurboModule {
     hash: string;
   }): Promise<void> {
     logger.debug(TAG, ',call downloadFullUpdate');
-    return UpdateModuleImpl.downloadFullUpdate(this.context, options);
+    return this.context.downloadFullUpdate(options.updateUrl, options.hash);
+  }
+
+  async downloadAndInstallApk(_options: {
+    url: string;
+    target: string;
+    hash: string;
+  }): Promise<void> {
+    logger.debug(TAG, ',call downloadAndInstallApk');
+    throw Error('downloadAndInstallApk is only supported on Android');
   }
 
   addListener(_eventName: string): void {

@@ -22,16 +22,16 @@
  * SOFTWARE.
  */
 
-#ifndef GEO_LOCATION_TURBOMODULE_H
-#define GEO_LOCATION_TURBOMODULE_H
+#ifndef PUSHY_TURBOMODULE_H
+#define PUSHY_TURBOMODULE_H
 
 #include <ReactCommon/TurboModule.h>
 #include "RNOH/ArkTSTurboModule.h"
 
 namespace rnoh {
 class JSI_EXPORT PushyTurboModule : public ArkTSTurboModule {
-    public:
-        PushyTurboModule(const ArkTSTurboModule::Context ctx, const std::string name);
+ public:
+  PushyTurboModule(const ArkTSTurboModule::Context ctx, const std::string name);
 };
 } // namespace rnoh
 

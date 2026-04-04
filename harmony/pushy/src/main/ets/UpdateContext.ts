@@ -16,7 +16,7 @@ import NativePatchCore, {
 export class UpdateContext {
   private context: common.UIAbilityContext;
   private rootDir: string;
-  private preferences: preferences.Preferences;
+  private preferences!: preferences.Preferences;
   private static DEBUG: boolean = false;
   private static isUsingBundleUrl: boolean = false;
 
@@ -121,6 +121,61 @@ export class UpdateContext {
     this.putNullableString('rolledBackVersion', state.rolledBackVersion);
   }
 
+  private persistState(
+    state: StateCoreResult,
+    options: {
+      clearExisting?: boolean;
+      removeStaleHash?: boolean;
+      cleanUp?: boolean;
+    } = {},
+  ): void {
+    if (options.clearExisting) {
+      this.preferences.clear();
+    }
+    this.applyState(state);
+    if (options.removeStaleHash && state.staleVersionToDelete) {
+      this.preferences.deleteSync(`hash_${state.staleVersionToDelete}`);
+    }
+    this.preferences.flush();
+    if (options.cleanUp) {
+      this.cleanUp();
+    }
+  }
+
+  private runStateOperation(
+    operation: number,
+    stringArg: string = '',
+    options: {
+      removeStaleHash?: boolean;
+      cleanUp?: boolean;
+    } = {},
+  ): StateCoreResult {
+    const nextState = NativePatchCore.runStateCore(
+      operation,
+      this.getStateSnapshot(),
+      stringArg,
+    );
+    this.persistState(nextState, options);
+    return nextState;
+  }
+
+  private createTaskParams(
+    type: number,
+    url: string,
+    hash: string,
+  ): DownloadTaskParams {
+    const params = new DownloadTaskParams();
+    params.type = type;
+    params.url = url;
+    params.hash = hash;
+    return params;
+  }
+
+  private async executeTask(params: DownloadTaskParams): Promise<void> {
+    const downloadTask = new DownloadTask(this.context);
+    await downloadTask.execute(params);
+  }
+
   public syncStateWithBinaryVersion(
     packageVersion: string,
     buildTime: string,
@@ -136,9 +191,7 @@ export class UpdateContext {
     }
 
     this.cleanUp();
-    this.preferences.clear();
-    this.applyState(nextState);
-    this.preferences.flush();
+    this.persistState(nextState, { clearExisting: true });
   }
 
   public setKv(key: string, value: string): void {
@@ -163,48 +216,32 @@ export class UpdateContext {
       return;
     }
 
-    const nextState = NativePatchCore.runStateCore(
-      STATE_OP_MARK_SUCCESS,
-      this.getStateSnapshot(),
-    );
-    this.applyState(nextState);
-    if (nextState.staleVersionToDelete) {
-      this.preferences.deleteSync(`hash_${nextState.staleVersionToDelete}`);
-    }
-    this.preferences.flush();
-    this.cleanUp();
+    this.runStateOperation(STATE_OP_MARK_SUCCESS, '', {
+      removeStaleHash: true,
+      cleanUp: true,
+    });
   }
 
   public clearFirstTime(): void {
-    const nextState = NativePatchCore.runStateCore(
-      STATE_OP_CLEAR_FIRST_TIME,
-      this.getStateSnapshot(),
-    );
-    this.applyState(nextState);
-    this.preferences.flush();
-    this.cleanUp();
+    this.runStateOperation(STATE_OP_CLEAR_FIRST_TIME, '', { cleanUp: true });
   }
 
   public clearRollbackMark(): void {
-    const nextState = NativePatchCore.runStateCore(
-      STATE_OP_CLEAR_ROLLBACK_MARK,
-      this.getStateSnapshot(),
-    );
-    this.applyState(nextState);
-    this.preferences.flush();
-    this.cleanUp();
+    this.runStateOperation(STATE_OP_CLEAR_ROLLBACK_MARK, '', {
+      cleanUp: true,
+    });
   }
 
   public async downloadFullUpdate(url: string, hash: string): Promise<void> {
     try {
-      const params = new DownloadTaskParams();
-      params.type = DownloadTaskParams.TASK_TYPE_PATCH_FULL;
-      params.url = url;
-      params.hash = hash;
+      const params = this.createTaskParams(
+        DownloadTaskParams.TASK_TYPE_PATCH_FULL,
+        url,
+        hash,
+      );
       params.targetFile = `${this.rootDir}/${hash}.ppk`;
       params.unzipDirectory = `${this.rootDir}/${hash}`;
-      const downloadTask = new DownloadTask(this.context);
-      await downloadTask.execute(params);
+      await this.executeTask(params);
     } catch (e) {
       console.error('Failed to download full update:', e);
       throw e;
@@ -216,14 +253,13 @@ export class UpdateContext {
     hash: string,
     fileName: string,
   ): Promise<void> {
-    const params = new DownloadTaskParams();
-    params.type = DownloadTaskParams.TASK_TYPE_PLAIN_DOWNLOAD;
-    params.url = url;
-    params.hash = hash;
+    const params = this.createTaskParams(
+      DownloadTaskParams.TASK_TYPE_PLAIN_DOWNLOAD,
+      url,
+      hash,
+    );
     params.targetFile = this.rootDir + '/' + fileName;
-
-    const downloadTask = new DownloadTask(this.context);
-    await downloadTask.execute(params);
+    await this.executeTask(params);
   }
 
   public async downloadPatchFromPpk(
@@ -231,17 +267,16 @@ export class UpdateContext {
     hash: string,
     originHash: string,
   ): Promise<void> {
-    const params = new DownloadTaskParams();
-    params.type = DownloadTaskParams.TASK_TYPE_PATCH_FROM_PPK;
-    params.url = url;
-    params.hash = hash;
+    const params = this.createTaskParams(
+      DownloadTaskParams.TASK_TYPE_PATCH_FROM_PPK,
+      url,
+      hash,
+    );
     params.originHash = originHash;
     params.targetFile = `${this.rootDir}/${originHash}_${hash}.ppk.patch`;
     params.unzipDirectory = `${this.rootDir}/${hash}`;
     params.originDirectory = `${this.rootDir}/${params.originHash}`;
-
-    const downloadTask = new DownloadTask(this.context);
-    await downloadTask.execute(params);
+    await this.executeTask(params);
   }
 
   public async downloadPatchFromPackage(
@@ -249,15 +284,14 @@ export class UpdateContext {
     hash: string,
   ): Promise<void> {
     try {
-      const params = new DownloadTaskParams();
-      params.type = DownloadTaskParams.TASK_TYPE_PATCH_FROM_APP;
-      params.url = url;
-      params.hash = hash;
+      const params = this.createTaskParams(
+        DownloadTaskParams.TASK_TYPE_PATCH_FROM_APP,
+        url,
+        hash,
+      );
       params.targetFile = `${this.rootDir}/${hash}.app.patch`;
       params.unzipDirectory = `${this.rootDir}/${hash}`;
-
-      const downloadTask = new DownloadTask(this.context);
-      return await downloadTask.execute(params);
+      return await this.executeTask(params);
     } catch (e) {
       console.error('Failed to download package patch:', e);
       throw e;
@@ -271,13 +305,7 @@ export class UpdateContext {
         throw Error(`Bundle version ${hash} not found.`);
       }
 
-      const nextState = NativePatchCore.runStateCore(
-        STATE_OP_SWITCH_VERSION,
-        this.getStateSnapshot(),
-        hash,
-      );
-      this.applyState(nextState);
-      this.preferences.flush();
+      this.runStateOperation(STATE_OP_SWITCH_VERSION, hash);
     } catch (e) {
       console.error('Failed to switch version:', e);
       throw e;
@@ -294,8 +322,7 @@ export class UpdateContext {
       false,
     );
     if (launchState.didRollback || launchState.consumedFirstTime) {
-      this.applyState(launchState);
-      this.preferences.flush();
+      this.persistState(launchState);
     }
 
     let version = launchState.loadVersion || '';
@@ -321,12 +348,7 @@ export class UpdateContext {
   }
 
   private rollBack(): string {
-    const nextState = NativePatchCore.runStateCore(
-      STATE_OP_ROLLBACK,
-      this.getStateSnapshot(),
-    );
-    this.applyState(nextState);
-    this.preferences.flush();
+    const nextState = this.runStateOperation(STATE_OP_ROLLBACK);
     return nextState.currentVersion || '';
   }
 
