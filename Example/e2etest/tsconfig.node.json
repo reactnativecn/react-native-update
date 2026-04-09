@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "verbatimModuleSyntax": false,
+    "allowImportingTsExtensions": false,
+    "noEmit": false
+  },
+  "include": [
+    "e2e/globalSetup.ts",
+    "e2e/globalTeardown.ts",
+    "e2e/localUpdateConfig.ts",
+    "scripts/prepare-local-update-artifacts.ts"
+  ]
+}

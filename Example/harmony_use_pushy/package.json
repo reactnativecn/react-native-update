@@ -15,7 +15,7 @@
     "@react-native-oh/react-native-harmony": "0.72.96",
     "react": "18.2.0",
     "react-native": "0.72.5",
-    "react-native-update": "^10.38.4"
+    "react-native-update": "^10.39.1"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0",

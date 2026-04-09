@@ -1,0 +1,10 @@
+{
+  "ios": {
+    "appId": 0,
+    "appKey": "local-e2e-ios"
+  },
+  "android": {
+    "appId": 0,
+    "appKey": "local-e2e-android"
+  }
+}
