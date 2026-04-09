@@ -680,6 +680,8 @@ RCT_EXPORT_METHOD(markSuccess:(RCTPromiseResolveBlock)resolve
         PushyToStdString(hash)
     );
     PushyApplyStateToDefaults(defaults, next);
+    // Re-enable first-load consumption and rollback checks for the newly selected bundle.
+    ignoreRollback = false;
     return YES;
 }
 

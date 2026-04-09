@@ -76,6 +76,7 @@ export function joinUrls(paths: string[], fileName?: string) {
   if (fileName) {
     return paths.map(path => {
       const normalizedPath = path.replace(/\/+$/, '');
+      // Keep explicit http(s) URLs for local/self-hosted update sources.
       const baseUrl = /^[a-z][a-z0-9+.-]*:\/\//i.test(normalizedPath)
         ? normalizedPath
         : `https://${normalizedPath}`;
