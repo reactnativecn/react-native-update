@@ -27,10 +27,22 @@ describe('joinUrls', () => {
     expect(joinUrls([], 'file.txt')).toEqual([]);
   });
 
-  test('maps over paths and prepends https:// with fileName', () => {
+  test('prepends https:// for host-only paths', () => {
     expect(joinUrls(['example.com', 'test.org'], 'file.txt')).toEqual([
       'https://example.com/file.txt',
       'https://test.org/file.txt',
+    ]);
+  });
+
+  test('preserves absolute urls and trims trailing slashes', () => {
+    expect(
+      joinUrls(
+        ['http://127.0.0.1:31337/artifacts/ios/', 'https://cdn.example.com/base'],
+        'file.txt',
+      ),
+    ).toEqual([
+      'http://127.0.0.1:31337/artifacts/ios/file.txt',
+      'https://cdn.example.com/base/file.txt',
     ]);
   });
 });

@@ -1,6 +1,7 @@
 .vscode
 android/build
 android/obj
+android/.cxx
 *.iml
 
 # OSX
@@ -43,6 +44,10 @@ npm-debug.log
 
 Example/**/.update
 Example/**/.pushy
+Example/**/.e2e-artifacts
+Example/**/artifacts
+Example/**/.detox
+Example/**/coverage
 Example/testHotUpdate/artifacts
 
 yarn-error.log
@@ -64,3 +69,4 @@ Example/harmony_use_pushy/harmony/entry/src/main/resources/rawfile/meta.json
 Example/harmony_use_pushy/harmony/entry/src/main/cpp/generated
 Example/testHotUpdate/.e2e-artifacts
 harmony/pushy/src/main/cpp/android-generated
+**/ios/.xcode.env.local

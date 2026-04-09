@@ -74,7 +74,13 @@ const ping = isWeb
 
 export function joinUrls(paths: string[], fileName?: string) {
   if (fileName) {
-    return paths.map(path => `https://${path}/${fileName}`);
+    return paths.map(path => {
+      const normalizedPath = path.replace(/\/+$/, '');
+      const baseUrl = /^[a-z][a-z0-9+.-]*:\/\//i.test(normalizedPath)
+        ? normalizedPath
+        : `https://${normalizedPath}`;
+      return `${baseUrl}/${fileName}`;
+    });
   }
 }
 
