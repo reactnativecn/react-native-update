@@ -58,6 +58,15 @@ function detectAndroidAvdName() {
       .split('\n')
       .map(line => line.trim())
       .filter(Boolean);
+
+    const preferredPatterns = [/^api34$/i, /\bapi[_-]?34\b/i, /\b34\b/];
+    for (const pattern of preferredPatterns) {
+      const preferredAvd = avds.find(item => pattern.test(item));
+      if (preferredAvd) {
+        return preferredAvd;
+      }
+    }
+
     if (avds.length > 0) {
       return avds[0];
     }
@@ -65,7 +74,7 @@ function detectAndroidAvdName() {
     // fall through to default
   }
 
-  return 'Pixel_3a_API_33_arm64-v8a';
+  return 'api34';
 }
 
 const iosSimulatorType = detectIosSimulatorType();

@@ -15,7 +15,7 @@ concurrency:
 jobs:
   e2e-ios:
     runs-on: macos-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
       - name: Checkout react-native-update
         uses: actions/checkout@v4
@@ -29,7 +29,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -50,24 +50,27 @@ jobs:
       - name: Install applesimutils
         run: HOMEBREW_NO_AUTO_UPDATE=1 brew tap wix/brew && HOMEBREW_NO_AUTO_UPDATE=1 brew install applesimutils
 
-      - name: Install testHotUpdate dependencies
-        run: cd Example/testHotUpdate && bun install --frozen-lockfile
+      - name: Install e2etest dependencies
+        run: cd Example/e2etest && bun install --frozen-lockfile
 
       - name: Install react-native-update-cli dependencies
         run: cd react-native-update-cli && bun install --frozen-lockfile
 
+      - name: Install CocoaPods dependencies
+        run: cd Example/e2etest/ios && pod install
+
       - name: Rebuild Detox iOS framework cache
         run: |
-          cd Example/testHotUpdate
-          npx detox clean-framework-cache
-          npx detox build-framework-cache
+          cd Example/e2etest
+          bunx detox clean-framework-cache
+          bunx detox build-framework-cache
 
       - name: Detox build (ios.sim.release)
         env:
           RNU_CLI_ROOT: ${{ github.workspace }}/react-native-update-cli
-        run: cd Example/testHotUpdate && E2E_PLATFORM=ios npx detox build --configuration ios.sim.release
+        run: cd Example/e2etest && E2E_PLATFORM=ios bunx detox build --configuration ios.sim.release
 
       - name: Detox test (ios.sim.release)
         env:
           RNU_CLI_ROOT: ${{ github.workspace }}/react-native-update-cli
-        run: cd Example/testHotUpdate && E2E_PLATFORM=ios npx detox test --configuration ios.sim.release
+        run: cd Example/e2etest && E2E_PLATFORM=ios bunx detox test --configuration ios.sim.release

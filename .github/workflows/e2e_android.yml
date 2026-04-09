@@ -16,7 +16,7 @@ concurrency:
 jobs:
   e2e-android:
     runs-on: macos-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
       - name: Checkout react-native-update
         uses: actions/checkout@v4
@@ -30,7 +30,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -43,25 +43,24 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Install testHotUpdate dependencies
-        run: cd Example/testHotUpdate && bun install --frozen-lockfile
+      - name: Install e2etest dependencies
+        run: cd Example/e2etest && bun install --frozen-lockfile
 
       - name: Install react-native-update-cli dependencies
         run: cd react-native-update-cli && bun install --frozen-lockfile
 
       - name: Detox build (android.emu.release)
-        run: cd Example/testHotUpdate && E2E_PLATFORM=android npx detox build --configuration android.emu.release
-
-      - name: Read Detox emulator name
-        id: device
-        run: node -e "console.log('AVD_NAME=' + require('./Example/testHotUpdate/.detoxrc').devices.emulator.device.avdName)" >> $GITHUB_OUTPUT
+        env:
+          DETOX_AVD_NAME: api34
+        run: cd Example/e2etest && E2E_PLATFORM=android bunx detox build --configuration android.emu.release
 
       - name: Detox test (android.emu.release)
         uses: reactivecircus/android-emulator-runner@v2
         env:
           RNU_CLI_ROOT: ${{ github.workspace }}/react-native-update-cli
+          DETOX_AVD_NAME: api34
         with:
-          api-level: 33
+          api-level: 34
           arch: arm64-v8a
-          avd-name: ${{ steps.device.outputs.AVD_NAME }}
-          script: cd Example/testHotUpdate && E2E_PLATFORM=android npx detox test --configuration android.emu.release --headless --record-logs all
+          avd-name: api34
+          script: cd Example/e2etest && E2E_PLATFORM=android bunx detox test --configuration android.emu.release --headless --record-logs all

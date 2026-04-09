@@ -109,7 +109,7 @@ android {
 }
 
 
-def detoxVersion = "20.41.2"
+def detoxVersion = "20.50.1"
 
 repositories {
     maven {
