@@ -10,7 +10,11 @@ const createJsonResponse = (payload: unknown) =>
     json: async () => payload,
   }) as Response;
 
-const setupClientMocks = () => {
+const setupClientMocks = ({
+  currentVersion = 'hash',
+}: {
+  currentVersion?: string;
+} = {}) => {
   (globalThis as any).__DEV__ = false;
 
   mock.module('react-native', () => ({
@@ -45,11 +49,12 @@ const setupClientMocks = () => {
       os: 'ios',
       uuid: 'uuid',
     },
-    currentVersion: 'hash',
+    currentVersion,
     currentVersionInfo: {},
     isFirstTime: false,
     isRolledBack: false,
     packageVersion: '1.0.0',
+    bundleHash: 'bundle-hash',
     pushyNativeEventEmitter: {
       addListener: mock(() => ({ remove: mock(() => {}) })),
     },

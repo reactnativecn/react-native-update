@@ -7,6 +7,7 @@
 
 #include "archive_patch_core.h"
 #include "patch_core.h"
+#include "sha256_util.h"
 #include "state_core.h"
 
 extern "C" {
@@ -503,6 +504,37 @@ napi_value HdiffPatch(napi_env env, napi_callback_info info) {
   return result;
 }
 
+napi_value Sha256Hex(napi_env env, napi_callback_info info) {
+  napi_value args[1] = {nullptr};
+  size_t argc = 1;
+  if (!GetArgCount(env, info, &argc, args) || argc < 1) {
+    ThrowError(env, "Wrong number of arguments");
+    return nullptr;
+  }
+
+  bool is_typed_array = false;
+  if (napi_is_typedarray(env, args[0], &is_typed_array) != napi_ok || !is_typed_array) {
+    ThrowError(env, "First argument must be a TypedArray");
+    return nullptr;
+  }
+
+  void* bytes = nullptr;
+  size_t length = 0;
+  if (napi_get_typedarray_info(
+          env,
+          args[0],
+          nullptr,
+          &length,
+          &bytes,
+          nullptr,
+          nullptr) != napi_ok) {
+    ThrowError(env, "Failed to get buffer");
+    return nullptr;
+  }
+
+  return NewString(env, pushy::crypto::Sha256Hex(bytes, length));
+}
+
 napi_value SyncStateWithBinaryVersion(napi_env env, napi_callback_info info) {
   napi_value args[3] = {nullptr, nullptr, nullptr};
   size_t argc = 3;
@@ -842,6 +874,7 @@ bool ExportFunction(
 
 napi_value Init(napi_env env, napi_value exports) {
   if (!ExportFunction(env, exports, "hdiffPatch", HdiffPatch) ||
+      !ExportFunction(env, exports, "sha256Hex", Sha256Hex) ||
       !ExportFunction(env, exports, "syncStateWithBinaryVersion", SyncStateWithBinaryVersion) ||
       !ExportFunction(env, exports, "runStateCore", RunStateCore) ||
       !ExportFunction(env, exports, "buildArchivePatchPlan", BuildArchivePatchPlan) ||

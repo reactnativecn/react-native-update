@@ -6,6 +6,7 @@ import {
 import {
   PushyModule,
   buildTime,
+  bundleHash,
   cInfo,
   currentVersion,
   currentVersionInfo,
@@ -369,6 +370,7 @@ export class Pushy {
     const fetchBody = {
       packageVersion: this.options.overridePackageVersion || packageVersion,
       hash: currentVersion,
+      bundleHash,
       buildTime,
       cInfo,
       ...extra,

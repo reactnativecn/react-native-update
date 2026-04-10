@@ -9,7 +9,6 @@
 #include <unistd.h>
 
 #include <set>
-#include <sstream>
 #include <vector>
 
 extern "C" {
@@ -31,12 +30,19 @@ class HdiffBundlePatcher final : public BundlePatcher {
 };
 
 Status MakeErrnoStatus(const std::string& message, int err = errno) {
-  std::ostringstream stream;
-  stream << message;
-  if (err != 0) {
-    stream << ": " << std::strerror(err);
+  if (err == 0) {
+    return Status::Error(message);
   }
-  return Status::Error(stream.str());
+  return Status::Error(message + ": " + std::strerror(err));
+}
+
+std::string IntToString(int value) {
+  char buffer[32] = {0};
+  const int written = std::snprintf(buffer, sizeof(buffer), "%d", value);
+  if (written <= 0) {
+    return "0";
+  }
+  return std::string(buffer, static_cast<size_t>(written));
 }
 
 bool EndsWithSlash(const std::string& path) {
@@ -522,9 +528,8 @@ Status HdiffBundlePatcher::Apply(
       destination_bundle_path.c_str(),
       bundle_patch_path.c_str());
   if (result != 0) {
-    std::ostringstream stream;
-    stream << "Failed to apply bundle patch, hpatch error " << result;
-    return Status::Error(stream.str());
+    return Status::Error(
+        "Failed to apply bundle patch, hpatch error " + IntToString(result));
   }
   return Status::Ok();
 }

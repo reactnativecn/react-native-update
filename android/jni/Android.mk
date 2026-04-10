@@ -24,8 +24,10 @@ LOCAL_SRC_FILES := \
 	../../cpp/patch_core/archive_patch_core.cpp \
 	../../cpp/patch_core/patch_core.cpp \
 	../../cpp/patch_core/patch_core_android.cpp \
+	../../cpp/patch_core/sha256_util.cpp \
 	../../cpp/patch_core/state_core.cpp \
 	../../cpp/patch_core/update_core_android.cpp \
+	lzma/C/Sha256.c \
 	$(Hdp_Files)
 
 include $(BUILD_SHARED_LIBRARY)

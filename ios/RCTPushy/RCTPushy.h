@@ -5,5 +5,6 @@
 @interface RCTPushy : RCTEventEmitter<RCTBridgeModule>
 
 + (NSURL *)bundleURL;
++ (NSString *)bundleHash;
 
 @end

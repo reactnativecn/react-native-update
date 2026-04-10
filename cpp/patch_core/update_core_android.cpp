@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "archive_patch_core.h"
+#include "sha256_util.h"
 #include "state_core.h"
 
 namespace {
@@ -391,6 +392,34 @@ Java_cn_reactnative_modules_update_UpdateContext_runStateCore(
 
   ThrowRuntimeException(env, "Unknown state operation");
   return nullptr;
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_cn_reactnative_modules_update_UpdateContext_hashBytes(
+    JNIEnv* env,
+    jclass,
+    jbyteArray data) {
+  if (data == nullptr) {
+    return nullptr;
+  }
+
+  const jsize length = env->GetArrayLength(data);
+  if (length == 0) {
+    const std::string digest = pushy::crypto::Sha256Hex(nullptr, 0);
+    return env->NewStringUTF(digest.c_str());
+  }
+
+  jbyte* bytes = env->GetByteArrayElements(data, nullptr);
+  if (bytes == nullptr) {
+    ThrowRuntimeException(env, "Failed to access byte array");
+    return nullptr;
+  }
+
+  const std::string digest = pushy::crypto::Sha256Hex(
+      reinterpret_cast<const uint8_t*>(bytes),
+      static_cast<size_t>(length));
+  env->ReleaseByteArrayElements(data, bytes, JNI_ABORT);
+  return env->NewStringUTF(digest.c_str());
 }
 
 extern "C" JNIEXPORT jobject JNICALL

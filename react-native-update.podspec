@@ -92,7 +92,7 @@ Pod::Spec.new do |s|
 
   s.libraries = 'bz2', 'z'
   s.pod_target_xcconfig = { 
-    'USER_HEADER_SEARCH_PATHS' => "#{podspec_dir}/ios \"$(PODS_ROOT)/Headers/Public/SSZipArchive\" \"$(PODS_ROOT)/Headers/Public/React-Codegen/RCTPushySpec\"", 
+    'USER_HEADER_SEARCH_PATHS' => "#{podspec_dir}/ios #{podspec_dir}/android/jni/lzma/C \"$(PODS_ROOT)/Headers/Public/SSZipArchive\" \"$(PODS_ROOT)/Headers/Public/React-Codegen/RCTPushySpec\"", 
     "DEFINES_MODULE" => "YES" 
   }
   s.resource = 'ios/pushy_build_time.txt'
@@ -111,10 +111,12 @@ Pod::Spec.new do |s|
     ss.source_files = ['ios/RCTPushy/*.{h,m,mm}',
                        'cpp/patch_core/archive_patch_core.{h,cpp}',
                        'cpp/patch_core/patch_core.{h,cpp}',
+                       'cpp/patch_core/sha256_util.{h,cpp}',
                        'cpp/patch_core/state_core.{h,cpp}',
                        'android/jni/hpatch.{h,c}',
                        'android/jni/HDiffPatch/libHDiffPatch/HPatch/*.{h,c}',
                        'android/jni/HDiffPatch/file_for_patch.{h,c}',
+                       'android/jni/lzma/C/Sha256.{h,c}',
                        'android/jni/lzma/C/LzmaDec.{h,c}',
                        'android/jni/lzma/C/Lzma2Dec.{h,c}']
     ss.public_header_files = ['ios/RCTPushy/*.h']

@@ -35,8 +35,10 @@ else()
          ${CMAKE_CURRENT_SOURCE_DIR}/pushy.cpp
          ${PATCH_CORE_DIR}/archive_patch_core.cpp
          ${PATCH_CORE_DIR}/patch_core.cpp
+         ${PATCH_CORE_DIR}/sha256_util.cpp
          ${PATCH_CORE_DIR}/state_core.cpp
          ${ANDROID_JNI_DIR}/hpatch.c
+         ${LZMA_DIR}/C/Sha256.c
          ${HDIFFPATCH_DIR}/libHDiffPatch/HPatch/patch.c
          ${HDIFFPATCH_DIR}/file_for_patch.c
          ${LZMA_DIR}/C/LzmaDec.c

@@ -4,11 +4,15 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import android.content.res.AssetManager;
 import android.os.Build;
 import android.os.Environment;
 import android.util.Log;
 import com.facebook.react.ReactInstanceManager;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 
@@ -35,6 +39,9 @@ public class UpdateContext {
     private static final int STATE_OP_CLEAR_ROLLBACK_MARK = 5;
     private static final int STATE_OP_RESOLVE_LAUNCH = 6;
     private static final String KEY_FIRST_LOAD_MARKED = "firstLoadMarked";
+    private static final String KEY_BUNDLE_HASH_CACHE_IDENTITY = "bundleHashCacheIdentity";
+    private static final String KEY_BUNDLE_HASH_CACHE_VALUE = "bundleHashCacheValue";
+    private static final String EMBEDDED_BUNDLE_ASSET_NAME = "index.android.bundle";
     
     // Singleton instance
     private static UpdateContext sInstance;
@@ -54,6 +61,8 @@ public class UpdateContext {
         boolean flagA,
         boolean flagB
     );
+
+    private static native String hashBytes(byte[] data);
 
     public UpdateContext(Context context) {
         this.context = context.getApplicationContext();
@@ -108,6 +117,47 @@ public class UpdateContext {
 
     public boolean getIsUsingBundleUrl() {
         return isUsingBundleUrl;
+    }
+
+    public String getBundleHash() {
+        String identity = "embedded:" + getPackageVersion() + ":" + getBuildTime();
+        String cachedIdentity = sp.getString(KEY_BUNDLE_HASH_CACHE_IDENTITY, null);
+        String cachedValue = sp.getString(KEY_BUNDLE_HASH_CACHE_VALUE, null);
+        if (identity.equals(cachedIdentity) && cachedValue != null && !cachedValue.isEmpty()) {
+            return cachedValue;
+        }
+
+        String bundleHash = hashAsset(EMBEDDED_BUNDLE_ASSET_NAME);
+        if (bundleHash == null) {
+            return "";
+        }
+
+        SharedPreferences.Editor editor = sp.edit();
+        editor.putString(KEY_BUNDLE_HASH_CACHE_IDENTITY, identity);
+        editor.putString(KEY_BUNDLE_HASH_CACHE_VALUE, bundleHash);
+        persistEditor(editor, "cache bundle hash");
+        return bundleHash;
+    }
+
+    private String hashAsset(String assetName) {
+        try (InputStream stream = context.getAssets().open(assetName, AssetManager.ACCESS_STREAMING)) {
+            return hashInputStream(stream);
+        } catch (IOException e) {
+            if (DEBUG) {
+                Log.w(TAG, "Failed to hash asset bundle " + assetName, e);
+            }
+            return null;
+        }
+    }
+
+    private String hashInputStream(InputStream stream) throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        byte[] buffer = new byte[8192];
+        int read;
+        while ((read = stream.read(buffer)) != -1) {
+            output.write(buffer, 0, read);
+        }
+        return hashBytes(output.toByteArray());
     }
 
     private void enqueue(DownloadTaskParams params) {
