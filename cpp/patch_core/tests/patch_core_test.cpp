@@ -1,6 +1,5 @@
 #include "../archive_patch_core.h"
 #include "../patch_core.h"
-#include "../sha256_util.h"
 #include "../state_core.h"
 
 #include <cstdio>
@@ -443,15 +442,6 @@ void TestArchivePatchCoreSupportsCustomBundlePatchEntry() {
   ExpectEq(plan.merge_source_subdir, "", "custom bundle patch merge subdir mismatch");
 }
 
-void TestSha256UtilGeneratesStableDigest() {
-  const std::string digest = pushy::crypto::Sha256Hex("abc", 3);
-  ExpectEq(
-      digest,
-      "ba7816bf8f01cfea414140de5dae2223"
-      "b00361a396177a9cb410ff61f20015ad",
-      "sha256 digest mismatch");
-}
-
 }  // namespace
 
 int main() {
@@ -467,7 +457,6 @@ int main() {
       {"ArchivePatchCoreBuildPlanAndCopyGroups", TestArchivePatchCoreBuildPlanAndCopyGroups},
       {"ArchivePatchCoreRejectsMissingEntries", TestArchivePatchCoreRejectsMissingEntries},
       {"ArchivePatchCoreSupportsCustomBundlePatchEntry", TestArchivePatchCoreSupportsCustomBundlePatchEntry},
-      {"Sha256UtilGeneratesStableDigest", TestSha256UtilGeneratesStableDigest},
   };
 
   for (const auto& test : tests) {

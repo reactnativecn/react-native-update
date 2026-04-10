@@ -14,9 +14,6 @@ import NativePatchCore, {
 } from './NativePatchCore';
 
 export class UpdateContext {
-  private static readonly KEY_BUNDLE_HASH_CACHE_IDENTITY =
-    'bundleHashCacheIdentity';
-  private static readonly KEY_BUNDLE_HASH_CACHE_VALUE = 'bundleHashCacheValue';
   private context: common.UIAbilityContext;
   private rootDir: string;
   private preferences!: preferences.Preferences;
@@ -204,51 +201,6 @@ export class UpdateContext {
 
   public getKv(key: string): string {
     return this.readString(key);
-  }
-
-  public getBundleHash(
-    packageVersion: string,
-    buildTime: string,
-  ): string {
-    const identity = `embedded:${packageVersion}:${buildTime}`;
-    const cachedIdentity = this.readString(
-      UpdateContext.KEY_BUNDLE_HASH_CACHE_IDENTITY,
-    );
-    const cachedValue = this.readString(
-      UpdateContext.KEY_BUNDLE_HASH_CACHE_VALUE,
-    );
-    if (identity === cachedIdentity && cachedValue) {
-      return cachedValue;
-    }
-
-    const bundleBytes = this.readEmbeddedBundleBytesSync();
-    if (!bundleBytes) {
-      return '';
-    }
-
-    const bundleHash = NativePatchCore.sha256Hex(bundleBytes);
-    this.preferences.putSync(
-      UpdateContext.KEY_BUNDLE_HASH_CACHE_IDENTITY,
-      identity,
-    );
-    this.preferences.putSync(
-      UpdateContext.KEY_BUNDLE_HASH_CACHE_VALUE,
-      bundleHash,
-    );
-    this.preferences.flush();
-    return bundleHash;
-  }
-
-  private readEmbeddedBundleBytesSync(): Uint8Array | null {
-    try {
-      const content = this.context.resourceManager.getRawFileContentSync(
-        'bundle.harmony.js',
-      );
-      return new Uint8Array(content);
-    } catch (error) {
-      console.error('Failed to read embedded Harmony bundle:', error);
-      return null;
-    }
   }
 
   public isFirstTime(): boolean {

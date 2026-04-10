@@ -32,7 +32,6 @@ const PushyConstants = isTurboModuleEnabled
 export const downloadRootDir: string = PushyConstants.downloadRootDir;
 export const packageVersion: string = PushyConstants.packageVersion;
 export const currentVersion: string = PushyConstants.currentVersion;
-export const bundleHash: string = PushyConstants.bundleHash || '';
 
 export function setLocalHashInfo(hash: string, info: Record<string, any>) {
   PushyModule.setLocalHashInfo(hash, JSON.stringify(info));

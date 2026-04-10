@@ -23,7 +23,6 @@ final class UpdateModuleSupport {
         constants.put("currentVersion", currentVersion);
         constants.put("currentVersionInfo", updateContext.getKv("hash_" + currentVersion));
         constants.put("buildTime", updateContext.getBuildTime());
-        constants.put("bundleHash", updateContext.getBundleHash());
         constants.put("isUsingBundleUrl", updateContext.getIsUsingBundleUrl());
 
         boolean isFirstTime = updateContext.consumeFirstLoadMarker();

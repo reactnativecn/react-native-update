@@ -54,7 +54,6 @@ interface NativePatchCoreBindings {
     origin: Uint8Array,
     patch: Uint8Array,
   ): ArrayBuffer | Uint8Array;
-  sha256Hex(bytes: Uint8Array): string;
   syncStateWithBinaryVersion(
     packageVersion: string,
     buildTime: string,

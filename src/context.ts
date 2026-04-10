@@ -18,7 +18,6 @@ export const defaultContext = {
   getCurrentVersionInfo: () => Promise.resolve({}),
   parseTestQrCode: () => false,
   currentHash: '',
-  bundleHash: '',
   packageVersion: '',
   currentVersionInfo: {},
 };
@@ -45,7 +44,6 @@ export const UpdateContext = createContext<{
   parseTestQrCode: (code: string) => boolean;
   restartApp: () => Promise<void>;
   currentHash: string;
-  bundleHash: string;
   packageVersion: string;
   client?: Pushy | Cresc;
   progress?: ProgressData;

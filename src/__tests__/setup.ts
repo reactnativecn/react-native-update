@@ -18,7 +18,6 @@ mock.module('react-native', () => {
         isFirstTime: false,
         rolledBackVersion: '',
         buildTime: '2023-01-01',
-        bundleHash: 'bundle-hash',
         uuid: 'uuid',
         setLocalHashInfo: () => {},
         getLocalHashInfo: () => Promise.resolve('{}'),

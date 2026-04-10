@@ -17,7 +17,6 @@ COMMON_INCLUDES="
 cc -Wall -Wextra $COMMON_INCLUDES -c "$ROOT_DIR/android/jni/hpatch.c" -o "$BUILD_DIR/hpatch.o"
 cc -Wall -Wextra $COMMON_INCLUDES -c "$ROOT_DIR/android/jni/HDiffPatch/libHDiffPatch/HPatch/patch.c" -o "$BUILD_DIR/patch.o"
 cc -Wall -Wextra $COMMON_INCLUDES -c "$ROOT_DIR/android/jni/HDiffPatch/file_for_patch.c" -o "$BUILD_DIR/file_for_patch.o"
-cc -Wall -Wextra $COMMON_INCLUDES -c "$ROOT_DIR/android/jni/lzma/C/Sha256.c" -o "$BUILD_DIR/Sha256.o"
 cc -Wall -Wextra $COMMON_INCLUDES -c "$ROOT_DIR/android/jni/lzma/C/LzmaDec.c" -o "$BUILD_DIR/LzmaDec.o"
 cc -Wall -Wextra $COMMON_INCLUDES -c "$ROOT_DIR/android/jni/lzma/C/Lzma2Dec.c" -o "$BUILD_DIR/Lzma2Dec.o"
 
@@ -29,12 +28,10 @@ c++ \
   "$ROOT_DIR/cpp/patch_core/tests/patch_core_test.cpp" \
   "$ROOT_DIR/cpp/patch_core/archive_patch_core.cpp" \
   "$ROOT_DIR/cpp/patch_core/patch_core.cpp" \
-  "$ROOT_DIR/cpp/patch_core/sha256_util.cpp" \
   "$ROOT_DIR/cpp/patch_core/state_core.cpp" \
   "$BUILD_DIR/hpatch.o" \
   "$BUILD_DIR/patch.o" \
   "$BUILD_DIR/file_for_patch.o" \
-  "$BUILD_DIR/Sha256.o" \
   "$BUILD_DIR/LzmaDec.o" \
   "$BUILD_DIR/Lzma2Dec.o" \
   -o "$BUILD_DIR/patch_core_test"

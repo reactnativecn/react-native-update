@@ -3,7 +3,6 @@
 #import "ZipArchive.h"
 #include "../../cpp/patch_core/archive_patch_core.h"
 #include "../../cpp/patch_core/patch_core.h"
-#include "../../cpp/patch_core/sha256_util.h"
 #include "../../cpp/patch_core/state_core.h"
 
 #if __has_include("RCTReloadCommand.h")
@@ -28,8 +27,6 @@ static NSString *const keyHashInfo = @"REACTNATIVECN_PUSHY_HASH_";
 static NSString *const keyFirstLoadMarked = @"REACTNATIVECN_PUSHY_FIRSTLOADMARKED_KEY";
 static NSString *const keyRolledBackMarked = @"REACTNATIVECN_PUSHY_ROLLEDBACKMARKED_KEY";
 static NSString *const KeyPackageUpdatedMarked = @"REACTNATIVECN_PUSHY_ISPACKAGEUPDATEDMARKED_KEY";
-static NSString *const keyBundleHashCacheIdentity = @"REACTNATIVECN_PUSHY_BUNDLEHASH_IDENTITY";
-static NSString *const keyBundleHashCacheValue = @"REACTNATIVECN_PUSHY_BUNDLEHASH_VALUE";
 static NSString *const PushyErrorDomain = @"cn.reactnative.pushy";
 
 // file def
@@ -91,41 +88,6 @@ static void PushySetNullableString(NSUserDefaults *defaults, NSString *key, NSSt
 
 static NSString *PushyHashInfoKey(NSString *hash) {
     return [keyHashInfo stringByAppendingString:hash ?: @""];
-}
-
-static NSString *PushySHA256HexForFile(NSString *path) {
-    if (path.length == 0) {
-        return nil;
-    }
-
-    NSInputStream *stream = [NSInputStream inputStreamWithFileAtPath:path];
-    if (stream == nil) {
-        return nil;
-    }
-
-    [stream open];
-    if (stream.streamStatus == NSStreamStatusError) {
-        [stream close];
-        return nil;
-    }
-
-    pushy::crypto::Sha256Hasher hasher;
-    uint8_t buffer[8192];
-    while ([stream hasBytesAvailable]) {
-        NSInteger read = [stream read:buffer maxLength:sizeof(buffer)];
-        if (read < 0) {
-            [stream close];
-            return nil;
-        }
-        if (read == 0) {
-            break;
-        }
-        hasher.Update(buffer, static_cast<size_t>(read));
-    }
-    [stream close];
-
-    std::string digest = hasher.FinalHex();
-    return [NSString stringWithUTF8String:digest.c_str()];
 }
 
 static NSString *PushyOptionString(NSDictionary *options, NSString *key) {
@@ -332,7 +294,6 @@ RCT_EXPORT_MODULE(RCTPushy);
     ret[@"downloadRootDir"] = [RCTPushy downloadDir];
     ret[@"packageVersion"] = [RCTPushy packageVersion];
     ret[@"buildTime"] = [RCTPushy buildTime];
-    ret[@"bundleHash"] = [RCTPushy bundleHash];
     ret[@"rolledBackVersion"] = [defaults objectForKey:keyRolledBackMarked];
     ret[@"isFirstTime"] = [defaults objectForKey:keyFirstLoadMarked];
     ret[@"uuid"] = [defaults objectForKey:keyUuid];
@@ -846,30 +807,6 @@ RCT_EXPORT_METHOD(markSuccess:(RCTPromiseResolveBlock)resolve
     });
     return buildTime;
 #endif
-}
-
-+ (NSString *)bundleHash
-{
-    NSUserDefaults *defaults = PushyDefaults();
-    NSString *identity = [NSString stringWithFormat:@"embedded:%@:%@",
-      [RCTPushy packageVersion] ?: @"",
-      [RCTPushy buildTime] ?: @""];
-
-    NSString *cachedIdentity = [defaults stringForKey:keyBundleHashCacheIdentity];
-    NSString *cachedValue = [defaults stringForKey:keyBundleHashCacheValue];
-    if ([identity isEqualToString:cachedIdentity] && cachedValue.length) {
-        return cachedValue;
-    }
-
-    NSString *bundlePath = [[RCTPushy binaryBundleURL] path];
-    NSString *bundleHash = PushySHA256HexForFile(bundlePath);
-    if (!bundleHash.length) {
-        return @"";
-    }
-
-    [defaults setObject:identity forKey:keyBundleHashCacheIdentity];
-    [defaults setObject:bundleHash forKey:keyBundleHashCacheValue];
-    return bundleHash;
 }
 
 #ifdef RCT_NEW_ARCH_ENABLED

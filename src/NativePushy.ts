@@ -8,7 +8,6 @@ export interface Spec extends TurboModule {
     isFirstTime: boolean;
     rolledBackVersion: string;
     buildTime: string;
-    bundleHash: string;
     uuid: string;
     isUsingBundleUrl: boolean;
     currentVersionInfo: string;

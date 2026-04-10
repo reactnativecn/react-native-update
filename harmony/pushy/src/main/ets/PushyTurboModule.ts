@@ -100,7 +100,6 @@ export class PushyTurboModule extends UITurboModule {
     this.context.syncStateWithBinaryVersion(packageVersion, buildTime);
 
     const currentVersion = this.context.getCurrentVersion();
-    const bundleHash = this.context.getBundleHash(packageVersion, buildTime);
     const currentVersionInfo = currentVersion
       ? this.context.getKv(`hash_${currentVersion}`)
       : '';
@@ -119,7 +118,6 @@ export class PushyTurboModule extends UITurboModule {
       packageVersion,
       currentVersion,
       buildTime,
-      bundleHash,
       isUsingBundleUrl,
       isFirstTime,
       rolledBackVersion,

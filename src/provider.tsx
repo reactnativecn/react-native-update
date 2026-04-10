@@ -16,7 +16,6 @@ import { Pushy, Cresc, sharedState } from './client';
 import {
   currentVersion,
   packageVersion,
-  bundleHash,
   getCurrentVersionInfo,
   currentVersionInfo,
 } from './core';
@@ -409,7 +408,6 @@ export const UpdateProvider = ({
         client,
         downloadUpdate,
         packageVersion,
-        bundleHash,
         currentHash: currentVersion,
         progress,
         downloadAndInstallApk,
