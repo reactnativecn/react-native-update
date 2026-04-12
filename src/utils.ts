@@ -39,8 +39,9 @@ export function promiseAny<T>(promises: Promise<T>[]) {
 
 export const emptyObj = {};
 export const noop = () => {};
+const emptyModuleTarget: Record<string, typeof noop> = {};
 export const emptyModule = new Proxy(
-  {} as Record<string, typeof noop>,
+  emptyModuleTarget,
   {
     get(_target, _prop) {
       return noop;
