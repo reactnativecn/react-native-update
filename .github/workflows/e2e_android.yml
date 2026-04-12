@@ -71,12 +71,14 @@ jobs:
 
       - name: Detox build (android.emu.release)
         env:
+          DETOX_ANDROID_ARCHS: x86_64
           DETOX_AVD_NAME: api34
         run: cd Example/e2etest && E2E_PLATFORM=android bunx detox build --configuration android.emu.release
 
       - name: Detox test (android.emu.release)
         uses: reactivecircus/android-emulator-runner@v2
         env:
+          DETOX_ANDROID_ARCHS: x86_64
           RNU_CLI_ROOT: ${{ github.workspace }}/react-native-update-cli
           DETOX_AVD_NAME: api34
         with:

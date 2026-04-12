@@ -80,6 +80,9 @@ function detectAndroidAvdName() {
 const iosSimulatorType = detectIosSimulatorType();
 const androidAvdName = detectAndroidAvdName();
 const iosSimulatorArch = process.arch === 'arm64' ? 'arm64' : 'x86_64';
+const androidArchitectures = process.env.DETOX_ANDROID_ARCHS
+  ? ` -PreactNativeArchitectures=${process.env.DETOX_ANDROID_ARCHS}`
+  : '';
 const iosBuildBase =
   'xcodebuild -workspace ios/AwesomeProject.xcworkspace -UseNewBuildSystem=NO -scheme AwesomeProject -sdk iphonesimulator -destination "generic/platform=iOS Simulator" -derivedDataPath ios/build';
 
@@ -118,7 +121,7 @@ const config = {
       type: 'android.apk',
       binaryPath: 'android/app/build/outputs/apk/debug/app-debug.apk',
       build:
-        'cd android && ./gradlew assembleDebug assembleAndroidTest -DtestBuildType=debug',
+        `cd android && ./gradlew assembleDebug assembleAndroidTest -DtestBuildType=debug${androidArchitectures}`,
       start: 'scripts/start-rn.sh android',
       reversePorts: [8081],
     },
@@ -126,7 +129,7 @@ const config = {
       type: 'android.apk',
       binaryPath: 'android/app/build/outputs/apk/release/app-release.apk',
       build:
-        'cd android && ./gradlew assembleRelease assembleAndroidTest -DtestBuildType=release',
+        `cd android && ./gradlew assembleRelease assembleAndroidTest -DtestBuildType=release${androidArchitectures}`,
     },
   },
   devices: {
