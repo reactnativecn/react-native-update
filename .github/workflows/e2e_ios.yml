@@ -18,10 +18,10 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout react-native-update
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Checkout react-native-update-cli
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: reactnativecn/react-native-update-cli
           path: react-native-update-cli
@@ -37,7 +37,7 @@ jobs:
           bun-version: latest
 
       - name: Setup Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
