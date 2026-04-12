@@ -11,11 +11,7 @@ let eventListener:
   | ((type: string, data?: Record<string, unknown>) => void)
   | null = null;
 let checkStateListener:
-  | ((state: {
-      status: string;
-      resultKind: string;
-      hash?: string;
-    }) => void)
+  | ((state: { status: string; resultKind: string; hash?: string }) => void)
   | null = null;
 type UpdateStrategyMode = 'silentAndNow' | 'silentAndLater';
 const updatePlatform = Platform.OS === 'android' ? 'android' : 'ios';
@@ -36,9 +32,8 @@ function App() {
   const [lastEventVersion, setLastEventVersion] = useState('(none)');
   const [lastCheckStatus, setLastCheckStatus] = useState('(none)');
   const [lastCheckResult, setLastCheckResult] = useState('(none)');
-  const [selectedStrategy, setSelectedStrategy] = useState<UpdateStrategyMode>(
-    'silentAndNow',
-  );
+  const [selectedStrategy, setSelectedStrategy] =
+    useState<UpdateStrategyMode>('silentAndNow');
   const bundleLabelGlobal = globalThis as typeof globalThis & {
     __RNU_E2E_BUNDLE_LABEL?: string;
   };
@@ -66,9 +61,7 @@ function App() {
     }) => {
       setLastCheckStatus(state.status);
       setLastCheckResult(
-        state.hash
-          ? `${state.resultKind}:${state.hash}`
-          : state.resultKind,
+        state.hash ? `${state.resultKind}:${state.hash}` : state.resultKind,
       );
     };
     eventListener = listener;
@@ -88,24 +81,7 @@ function App() {
       <Text style={styles.welcome}>react-native-update e2etest</Text>
       <Text testID="bundle-label">bundleLabel: {bundleLabel}</Text>
       <Text testID="current-hash">currentHash: {currentHash || '(empty)'}</Text>
-      <Text testID="package-version">packageVersion: {packageVersion}</Text>
-      <Text testID="client-version">clientVersion: {client?.version}</Text>
       <Text testID="update-strategy">updateStrategy: {selectedStrategy}</Text>
-      <Text testID="endpoint">
-        endpoint: {getLocalUpdateEndpoint(updatePlatform)}
-      </Text>
-      <Text testID="progress">
-        progress: {received || 0} / {total || 0}
-      </Text>
-      <Text testID="last-event">lastEvent: {lastEvent}</Text>
-      <Text testID="last-event-data">lastEventData: {lastEventData}</Text>
-      <Text testID="last-event-version">lastEventVersion: {lastEventVersion}</Text>
-      <Text testID="last-check-status">lastCheckStatus: {lastCheckStatus}</Text>
-      <Text testID="last-check-result">lastCheckResult: {lastCheckResult}</Text>
-      <Text testID="last-error">lastError: {lastError?.message || '(none)'}</Text>
-      <Text testID="version-info">
-        currentVersionInfo: {JSON.stringify(currentVersionInfo) || '(empty)'}
-      </Text>
 
       <View style={styles.buttonRow}>
         <Pressable
@@ -141,6 +117,38 @@ function App() {
       >
         <Text style={styles.buttonText}>Check Update</Text>
       </Pressable>
+
+      <Text testID="package-version">packageVersion: {packageVersion}</Text>
+      <Text testID="client-version">clientVersion: {client?.version}</Text>
+      <Text testID="endpoint" style={styles.diagnosticText} numberOfLines={1}>
+        endpoint: {getLocalUpdateEndpoint(updatePlatform)}
+      </Text>
+      <Text testID="progress">
+        progress: {received || 0} / {total || 0}
+      </Text>
+      <Text testID="last-event">lastEvent: {lastEvent}</Text>
+      <Text
+        testID="last-event-data"
+        style={styles.diagnosticText}
+        numberOfLines={1}
+      >
+        lastEventData: {lastEventData}
+      </Text>
+      <Text testID="last-event-version">
+        lastEventVersion: {lastEventVersion}
+      </Text>
+      <Text testID="last-check-status">lastCheckStatus: {lastCheckStatus}</Text>
+      <Text testID="last-check-result">lastCheckResult: {lastCheckResult}</Text>
+      <Text testID="last-error" style={styles.diagnosticText} numberOfLines={1}>
+        lastError: {lastError?.message || '(none)'}
+      </Text>
+      <Text
+        testID="version-info"
+        style={styles.diagnosticText}
+        numberOfLines={1}
+      >
+        currentVersionInfo: {JSON.stringify(currentVersionInfo) || '(empty)'}
+      </Text>
     </View>
   );
 }
@@ -150,7 +158,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
     paddingHorizontal: 24,
     backgroundColor: '#F5FCFF',
   },
@@ -166,7 +174,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   button: {
-    marginTop: 16,
+    marginTop: 8,
     borderRadius: 8,
     backgroundColor: '#0a84ff',
     paddingHorizontal: 16,
@@ -176,6 +184,9 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     color: '#ffffff',
     fontWeight: '600',
+  },
+  diagnosticText: {
+    maxWidth: '100%',
   },
 });
 
@@ -193,12 +204,12 @@ const updateClient = new Pushy({
     const resultKind = result?.update
       ? 'update'
       : result?.upToDate
-        ? 'upToDate'
-        : result?.expired
-          ? 'expired'
-          : result?.paused
-            ? `paused:${result.paused}`
-            : '(none)';
+      ? 'upToDate'
+      : result?.expired
+      ? 'expired'
+      : result?.paused
+      ? `paused:${result.paused}`
+      : '(none)';
     checkStateListener?.({
       status: state.status,
       resultKind,
