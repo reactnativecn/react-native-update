@@ -67,7 +67,7 @@ jobs:
           ln -s ../.e2e-artifacts/local-react-native-update Example/e2etest/node_modules/react-native-update
 
       - name: Install react-native-update-cli dependencies
-        run: cd react-native-update-cli && bun install --frozen-lockfile
+        run: cd react-native-update-cli && bun install --frozen-lockfile && bun run build
 
       - name: Detox build (android.emu.release)
         env:
