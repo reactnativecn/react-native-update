@@ -20,6 +20,8 @@ jobs:
     steps:
       - name: Checkout react-native-update
         uses: actions/checkout@v6
+        with:
+          submodules: recursive
 
       - name: Checkout react-native-update-cli
         uses: actions/checkout@v6
@@ -51,6 +53,18 @@ jobs:
 
       - name: Install e2etest dependencies
         run: cd Example/e2etest && bun install --frozen-lockfile
+
+      - name: Link local react-native-update
+        run: |
+          set -euo pipefail
+          export LOCAL_RNU_VERSION="$(node -p "require('./Example/e2etest/node_modules/react-native-update/package.json').version")"
+          LOCAL_RNU_DIR="$PWD/Example/e2etest/.e2e-artifacts/local-react-native-update"
+          rm -rf "$LOCAL_RNU_DIR" Example/e2etest/node_modules/react-native-update
+          mkdir -p "$LOCAL_RNU_DIR"
+          cp package.json react-native-update.podspec react-native.config.js expo-module.config.json "$LOCAL_RNU_DIR"/
+          rsync -a --exclude='.git' src ios android cpp scripts "$LOCAL_RNU_DIR"/
+          node -e "const fs = require('fs'); const file = 'Example/e2etest/.e2e-artifacts/local-react-native-update/package.json'; const pkg = JSON.parse(fs.readFileSync(file, 'utf8')); pkg.version = process.env.LOCAL_RNU_VERSION; fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + '\n');"
+          ln -s ../.e2e-artifacts/local-react-native-update Example/e2etest/node_modules/react-native-update
 
       - name: Install react-native-update-cli dependencies
         run: cd react-native-update-cli && bun install --frozen-lockfile

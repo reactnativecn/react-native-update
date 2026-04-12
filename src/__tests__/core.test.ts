@@ -1,4 +1,4 @@
-import { describe, expect, test, mock } from 'bun:test';
+import { describe, expect, test, mock, spyOn } from 'bun:test';
 
 // In Bun, top-level imports are cached.
 // We can use mock.module to change the implementation of a module,
@@ -11,12 +11,15 @@ const importFreshCore = (cacheKey: string) => import(`../core?${cacheKey}`);
 
 describe('core info parsing', () => {
   test('should call error when currentVersionInfo is invalid JSON', async () => {
-    const mockError = mock(() => {});
+    const consoleError = spyOn(console, 'error').mockImplementation(() => {});
 
     mock.module('react-native', () => ({
       Platform: {
         OS: 'ios',
         Version: 13,
+      },
+      DeviceEventEmitter: {
+        addListener: mock(() => ({ remove: mock(() => {}) })),
       },
       NativeModules: {
         Pushy: {
@@ -46,29 +49,29 @@ describe('core info parsing', () => {
       nanoid: () => 'mock-uuid',
     }));
 
-    mock.module('../utils', () => ({
-      error: mockError,
-      log: mock(() => {}),
-      emptyModule: {},
-    }));
-
     // Use a unique query parameter to bypass cache if supported, or just rely on fresh environment per file.
     // In Bun, you can sometimes use a cache buster if it's dynamic import.
     await importFreshCore('error');
 
-    expect(mockError).toHaveBeenCalledWith(
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.any(String),
       expect.stringContaining('error_parse_version_info')
     );
+
+    consoleError.mockRestore();
   });
 
   test('should not call error when currentVersionInfo is valid JSON', async () => {
-    const mockError = mock(() => {});
+    const consoleError = spyOn(console, 'error').mockImplementation(() => {});
     const mockSetLocalHashInfo = mock(() => {});
 
     mock.module('react-native', () => ({
       Platform: {
         OS: 'ios',
         Version: 13,
+      },
+      DeviceEventEmitter: {
+        addListener: mock(() => ({ remove: mock(() => {}) })),
       },
       NativeModules: {
         Pushy: {
@@ -90,14 +93,10 @@ describe('core info parsing', () => {
       },
     }));
 
-    mock.module('../utils', () => ({
-      error: mockError,
-      log: mock(() => {}),
-      emptyModule: {},
-    }));
-
     await importFreshCore('success');
 
-    expect(mockError).not.toHaveBeenCalled();
+    expect(consoleError).not.toHaveBeenCalled();
+
+    consoleError.mockRestore();
   });
 });
