@@ -39,16 +39,14 @@ export function promiseAny<T>(promises: Promise<T>[]) {
 
 export const emptyObj = {};
 export const noop = () => {};
-class EmptyModule {
-  constructor() {
-    return new Proxy(this, {
-      get() {
-        return noop;
-      },
-    });
-  }
-}
-export const emptyModule = new EmptyModule();
+export const emptyModule = new Proxy(
+  {} as Record<string, typeof noop>,
+  {
+    get(_target, _prop) {
+      return noop;
+    },
+  },
+);
 
 const ping = isWeb
   ? Promise.resolve
