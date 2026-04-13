@@ -11,6 +11,24 @@ import { util } from '@kit.ArkTS';
 
 const TAG = 'PushyTurboModule';
 
+export function getErrorMessage(error: any): string {
+  if (error && typeof error === 'object' && 'message' in error) {
+    return String(error.message);
+  }
+  return String(error);
+}
+
+export function validateHashInfo(info: string): void {
+  try {
+    const parsed = JSON.parse(info);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw Error('invalid json string');
+    }
+  } catch {
+    throw Error('invalid json string');
+  }
+}
+
 export class PushyTurboModule extends UITurboModule {
   public static readonly NAME = 'Pushy';
 
@@ -27,13 +45,6 @@ export class PushyTurboModule extends UITurboModule {
 
   private getBundleFlags(): bundleManager.BundleFlag {
     return bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_REQUESTED_PERMISSION;
-  }
-
-  private getErrorMessage(error: any): string {
-    if (error && typeof error === 'object' && 'message' in error) {
-      return String(error.message);
-    }
-    return String(error);
   }
 
   private getPackageVersion(): string {
@@ -68,17 +79,6 @@ export class PushyTurboModule extends UITurboModule {
       throw Error(`${methodName}: empty hash`);
     }
     return hash;
-  }
-
-  private validateHashInfo(info: string): void {
-    try {
-      const parsed = JSON.parse(info);
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        throw Error('invalid json string');
-      }
-    } catch {
-      throw Error('invalid json string');
-    }
   }
 
   private async restartAbility(): Promise<void> {
@@ -127,14 +127,14 @@ export class PushyTurboModule extends UITurboModule {
 
   setLocalHashInfo(hash: string, info: string): boolean {
     logger.debug(TAG, ',call setLocalHashInfo');
-    this.validateHashInfo(info);
+    validateHashInfo(info);
     this.context.setKv(`hash_${hash}`, info);
     return true;
   }
 
   getLocalHashInfo(hash: string): string {
     const value = this.context.getKv(`hash_${hash}`);
-    this.validateHashInfo(value);
+    validateHashInfo(value);
     return value;
   }
 
@@ -151,8 +151,8 @@ export class PushyTurboModule extends UITurboModule {
       this.context.switchVersion(hash);
       await this.restartAbility();
     } catch (error) {
-      logger.error(TAG, `reloadUpdate failed: ${this.getErrorMessage(error)}`);
-      throw Error(`switchVersion failed ${this.getErrorMessage(error)}`);
+      logger.error(TAG, `reloadUpdate failed: ${getErrorMessage(error)}`);
+      throw Error(`switchVersion failed ${getErrorMessage(error)}`);
     }
   }
 
@@ -161,8 +161,8 @@ export class PushyTurboModule extends UITurboModule {
     try {
       await this.restartAbility();
     } catch (error) {
-      logger.error(TAG, `restartApp failed: ${this.getErrorMessage(error)}`);
-      throw Error(`restartApp failed ${this.getErrorMessage(error)}`);
+      logger.error(TAG, `restartApp failed: ${getErrorMessage(error)}`);
+      throw Error(`restartApp failed ${getErrorMessage(error)}`);
     }
   }
 

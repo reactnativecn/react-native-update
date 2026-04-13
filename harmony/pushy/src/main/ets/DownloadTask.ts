@@ -12,10 +12,43 @@ import NativePatchCore, {
   CopyGroupResult,
 } from './NativePatchCore';
 
-interface PatchManifestArrays {
+export interface PatchManifestArrays {
   copyFroms: string[];
   copyTos: string[];
   deletes: string[];
+}
+
+export function parseManifestToArrays(
+  manifest: Record<string, any>,
+  normalizeResourceCopies: boolean,
+): PatchManifestArrays {
+  const copyFroms: string[] = [];
+  const copyTos: string[] = [];
+  const deletesValue = manifest.deletes;
+  const deletes = Array.isArray(deletesValue)
+    ? deletesValue.map(item => String(item))
+    : deletesValue && typeof deletesValue === 'object'
+      ? Object.keys(deletesValue)
+      : [];
+
+  const copies = (manifest.copies || {}) as Record<string, string>;
+  for (const [to, rawFrom] of Object.entries(copies)) {
+    let from = String(rawFrom || '');
+    if (normalizeResourceCopies) {
+      from = from.replace('resources/rawfile/', '');
+      if (!from) {
+        from = to;
+      }
+    }
+    copyFroms.push(from);
+    copyTos.push(to);
+  }
+
+  return {
+    copyFroms,
+    copyTos,
+    deletes,
+  };
 }
 
 const DIFF_MANIFEST_ENTRY = '__diff.json';
@@ -166,44 +199,12 @@ export class DownloadTask {
       };
     }
 
-    return this.manifestToArrays(
+    return parseManifestToArrays(
       this.parseJsonEntry(await this.readFileContent(manifestPath)),
       normalizeResourceCopies,
     );
   }
 
-  private manifestToArrays(
-    manifest: Record<string, any>,
-    normalizeResourceCopies: boolean,
-  ): PatchManifestArrays {
-    const copyFroms: string[] = [];
-    const copyTos: string[] = [];
-    const deletesValue = manifest.deletes;
-    const deletes = Array.isArray(deletesValue)
-      ? deletesValue.map(item => String(item))
-      : deletesValue && typeof deletesValue === 'object'
-        ? Object.keys(deletesValue)
-        : [];
-
-    const copies = (manifest.copies || {}) as Record<string, string>;
-    for (const [to, rawFrom] of Object.entries(copies)) {
-      let from = String(rawFrom || '');
-      if (normalizeResourceCopies) {
-        from = from.replace('resources/rawfile/', '');
-        if (!from) {
-          from = to;
-        }
-      }
-      copyFroms.push(from);
-      copyTos.push(to);
-    }
-
-    return {
-      copyFroms,
-      copyTos,
-      deletes,
-    };
-  }
 
   private async applyBundlePatchFromFileSource(
     originContent: ArrayBuffer,
