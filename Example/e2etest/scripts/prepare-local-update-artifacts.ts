@@ -93,7 +93,27 @@ function ensureHdiffModule() {
   const modulePath = path.join(cliRoot, 'node_modules/node-hdiffpatch');
   if (!fs.existsSync(modulePath)) {
     console.log('node-hdiffpatch not found, installing...');
-    runPushy(['install', 'node-hdiffpatch'], cliRoot);
+    const result = spawnSync(
+      'npm',
+      [
+        'install',
+        '--no-save',
+        '--package-lock=false',
+        '--legacy-peer-deps',
+        'node-hdiffpatch',
+      ],
+      {
+        cwd: cliRoot,
+        stdio: 'inherit',
+        env: process.env,
+      },
+    );
+
+    if (result.status !== 0) {
+      throw new Error(
+        `npm install node-hdiffpatch failed with exit code ${result.status}`,
+      );
+    }
   }
   if (!fs.existsSync(modulePath)) {
     throw new Error(`Failed to install node-hdiffpatch under: ${cliRoot}`);

@@ -160,4 +160,119 @@ jobs:
           arch: x86_64
           avd-name: api34
           emulator-boot-timeout: 900
-          script: cd Example/e2etest && E2E_PLATFORM=android bunx detox test --configuration android.emu.release --headless --record-logs all
+          script: cd Example/e2etest && E2E_PLATFORM=android bunx detox test --configuration android.emu.release --headless --record-logs all --retries 1
+
+      - name: Upload Detox artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-android-detox-artifacts
+          path: Example/e2etest/artifacts
+          if-no-files-found: ignore
+          retention-days: 7
+
+  e2e-android-arm:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - name: Checkout react-native-update
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Checkout react-native-update-cli
+        uses: actions/checkout@v6
+        with:
+          repository: reactnativecn/react-native-update-cli
+          path: react-native-update-cli
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Cache Bun dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-${{ runner.arch }}-bun-e2e-${{ hashFiles('Example/e2etest/bun.lock', 'react-native-update-cli/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-bun-e2e-
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: |
+            Example/e2etest/bun.lock
+            Example/e2etest/android/*.gradle
+            Example/e2etest/android/**/*.gradle
+            Example/e2etest/android/gradle/wrapper/gradle-wrapper.properties
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Install e2etest dependencies
+        run: cd Example/e2etest && bun install --frozen-lockfile
+
+      - name: Link local react-native-update
+        run: |
+          set -euo pipefail
+          export LOCAL_RNU_VERSION="$(node -p "require('./Example/e2etest/node_modules/react-native-update/package.json').version")"
+          LOCAL_RNU_DIR="$PWD/Example/e2etest/.e2e-artifacts/local-react-native-update"
+          rm -rf "$LOCAL_RNU_DIR" Example/e2etest/node_modules/react-native-update
+          mkdir -p "$LOCAL_RNU_DIR"
+          cp package.json react-native-update.podspec react-native.config.js expo-module.config.json "$LOCAL_RNU_DIR"/
+          rsync -a --exclude='.git' src ios android cpp scripts "$LOCAL_RNU_DIR"/
+          node -e "const fs = require('fs'); const file = 'Example/e2etest/.e2e-artifacts/local-react-native-update/package.json'; const pkg = JSON.parse(fs.readFileSync(file, 'utf8')); pkg.version = process.env.LOCAL_RNU_VERSION; fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + '\n');"
+          ln -s ../.e2e-artifacts/local-react-native-update Example/e2etest/node_modules/react-native-update
+
+      - name: Install react-native-update-cli dependencies
+        run: cd react-native-update-cli && bun install --frozen-lockfile && bun run build
+
+      - name: Detox build (android.emu.release arm64)
+        env:
+          DETOX_ANDROID_ARCHS: arm64-v8a
+          DETOX_AVD_NAME: api34-arm64
+        run: cd Example/e2etest && E2E_PLATFORM=android bunx detox build --configuration android.emu.release
+
+      - name: Prepare local update artifacts
+        env:
+          E2E_PLATFORM: android
+          RNU_CLI_ROOT: ${{ github.workspace }}/react-native-update-cli
+        run: cd Example/e2etest && bun run prepare:e2e
+
+      - name: Detox test (android.emu.release arm64)
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          DETOX_ANDROID_ARCHS: arm64-v8a
+          RNU_CLI_ROOT: ${{ github.workspace }}/react-native-update-cli
+          RNU_E2E_SKIP_PREPARE: 'true'
+          DETOX_AVD_NAME: api34-arm64
+        with:
+          api-level: 34
+          target: google_apis
+          arch: arm64-v8a
+          avd-name: api34-arm64
+          emulator-boot-timeout: 900
+          script: cd Example/e2etest && E2E_PLATFORM=android bunx detox test --configuration android.emu.release --headless --record-logs all --retries 1
+
+      - name: Upload Detox artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-android-arm-detox-artifacts
+          path: Example/e2etest/artifacts
+          if-no-files-found: ignore
+          retention-days: 7

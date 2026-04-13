@@ -17,20 +17,7 @@ on:
       - 'ios/**'
       - 'cpp/**'
       - 'android/jni/**'
-      - 'Example/e2etest/package.json'
-      - 'Example/e2etest/bun.lock'
-      - 'Example/e2etest/app.json'
-      - 'Example/e2etest/update.json'
-      - 'Example/e2etest/.detoxrc.js'
-      - 'Example/e2etest/.detoxrc.ts'
-      - 'Example/e2etest/babel.config.js'
-      - 'Example/e2etest/metro.config.js'
-      - 'Example/e2etest/index.js'
-      - 'Example/e2etest/tsconfig*.json'
-      - 'Example/e2etest/src/**'
-      - 'Example/e2etest/e2e/**'
-      - 'Example/e2etest/scripts/**'
-      - 'Example/e2etest/ios/**'
+      - 'Example/e2etest/**'
   push:
     branches:
       - master
@@ -47,20 +34,7 @@ on:
       - 'ios/**'
       - 'cpp/**'
       - 'android/jni/**'
-      - 'Example/e2etest/package.json'
-      - 'Example/e2etest/bun.lock'
-      - 'Example/e2etest/app.json'
-      - 'Example/e2etest/update.json'
-      - 'Example/e2etest/.detoxrc.js'
-      - 'Example/e2etest/.detoxrc.ts'
-      - 'Example/e2etest/babel.config.js'
-      - 'Example/e2etest/metro.config.js'
-      - 'Example/e2etest/index.js'
-      - 'Example/e2etest/tsconfig*.json'
-      - 'Example/e2etest/src/**'
-      - 'Example/e2etest/e2e/**'
-      - 'Example/e2etest/scripts/**'
-      - 'Example/e2etest/ios/**'
+      - 'Example/e2etest/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
