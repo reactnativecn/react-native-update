@@ -4,9 +4,63 @@ on:
   pull_request:
     branches:
       - '**'
+    paths:
+      - '.github/workflows/e2e_ios.yml'
+      - '.gitmodules'
+      - 'package.json'
+      - 'bun.lock'
+      - 'react-native-update.podspec'
+      - 'react-native.config.js'
+      - 'expo-module.config.json'
+      - 'src/**'
+      - 'scripts/**'
+      - 'ios/**'
+      - 'cpp/**'
+      - 'android/jni/**'
+      - 'Example/e2etest/package.json'
+      - 'Example/e2etest/bun.lock'
+      - 'Example/e2etest/app.json'
+      - 'Example/e2etest/update.json'
+      - 'Example/e2etest/.detoxrc.js'
+      - 'Example/e2etest/.detoxrc.ts'
+      - 'Example/e2etest/babel.config.js'
+      - 'Example/e2etest/metro.config.js'
+      - 'Example/e2etest/index.js'
+      - 'Example/e2etest/tsconfig*.json'
+      - 'Example/e2etest/src/**'
+      - 'Example/e2etest/e2e/**'
+      - 'Example/e2etest/scripts/**'
+      - 'Example/e2etest/ios/**'
   push:
     branches:
       - master
+    paths:
+      - '.github/workflows/e2e_ios.yml'
+      - '.gitmodules'
+      - 'package.json'
+      - 'bun.lock'
+      - 'react-native-update.podspec'
+      - 'react-native.config.js'
+      - 'expo-module.config.json'
+      - 'src/**'
+      - 'scripts/**'
+      - 'ios/**'
+      - 'cpp/**'
+      - 'android/jni/**'
+      - 'Example/e2etest/package.json'
+      - 'Example/e2etest/bun.lock'
+      - 'Example/e2etest/app.json'
+      - 'Example/e2etest/update.json'
+      - 'Example/e2etest/.detoxrc.js'
+      - 'Example/e2etest/.detoxrc.ts'
+      - 'Example/e2etest/babel.config.js'
+      - 'Example/e2etest/metro.config.js'
+      - 'Example/e2etest/index.js'
+      - 'Example/e2etest/tsconfig*.json'
+      - 'Example/e2etest/src/**'
+      - 'Example/e2etest/e2e/**'
+      - 'Example/e2etest/scripts/**'
+      - 'Example/e2etest/ios/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -38,11 +92,13 @@ jobs:
         with:
           bun-version: latest
 
-      - name: Setup Java
-        uses: actions/setup-java@v5
+      - name: Cache Bun dependencies
+        uses: actions/cache@v4
         with:
-          distribution: temurin
-          java-version: '17'
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-e2e-${{ hashFiles('Example/e2etest/bun.lock', 'react-native-update-cli/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-e2e-
 
       - name: Setup Xcode
         uses: maxim-lobanov/setup-xcode@v1
@@ -70,14 +126,37 @@ jobs:
       - name: Install react-native-update-cli dependencies
         run: cd react-native-update-cli && bun install --frozen-lockfile && bun run build
 
+      - name: Prepare local update artifacts
+        env:
+          E2E_PLATFORM: ios
+          RNU_CLI_ROOT: ${{ github.workspace }}/react-native-update-cli
+        run: cd Example/e2etest && bun run prepare:e2e
+
+      - name: Cache CocoaPods dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            Example/e2etest/ios/Pods
+            ~/Library/Caches/CocoaPods
+          key: ${{ runner.os }}-cocoapods-e2e-${{ hashFiles('Example/e2etest/ios/Podfile.lock', 'Example/e2etest/ios/Podfile', 'Example/e2etest/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cocoapods-e2e-
+
       - name: Install CocoaPods dependencies
         run: cd Example/e2etest/ios && pod install
 
-      - name: Rebuild Detox iOS framework cache
-        run: |
-          cd Example/e2etest
-          bunx detox clean-framework-cache
-          bunx detox build-framework-cache
+      - name: Cache Detox iOS framework
+        id: cache-detox-ios-framework
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Detox
+          key: ${{ runner.os }}-detox-ios-framework-xcode-26.4-${{ hashFiles('Example/e2etest/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-detox-ios-framework-xcode-26.4-
+
+      - name: Build Detox iOS framework cache
+        if: steps.cache-detox-ios-framework.outputs.cache-hit != 'true'
+        run: cd Example/e2etest && bunx detox build-framework-cache
 
       - name: Detox build (ios.sim.release)
         env:
@@ -87,4 +166,5 @@ jobs:
       - name: Detox test (ios.sim.release)
         env:
           RNU_CLI_ROOT: ${{ github.workspace }}/react-native-update-cli
+          RNU_E2E_SKIP_PREPARE: 'true'
         run: cd Example/e2etest && E2E_PLATFORM=ios bunx detox test --configuration ios.sim.release

@@ -1,0 +1,32 @@
+name: CI Failure Email
+
+on:
+  workflow_run:
+    workflows:
+      - e2e-android
+      - e2e-ios
+      - lint
+      - Publish Package to npmjs
+      - test
+    types: [completed]
+
+jobs:
+  notify:
+    if: contains(fromJSON('["failure","timed_out","action_required"]'), github.event.workflow_run.conclusion)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send failure email
+        uses: dawidd6/action-send-mail@v16
+        with:
+          connection_url: ${{ secrets.CI_FAILURE_MAIL_CONNECTION }}
+          subject: "[CI failed] ${{ github.repository }} / ${{ github.event.workflow_run.name }}"
+          to: sunnylqm@gmail.com
+          from: "GitHub Actions <sunnylqm@gmail.com>"
+          body: |
+            Repository: ${{ github.repository }}
+            Workflow: ${{ github.event.workflow_run.name }}
+            Conclusion: ${{ github.event.workflow_run.conclusion }}
+            Branch: ${{ github.event.workflow_run.head_branch }}
+            Commit: ${{ github.event.workflow_run.head_sha }}
+            Actor: ${{ github.event.workflow_run.actor.login }}
+            Run: ${{ github.event.workflow_run.html_url }}

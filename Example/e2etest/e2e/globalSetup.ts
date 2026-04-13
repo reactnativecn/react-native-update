@@ -76,6 +76,15 @@ function runPrepareScript() {
   }
 }
 
+function ensurePreparedArtifacts(platform: string) {
+  const manifestPath = path.join(artifactsRoot, platform, 'manifest.json');
+  if (!fs.existsSync(manifestPath)) {
+    throw new Error(
+      `RNU_E2E_SKIP_PREPARE is set, but local update artifacts are missing: ${manifestPath}`,
+    );
+  }
+}
+
 function startServer() {
   const serverScript = path.join(projectRoot, 'scripts/local-e2e-server.ts');
   fs.mkdirSync(artifactsRoot, { recursive: true });
@@ -132,7 +141,11 @@ async function globalSetup() {
   }
 
   killExistingServer();
-  runPrepareScript();
+  if (process.env.RNU_E2E_SKIP_PREPARE === 'true') {
+    ensurePreparedArtifacts(platform);
+  } else {
+    runPrepareScript();
+  }
   startServer();
   await waitForServer();
   await detoxGlobalSetup();
