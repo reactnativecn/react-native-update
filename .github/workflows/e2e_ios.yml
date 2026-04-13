@@ -67,7 +67,7 @@ jobs:
           bun-version: latest
 
       - name: Cache Bun dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v5.0.4
         with:
           path: ~/.bun/install/cache
           key: ${{ runner.os }}-bun-e2e-${{ hashFiles('Example/e2etest/bun.lock', 'react-native-update-cli/bun.lock') }}
@@ -107,7 +107,7 @@ jobs:
         run: cd Example/e2etest && bun run prepare:e2e
 
       - name: Cache CocoaPods dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v5.0.4
         with:
           path: |
             Example/e2etest/ios/Pods
@@ -121,7 +121,7 @@ jobs:
 
       - name: Cache Detox iOS framework
         id: cache-detox-ios-framework
-        uses: actions/cache@v4
+        uses: actions/cache@v5.0.4
         with:
           path: ~/Library/Detox
           key: ${{ runner.os }}-detox-ios-framework-xcode-26.4-${{ hashFiles('Example/e2etest/bun.lock') }}
