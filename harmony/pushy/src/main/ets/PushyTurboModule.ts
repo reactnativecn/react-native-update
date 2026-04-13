@@ -174,8 +174,8 @@ export class PushyTurboModule extends UITurboModule {
       this.context.switchVersion(hash);
       return true;
     } catch (error) {
-      logger.error(TAG, `setNeedUpdate failed: ${this.getErrorMessage(error)}`);
-      throw Error(`switchVersionLater failed: ${this.getErrorMessage(error)}`);
+      logger.error(TAG, `setNeedUpdate failed: ${getErrorMessage(error)}`);
+      throw Error(`switchVersionLater failed: ${getErrorMessage(error)}`);
     }
   }
 
