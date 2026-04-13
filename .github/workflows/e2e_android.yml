@@ -217,6 +217,16 @@ jobs:
             Example/e2etest/android/**/*.gradle
             Example/e2etest/android/gradle/wrapper/gradle-wrapper.properties
 
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4.0.1
+        with:
+          packages: |
+            tools
+            platform-tools
+            platforms;android-36
+            build-tools;36.0.0
+            ndk;27.1.12297006
+
       - name: Enable KVM if available
         run: |
           if [ -e /dev/kvm ]; then
