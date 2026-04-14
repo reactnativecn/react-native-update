@@ -45,4 +45,29 @@ describe('joinUrls', () => {
       'https://cdn.example.com/base/file.txt',
     ]);
   });
+
+  test('handles empty string paths', () => {
+    expect(joinUrls([''], 'file.txt')).toEqual(['https:///file.txt']);
+  });
+
+  test('trims multiple trailing slashes', () => {
+    expect(joinUrls(['example.com///', 'http://example.com///'], 'file.txt')).toEqual([
+      'https://example.com/file.txt',
+      'http://example.com/file.txt',
+    ]);
+  });
+
+  test('preserves custom protocols', () => {
+    expect(joinUrls(['ftp://example.com', 'myapp://some/path'], 'file.txt')).toEqual([
+      'ftp://example.com/file.txt',
+      'myapp://some/path/file.txt',
+    ]);
+  });
+
+  test('prepends https:// to IP addresses with ports', () => {
+    expect(joinUrls(['192.168.1.1:8080', '10.0.0.1:3000/api'], 'file.txt')).toEqual([
+      'https://192.168.1.1:8080/file.txt',
+      'https://10.0.0.1:3000/api/file.txt',
+    ]);
+  });
 });
