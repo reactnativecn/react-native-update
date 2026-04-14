@@ -366,7 +366,7 @@ export class Pushy {
       return result;
     }
     this.lastChecking = now;
-    const fetchBody = {
+    const fetchBody: Record<string, any> = {
       packageVersion: this.options.overridePackageVersion || packageVersion,
       hash: currentVersion,
       buildTime,
@@ -374,7 +374,6 @@ export class Pushy {
       ...extra,
     };
     if (__DEV__) {
-      // @ts-ignore
       delete fetchBody.buildTime;
     }
     const stringifyBody = JSON.stringify(fetchBody);
