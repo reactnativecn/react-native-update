@@ -73,11 +73,14 @@ export class DownloadTask {
         const stat = await fileIo.stat(path);
         if (stat.isDirectory()) {
           const files = await fileIo.listFile(path);
-          for (const file of files) {
-            if (file === '.' || file === '..') {
-              continue;
-            }
-            await this.removeDirectory(`${path}/${file}`);
+
+          const entries = files.filter(file => file !== '.' && file !== '..');
+          const DELETE_CONCURRENCY = 32;
+          for (let i = 0; i < entries.length; i += DELETE_CONCURRENCY) {
+            const batch = entries.slice(i, i + DELETE_CONCURRENCY);
+            await Promise.all(
+              batch.map(file => this.removeDirectory(`${path}/${file}`)),
+            );
           }
           await fileIo.rmdir(path);
         } else {
