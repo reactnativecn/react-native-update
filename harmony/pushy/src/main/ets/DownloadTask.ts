@@ -529,9 +529,9 @@ export class DownloadTask {
               targets.map(t => t.substring(0, t.lastIndexOf('/'))).filter(Boolean),
             ),
           ];
-          for (const dir of parentDirs) {
-            await this.ensureDirectory(dir);
-          }
+          await Promise.all(
+            parentDirs.map(dir => this.ensureDirectory(dir)),
+          );
           await Promise.all(
             targets.map(target => this.writeFileContent(target, mediaBuffer.buffer)),
           );
@@ -544,9 +544,9 @@ export class DownloadTask {
             targets.map(t => t.substring(0, t.lastIndexOf('/'))).filter(Boolean),
           ),
         ];
-        for (const dir of parentDirs) {
-          await this.ensureDirectory(dir);
-        }
+        await Promise.all(
+          parentDirs.map(dir => this.ensureDirectory(dir))
+        );
         if (fileIo.accessSync(firstTarget)) {
           await fileIo.unlink(firstTarget);
         }
