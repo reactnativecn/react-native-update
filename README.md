@@ -35,19 +35,3 @@ See the docs:
 | **Server Deployment** | ✅ Hosted service or paid private deployment | ✅ Hosted by Expo (EAS Update) | ❌ **Discontinued** |
 | **Bandwidth Usage** | ⭐⭐⭐⭐⭐ Very low (incremental) | ⭐⭐⭐ Higher (full bundle) | ❌ **Discontinued** |
 
-## Local Development
-
-```bash
-git clone git@github.com:reactnativecn/react-native-update.git
-cd react-native-pushy/Example/testHotUpdate
-bun i
-bun start
-```
-
-The local library is linked with `yarn link`, so you can modify the source files directly and debug with the `testHotUpdate` example project.
-
-## About
-
-This package is published by [React Native Chinese](https://reactnative.cn/). For custom integration or service inquiries, see [Contact Us](https://reactnative.cn/about.html#content).
-
-If you find any issues, please open a thread in [Issues](https://github.com/reactnativecn/react-native-update/issues).
