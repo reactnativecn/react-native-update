@@ -122,7 +122,7 @@ export async function executeEndpointFallback<T>({
     throw new Error('No endpoints configured');
   }
 
-  const firstEndpoint = pickRandomEndpoint(candidates, random);
+  const firstEndpoint = pickRandomEndpoint(candidates, random)!;
 
   try {
     return {
