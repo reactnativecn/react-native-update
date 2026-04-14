@@ -73,11 +73,14 @@ export class DownloadTask {
         const stat = await fileIo.stat(path);
         if (stat.isDirectory()) {
           const files = await fileIo.listFile(path);
-          for (const file of files) {
-            if (file === '.' || file === '..') {
-              continue;
-            }
-            await this.removeDirectory(`${path}/${file}`);
+
+          const entries = files.filter(file => file !== '.' && file !== '..');
+          const DELETE_CONCURRENCY = 32;
+          for (let i = 0; i < entries.length; i += DELETE_CONCURRENCY) {
+            const batch = entries.slice(i, i + DELETE_CONCURRENCY);
+            await Promise.all(
+              batch.map(file => this.removeDirectory(`${path}/${file}`)),
+            );
           }
           await fileIo.rmdir(path);
         } else {
@@ -526,9 +529,9 @@ export class DownloadTask {
               targets.map(t => t.substring(0, t.lastIndexOf('/'))).filter(Boolean),
             ),
           ];
-          for (const dir of parentDirs) {
-            await this.ensureDirectory(dir);
-          }
+          await Promise.all(
+            parentDirs.map(dir => this.ensureDirectory(dir)),
+          );
           await Promise.all(
             targets.map(target => this.writeFileContent(target, mediaBuffer.buffer)),
           );
@@ -541,9 +544,9 @@ export class DownloadTask {
             targets.map(t => t.substring(0, t.lastIndexOf('/'))).filter(Boolean),
           ),
         ];
-        for (const dir of parentDirs) {
-          await this.ensureDirectory(dir);
-        }
+        await Promise.all(
+          parentDirs.map(dir => this.ensureDirectory(dir))
+        );
         if (fileIo.accessSync(firstTarget)) {
           await fileIo.unlink(firstTarget);
         }
