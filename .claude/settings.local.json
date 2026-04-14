@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./scripts/test-patch-core.sh:*)",
+      "Bash(bun test:*)"
+    ]
+  }
+}

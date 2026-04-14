@@ -442,6 +442,74 @@ void TestArchivePatchCoreSupportsCustomBundlePatchEntry() {
   ExpectEq(plan.merge_source_subdir, "", "custom bundle patch merge subdir mismatch");
 }
 
+void TestArchivePatchCoreHarmonyBundlePatchFromPackage() {
+  PatchManifest manifest;
+  manifest.copies.push_back(CopyOperation{"assets/a.png", "assets/b.png"});
+
+  pushy::archive_patch::ArchivePatchPlan plan;
+  Status status = pushy::archive_patch::BuildArchivePatchPlan(
+      pushy::archive_patch::ArchivePatchType::kPatchFromPackage,
+      manifest,
+      {"__diff.json", "bundle.harmony.js.patch", "assets/new.png"},
+      &plan,
+      "bundle.harmony.js.patch");
+  Expect(status.ok, status.message);
+  Expect(plan.enable_merge, "harmony package plan should enable merge");
+  ExpectEq(plan.merge_source_subdir, "assets", "harmony package merge subdir should be assets");
+
+  // ppk variant uses empty merge subdir
+  pushy::archive_patch::ArchivePatchPlan ppk_plan;
+  status = pushy::archive_patch::BuildArchivePatchPlan(
+      pushy::archive_patch::ArchivePatchType::kPatchFromPpk,
+      manifest,
+      {"__diff.json", "bundle.harmony.js.patch", "assets/new.png"},
+      &ppk_plan,
+      "bundle.harmony.js.patch");
+  Expect(status.ok, status.message);
+  Expect(ppk_plan.enable_merge, "harmony ppk plan should enable merge");
+  ExpectEq(ppk_plan.merge_source_subdir, "", "harmony ppk merge subdir should be empty");
+}
+
+void TestStateCoreRollbackToEmptyVersion() {
+  State state;
+  state.current_version = "current";
+  state.last_version = "";
+  state.first_time = false;
+  state.first_time_ok = true;
+
+  State rolled = pushy::state::Rollback(state);
+  Expect(rolled.current_version.empty(), "rollback with empty last should clear current");
+  Expect(rolled.last_version.empty(), "last_version should remain empty");
+  ExpectEq(rolled.rolled_back_version, "current", "rolled_back_version should record original");
+  Expect(!rolled.first_time, "first_time should be false after rollback");
+  Expect(rolled.first_time_ok, "first_time_ok should be true after rollback");
+}
+
+void TestStateCoreResolveLaunchNoCurrentVersion() {
+  State state;
+  state.current_version = "";
+  state.first_time = false;
+  state.first_time_ok = true;
+
+  LaunchDecision decision = pushy::state::ResolveLaunchState(state, false, true);
+  Expect(decision.load_version.empty(), "empty current should yield empty load_version");
+  Expect(!decision.did_rollback, "should not rollback when no current version");
+  Expect(!decision.consumed_first_time, "should not consume first_time when no current version");
+}
+
+void TestStateCoreSwitchToSameVersion() {
+  State state;
+  state.package_version = "1.0.0";
+  state.current_version = "same_hash";
+  state.last_version = "old_hash";
+
+  State switched = pushy::state::SwitchVersion(state, "same_hash");
+  ExpectEq(switched.current_version, "same_hash", "current should remain same_hash");
+  ExpectEq(switched.last_version, "old_hash", "last_version should not change when switching to same");
+  Expect(switched.first_time, "first_time should be set even when switching to same");
+  Expect(!switched.first_time_ok, "first_time_ok should be false");
+}
+
 }  // namespace
 
 int main() {
@@ -457,6 +525,10 @@ int main() {
       {"ArchivePatchCoreBuildPlanAndCopyGroups", TestArchivePatchCoreBuildPlanAndCopyGroups},
       {"ArchivePatchCoreRejectsMissingEntries", TestArchivePatchCoreRejectsMissingEntries},
       {"ArchivePatchCoreSupportsCustomBundlePatchEntry", TestArchivePatchCoreSupportsCustomBundlePatchEntry},
+      {"ArchivePatchCoreHarmonyBundlePatchFromPackage", TestArchivePatchCoreHarmonyBundlePatchFromPackage},
+      {"StateCoreRollbackToEmptyVersion", TestStateCoreRollbackToEmptyVersion},
+      {"StateCoreResolveLaunchNoCurrentVersion", TestStateCoreResolveLaunchNoCurrentVersion},
+      {"StateCoreSwitchToSameVersion", TestStateCoreSwitchToSameVersion},
   };
 
   for (const auto& test : tests) {
