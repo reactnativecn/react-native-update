@@ -3,7 +3,7 @@
 import { cInfo } from './core';
 
 /* eslint-disable no-bitwise */
-function murmurhash3_32_gc(key: string, seed = 0) {
+export function murmurhash3_32_gc(key: string, seed = 0) {
   let remainder, bytes, h1, h1b, c1, c2, k1, i;
 
   remainder = key.length & 3; // key.length % 4
