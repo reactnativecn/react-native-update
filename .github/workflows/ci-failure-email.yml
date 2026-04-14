@@ -28,6 +28,8 @@ jobs:
           ACTOR: ${{ github.event.workflow_run.actor.login }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}
         run: |
+          reported_at="$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S %z')"
+          issue_title_prefix="[CI failed] $REPOSITORY / $WORKFLOW_NAME at "
           body_file="$(mktemp)"
           cat > "$body_file" <<EOF
           @sunnylqm CI run failed.
@@ -38,10 +40,59 @@ jobs:
           Branch: $HEAD_BRANCH
           Commit: $HEAD_SHA
           Actor: $ACTOR
+          Reported at: $reported_at
           Run: $RUN_URL
           EOF
 
           gh issue create \
             --repo "$REPOSITORY" \
-            --title "[CI failed] $REPOSITORY / $WORKFLOW_NAME" \
+            --title "$issue_title_prefix$reported_at" \
             --body-file "$body_file"
+
+  close:
+    if: github.event.workflow_run.conclusion == 'success'
+    permissions:
+      issues: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Close recovered failure issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          issue_title_prefix="[CI failed] $REPOSITORY / $WORKFLOW_NAME at "
+          fixed_at="$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S %z')"
+          issue_numbers="$(
+            gh issue list \
+              --repo "$REPOSITORY" \
+              --state open \
+              --limit 1000 \
+              --json number,title |
+              jq -r --arg prefix "$issue_title_prefix" '.[] | select(.title | startswith($prefix)) | .number'
+          )"
+
+          if [ -z "$issue_numbers" ]; then
+            exit 0
+          fi
+
+          comment_body="$(cat <<EOF
+          CI recovered at $fixed_at.
+
+          Repository: $REPOSITORY
+          Workflow: $WORKFLOW_NAME
+          Branch: $HEAD_BRANCH
+          Commit: $HEAD_SHA
+          Run: $RUN_URL
+          EOF
+          )"
+
+          while IFS= read -r issue_number; do
+            [ -n "$issue_number" ] || continue
+            gh issue close "$issue_number" \
+              --repo "$REPOSITORY" \
+              --comment "$comment_body"
+          done <<< "$issue_numbers"

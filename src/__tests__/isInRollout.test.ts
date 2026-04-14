@@ -1,4 +1,3 @@
-let importCount = 0;
 import { describe, expect, it, mock } from 'bun:test';
 
 // Use the preload setup file instead of inline mocks since bun resolves
@@ -13,6 +12,10 @@ mock.module('../core', () => {
     }
   };
 });
+
+// Use a monotonic counter instead of Date.now() to avoid cache collisions
+// when two dynamic imports happen within the same millisecond.
+let importCounter = 0;
 
 import { murmurhash3_32_gc } from '../isInRollout';
 
@@ -48,25 +51,25 @@ describe('murmurhash3_32_gc', () => {
 describe('isInRollout', () => {
   it('should return true when the rollout is greater than the hash modulo', async () => {
     mockUuid = 'test1';
-    const { isInRollout } = await import(`../isInRollout?id=${++importCount}`);
+    const { isInRollout } = await import(`../isInRollout?id=${++importCounter}`);
     expect(isInRollout(25)).toBe(true);
   });
 
   it('should return false when the rollout is equal to the hash modulo', async () => {
     mockUuid = 'test1';
-    const { isInRollout } = await import(`../isInRollout?id=${++importCount}`);
+    const { isInRollout } = await import(`../isInRollout?id=${++importCounter}`);
     expect(isInRollout(24)).toBe(false);
   });
 
   it('should return false when the rollout is less than the hash modulo', async () => {
     mockUuid = 'test1';
-    const { isInRollout } = await import(`../isInRollout?id=${++importCount}`);
+    const { isInRollout } = await import(`../isInRollout?id=${++importCounter}`);
     expect(isInRollout(23)).toBe(false);
   });
 
   it('should evaluate correctly for a different uuid', async () => {
     mockUuid = 'test3';
-    const { isInRollout } = await import(`../isInRollout?id=${++importCount}`);
+    const { isInRollout } = await import(`../isInRollout?id=${++importCounter}`);
     expect(isInRollout(1)).toBe(true);
     expect(isInRollout(0)).toBe(false);
     expect(isInRollout(-1)).toBe(false);
@@ -74,13 +77,13 @@ describe('isInRollout', () => {
 
   it('should always return false for 0% rollout', async () => {
     mockUuid = 'test1';
-    const { isInRollout } = await import(`../isInRollout?id=${++importCount}`);
+    const { isInRollout } = await import(`../isInRollout?id=${++importCounter}`);
     expect(isInRollout(0)).toBe(false);
   });
 
   it('should always return true for 100% rollout', async () => {
     mockUuid = 'test1';
-    const { isInRollout } = await import(`../isInRollout?id=${++importCount}`);
+    const { isInRollout } = await import(`../isInRollout?id=${++importCounter}`);
     expect(isInRollout(100)).toBe(true);
   });
 });
