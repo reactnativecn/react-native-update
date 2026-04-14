@@ -40,8 +40,8 @@ See the docs:
 ```bash
 git clone git@github.com:reactnativecn/react-native-update.git
 cd react-native-pushy/Example/testHotUpdate
-yarn
-yarn start
+bun i
+bun start
 ```
 
 The local library is linked with `yarn link`, so you can modify the source files directly and debug with the `testHotUpdate` example project.
