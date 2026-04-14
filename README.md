@@ -29,23 +29,10 @@ See the docs:
 
 | Category | react-native-update | expo-update | react-native-code-push |
 |---------|---------------------|-------------|------------------------|
-| **Price / Cost** | Free tier with multiple paid plans (starting at about CNY 66/month), bandwidth included | Free tier with multiple paid plans (starting at about CNY 136/month), extra bandwidth charges apply | ❌ **Discontinued** (Microsoft App Center shut down on March 31, 2025) |
+| **Price / Cost** | Free tier with multiple paid plans, bandwidth included | Free tier with multiple paid plans, extra bandwidth charges apply | ❌ **Discontinued** (Microsoft App Center shut down on March 31, 2025) |
 | **Package Size** | ⭐⭐⭐⭐⭐ Tens to hundreds of KB (incremental) | ⭐⭐⭐ Full bundle updates (usually tens of MB) | ❌ **Discontinued** |
-| **iOS Support** | ✅ Supported | ✅ Supported | ❌ **Discontinued** |
-| **Android Support** | ✅ Supported | ✅ Supported | ❌ **Discontinued** |
-| **HarmonyOS Support** | ✅ Supported | ❌ Not supported | ❌ **Discontinued** |
-| **Expo Support** | ✅ Supported | ✅ Supported | ❌ **Discontinued** |
-| **RN Version Support** | ⭐⭐⭐⭐⭐ Fast support for latest stable RN versions | ⭐⭐⭐⭐ Follows Expo SDK cadence | ❌ **Discontinued** |
-| **New Architecture** | ✅ Supported | ✅ Supported | ❌ **Discontinued** |
-| **Hermes Support** | ✅ Supported | ✅ Supported | ❌ **Discontinued** |
-| **Crash Rollback** | ✅ Automatic rollback | ✅ Supported | ❌ **Discontinued** |
-| **Management UI** | ✅ CLI + Web dashboard | ✅ Expo Dashboard | ❌ **Discontinued** |
-| **CI/CD Integration** | ✅ Supported | ✅ Supported | ❌ **Discontinued** |
-| **API Extensibility** | ✅ Meta info + Open API | ⚠️ Limited | ❌ **Discontinued** |
-| **Chinese Docs / Support** | ⭐⭐⭐⭐⭐ Complete Chinese docs and community support | ⭐⭐ Mostly English | ❌ **Discontinued** |
 | **Technical Support** | ✅ Paid dedicated support | ⚠️ Community support | ❌ **Discontinued** |
 | **Server Deployment** | ✅ Hosted service or paid private deployment | ✅ Hosted by Expo (EAS Update) | ❌ **Discontinued** |
-| **Update Strategy** | Flexible configuration (silent / prompted / immediate / delayed) | More fixed workflow | ❌ **Discontinued** |
 | **Bandwidth Usage** | ⭐⭐⭐⭐⭐ Very low (incremental) | ⭐⭐⭐ Higher (full bundle) | ❌ **Discontinued** |
 
 ## Local Development
