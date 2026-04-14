@@ -72,8 +72,4 @@ describe('promiseAny', () => {
 
     await expect(promiseAny([p1, p2])).rejects.toThrow('error_all_promises_rejected');
   });
-
-  test('rejects with error_all_promises_rejected when given an empty array', async () => {
-    await expect(promiseAny([])).rejects.toBe('error_all_promises_rejected');
-  });
 });

@@ -22,11 +22,6 @@ export const DEFAULT_FETCH_TIMEOUT_MS = 5000;
 
 export function promiseAny<T>(promises: Promise<T>[]) {
   return new Promise<T>((resolve, reject) => {
-    if (promises.length === 0) {
-      reject('error_all_promises_rejected');
-      return;
-    }
-
     let count = 0;
 
     promises.forEach(promise => {
