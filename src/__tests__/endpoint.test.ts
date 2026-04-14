@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'bun:test';
-import { executeEndpointFallback } from '../endpoint';
+import { executeEndpointFallback, pickRandomEndpoint } from '../endpoint';
 
 const delay = (ms: number) =>
   new Promise<void>(resolve => {
@@ -88,5 +88,36 @@ describe('executeEndpointFallback', () => {
     expect(result.value).toBe('c-ok');
     expect(getRemoteEndpoints).toHaveBeenCalledTimes(2);
     expect(tryEndpoint.mock.calls.map(call => call[0])).toEqual(['a', 'b', 'c']);
+  });
+});
+
+describe('pickRandomEndpoint', () => {
+  test('returns undefined for empty arrays', () => {
+    expect(pickRandomEndpoint([])).toBeUndefined();
+  });
+
+  test('deterministically selects an endpoint using a custom random parameter', () => {
+    const endpoints = ['a', 'b', 'c'];
+
+    // Test random = 0 (picks first)
+    const endpoints1 = [...endpoints];
+    expect(pickRandomEndpoint(endpoints1, () => 0)).toBe('a');
+
+    // Test random = 0.5 (picks middle)
+    const endpoints2 = [...endpoints];
+    expect(pickRandomEndpoint(endpoints2, () => 0.5)).toBe('b');
+
+    // Test random = 0.99 (picks last)
+    const endpoints3 = [...endpoints];
+    expect(pickRandomEndpoint(endpoints3, () => 0.99)).toBe('c');
+  });
+
+  test('mutates the original array by removing the selected endpoint', () => {
+    const endpoints = ['a', 'b', 'c'];
+    const result = pickRandomEndpoint(endpoints, () => 0.5);
+
+    expect(result).toBe('b');
+    expect(endpoints).toEqual(['a', 'c']);
+    expect(endpoints.length).toBe(2);
   });
 });

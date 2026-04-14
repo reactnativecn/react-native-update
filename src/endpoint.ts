@@ -44,12 +44,11 @@ export const dedupeEndpoints = (
 
 export const pickRandomEndpoint = (
   endpoints: string[],
-  random: () => number = Math.random,
-) => {
-  if (!endpoints.length) {
-    throw new Error('No endpoints configured');
-  }
-  return endpoints[Math.floor(random() * endpoints.length)];
+  random = Math.random,
+): string | undefined => {
+  if (endpoints.length === 0) return undefined;
+  const index = Math.floor(random() * endpoints.length);
+  return endpoints.splice(index, 1)[0];
 };
 
 export async function selectFastestSuccessfulEndpoint<T>(
