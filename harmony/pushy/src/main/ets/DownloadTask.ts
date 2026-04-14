@@ -73,12 +73,12 @@ export class DownloadTask {
         const stat = await fileIo.stat(path);
         if (stat.isDirectory()) {
           const files = await fileIo.listFile(path);
-          for (const file of files) {
-            if (file === '.' || file === '..') {
-              continue;
-            }
-            await this.removeDirectory(`${path}/${file}`);
-          }
+
+          const removePromises = files
+            .filter(file => file !== '.' && file !== '..')
+            .map(file => this.removeDirectory(`${path}/${file}`));
+
+          await Promise.all(removePromises);
           await fileIo.rmdir(path);
         } else {
           await fileIo.unlink(path);
