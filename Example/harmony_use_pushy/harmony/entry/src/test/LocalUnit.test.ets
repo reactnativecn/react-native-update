@@ -1,31 +1,33 @@
-import { describe, it, expect } from '@ohos/hypium';
+import { describe, beforeAll, beforeEach, afterEach, afterAll, it, expect } from '@ohos/hypium';
 
 export default function localUnitTest() {
   describe('localUnitTest', () => {
-    it('JSON parse round-trip for update manifest', 0, () => {
-      const manifest = {
-        copies: { 'assets/icon.png': 'assets/original.png' },
-        deletes: ['assets/old.png'],
-      };
-      const serialized = JSON.stringify(manifest);
-      const parsed = JSON.parse(serialized);
-      expect(parsed.copies['assets/icon.png']).assertEqual('assets/original.png');
-      expect(parsed.deletes[0]).assertEqual('assets/old.png');
+    // Defines a test suite. Two parameters are supported: test suite name and test suite function.
+    beforeAll(() => {
+      // Presets an action, which is performed only once before all test cases of the test suite start.
+      // This API supports only one parameter: preset action function.
     });
-
-    it('version string comparison works correctly', 0, () => {
-      const v1 = '1.0.0';
-      const v2 = '1.0.0';
-      const v3 = '2.0.0';
-      expect(v1 === v2).assertEqual(true);
-      expect(v1 === v3).assertEqual(false);
+    beforeEach(() => {
+      // Presets an action, which is performed before each unit test case starts.
+      // The number of execution times is the same as the number of test cases defined by **it**.
+      // This API supports only one parameter: preset action function.
     });
-
-    it('hash string concatenation for kv keys', 0, () => {
-      const hash = 'abc123';
-      const key = `hash_${hash}`;
-      expect(key).assertEqual('hash_abc123');
-      expect(key).assertContain('hash_');
+    afterEach(() => {
+      // Presets a clear action, which is performed after each unit test case ends.
+      // The number of execution times is the same as the number of test cases defined by **it**.
+      // This API supports only one parameter: clear action function.
+    });
+    afterAll(() => {
+      // Presets a clear action, which is performed after all test cases of the test suite end.
+      // This API supports only one parameter: clear action function.
+    });
+    it('assertContain', 0, () => {
+      // Defines a test case. This API supports three parameters: test case name, filter parameter, and test case function.
+      let a = 'abc';
+      let b = 'b';
+      // Defines a variety of assertion methods, which are used to declare expected boolean conditions.
+      expect(a).assertContain(b);
+      expect(a).assertEqual(a);
     });
   });
 }

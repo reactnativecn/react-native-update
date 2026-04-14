@@ -185,7 +185,7 @@ export class PushyTurboModule extends UITurboModule {
       this.context.markSuccess();
       return true;
     } catch (error) {
-      logger.error(TAG, `markSuccess failed: ${getErrorMessage(error)}`);
+      logger.error(TAG, `markSuccess failed: ${this.getErrorMessage(error)}`);
       throw error;
     }
   }
