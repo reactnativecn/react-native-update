@@ -17,7 +17,7 @@ jobs:
       issues: write
     runs-on: ubuntu-latest
     steps:
-      - name: Create failure issue
+      - name: Create or update failure issue
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
@@ -44,9 +44,30 @@ jobs:
           Run: $RUN_URL
           EOF
 
+          issue_title="$issue_title_prefix$reported_at"
+          issue_numbers="$(
+            gh issue list \
+              --repo "$REPOSITORY" \
+              --state open \
+              --limit 1000 \
+              --json number,title |
+              jq -r --arg prefix "$issue_title_prefix" '.[] | select(.title | startswith($prefix)) | .number'
+          )"
+
+          if [ -n "$issue_numbers" ]; then
+            while IFS= read -r issue_number; do
+              [ -n "$issue_number" ] || continue
+              gh issue edit "$issue_number" \
+                --repo "$REPOSITORY" \
+                --title "$issue_title" \
+                --body-file "$body_file"
+            done <<< "$issue_numbers"
+            exit 0
+          fi
+
           gh issue create \
             --repo "$REPOSITORY" \
-            --title "$issue_title_prefix$reported_at" \
+            --title "$issue_title" \
             --body-file "$body_file"
 
   close:
