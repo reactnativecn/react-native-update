@@ -195,6 +195,11 @@ describe('Local Update Merge E2E', () => {
         ? LOCAL_UPDATE_HASHES.packagePatch
         : LOCAL_UPDATE_HASHES.ppkPatch;
 
+    await relaunchAppPreservingData();
+    await waitForReady();
+    await waitForBundleLabel(finalLabel);
+    await waitForHash(finalHash);
+
     await tapCheckUpdate();
     await waitForCheckState('completed', 'upToDate');
     await waitForBundleLabel(finalLabel);

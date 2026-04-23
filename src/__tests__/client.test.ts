@@ -10,7 +10,13 @@ const createJsonResponse = (payload: unknown) =>
     json: async () => payload,
   }) as Response;
 
-const setupClientMocks = () => {
+const setupClientMocks = ({
+  isFirstTime = false,
+  markSuccess = mock(() => {}),
+}: {
+  isFirstTime?: boolean;
+  markSuccess?: ReturnType<typeof mock>;
+} = {}) => {
   (globalThis as any).__DEV__ = false;
 
   mock.module('react-native', () => ({
@@ -29,7 +35,7 @@ const setupClientMocks = () => {
 
   mock.module('../core', () => ({
     PushyModule: {
-      markSuccess: mock(() => {}),
+      markSuccess,
       reloadUpdate: mock(() => Promise.resolve()),
       setNeedUpdate: mock(() => Promise.resolve()),
       downloadPatchFromPpk: mock(() => Promise.resolve()),
@@ -47,7 +53,7 @@ const setupClientMocks = () => {
     },
     currentVersion: 'hash',
     currentVersionInfo: {},
-    isFirstTime: false,
+    isFirstTime,
     isRolledBack: false,
     packageVersion: '1.0.0',
     pushyNativeEventEmitter: {
@@ -198,5 +204,41 @@ describe('Pushy server config', () => {
       status: 'error',
       error: fetchError,
     });
+  });
+
+  test('waits for native markSuccess before logging success', async () => {
+    let resolveNativeMarkSuccess = () => {};
+    const nativeMarkSuccess = mock(
+      () =>
+        new Promise<void>(resolve => {
+          resolveNativeMarkSuccess = resolve;
+        }),
+    );
+    const logger = mock(() => {});
+    setupClientMocks({
+      isFirstTime: true,
+      markSuccess: nativeMarkSuccess,
+    });
+
+    const { Pushy, sharedState } = await importFreshClient('mark-success-awaits-native');
+    const client = new Pushy({
+      appKey: 'demo-app',
+      logger,
+    });
+
+    const markPromise = client.markSuccess();
+    expect(nativeMarkSuccess).toHaveBeenCalledTimes(1);
+    expect(sharedState.marked).toBe(false);
+    expect(logger).not.toHaveBeenCalled();
+
+    resolveNativeMarkSuccess();
+    await markPromise;
+
+    expect(sharedState.marked).toBe(true);
+    expect(logger).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'markSuccess',
+      }),
+    );
   });
 });

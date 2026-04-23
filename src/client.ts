@@ -310,13 +310,13 @@ export class Pushy {
     }
     return true;
   };
-  markSuccess = () => {
+  markSuccess = async () => {
     if (sharedState.marked || __DEV__ || !isFirstTime) {
       return;
     }
+    await Promise.resolve(PushyModule.markSuccess());
     sharedState.marked = true;
-    PushyModule.markSuccess();
-    this.report({ type: 'markSuccess' });
+    await this.report({ type: 'markSuccess' });
   };
   switchVersion = async (hash: string) => {
     if (!this.assertDebug('switchVersion()')) {
