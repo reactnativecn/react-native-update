@@ -106,12 +106,10 @@ jobs:
           RNU_CLI_ROOT: ${{ github.workspace }}/react-native-update-cli
         run: cd Example/e2etest && bun run prepare:e2e
 
-      - name: Cache CocoaPods dependencies
+      - name: Cache CocoaPods downloads
         uses: actions/cache@v5.0.4
         with:
-          path: |
-            Example/e2etest/ios/Pods
-            ~/Library/Caches/CocoaPods
+          path: ~/Library/Caches/CocoaPods
           key: ${{ runner.os }}-cocoapods-e2e-${{ hashFiles('Example/e2etest/ios/Podfile.lock', 'Example/e2etest/ios/Podfile', 'Example/e2etest/bun.lock') }}
           restore-keys: |
             ${{ runner.os }}-cocoapods-e2e-
