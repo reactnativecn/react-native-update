@@ -2,11 +2,13 @@ import * as fs from 'node:fs';
 import * as http from 'node:http';
 import * as path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
-import { LOCAL_UPDATE_PORT } from './localUpdateConfig';
+import {
+  LOCAL_UPDATE_APP_KEYS,
+  LOCAL_UPDATE_FILES,
+  LOCAL_UPDATE_PORT,
+} from './localUpdateConfig';
 
-const detoxGlobalSetup: () => Promise<void> = require(
-  'detox/runners/jest/globalSetup.js',
-);
+const detoxGlobalSetup: () => Promise<void> = require('detox/runners/jest/globalSetup.js');
 
 function findProjectRoot(...startDirs: string[]) {
   for (const startDir of startDirs) {
@@ -14,7 +16,12 @@ function findProjectRoot(...startDirs: string[]) {
     while (true) {
       const hasMarkers =
         fs.existsSync(path.join(currentDir, 'package.json')) &&
-        fs.existsSync(path.join(currentDir, 'scripts/run-prepare-local-update-artifacts.js')) &&
+        fs.existsSync(
+          path.join(
+            currentDir,
+            'scripts/run-prepare-local-update-artifacts.js',
+          ),
+        ) &&
         fs.existsSync(path.join(currentDir, 'scripts/local-e2e-server.ts'));
 
       if (hasMarkers) {
@@ -57,17 +64,13 @@ function runPrepareScript() {
     'scripts/run-prepare-local-update-artifacts.js',
   );
 
-  const result = spawnSync(
-    process.execPath,
-    [prepareScript],
-    {
-      // Use Node here because the local CLI depends on native addons that are
-      // built for Node rather than Bun.
-      cwd: projectRoot,
-      stdio: 'inherit',
-      env: process.env,
-    },
-  );
+  const result = spawnSync(process.execPath, [prepareScript], {
+    // Use Node here because the local CLI depends on native addons that are
+    // built for Node rather than Bun.
+    cwd: projectRoot,
+    stdio: 'inherit',
+    env: process.env,
+  });
 
   if (result.status !== 0) {
     throw new Error(
@@ -124,7 +127,9 @@ function waitForServer(timeoutMs = 30000) {
 
     const retry = () => {
       if (Date.now() - start > timeoutMs) {
-        reject(new Error('Local artifacts server did not become ready in time.'));
+        reject(
+          new Error('Local artifacts server did not become ready in time.'),
+        );
         return;
       }
       setTimeout(poll, 300);
@@ -132,6 +137,83 @@ function waitForServer(timeoutMs = 30000) {
 
     poll();
   });
+}
+
+function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function waitForRequestReady(
+  url: string,
+  init: RequestInit,
+  label: string,
+  timeoutMs = 30000,
+) {
+  const start = Date.now();
+
+  while (true) {
+    try {
+      const response = await fetch(url, init);
+      if (response.ok) {
+        return;
+      }
+    } catch {
+      // Keep polling until the timeout expires.
+    }
+
+    if (Date.now() - start > timeoutMs) {
+      throw new Error(`${label} did not become ready in time.`);
+    }
+
+    await sleep(300);
+  }
+}
+
+async function warmServer(platform: 'ios' | 'android') {
+  const origin = `http://127.0.0.1:${LOCAL_UPDATE_PORT}`;
+  const appKey = LOCAL_UPDATE_APP_KEYS[platform];
+  const payload = JSON.stringify({
+    packageVersion: '1.0',
+    hash: '',
+    buildTime: '0',
+    cInfo: {
+      rn: '0.85.2',
+      os: platform,
+      rnu: 'e2e-warmup',
+      uuid: 'warmup',
+    },
+  });
+
+  await waitForRequestReady(
+    `${origin}/checkUpdate/${appKey}`,
+    {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: payload,
+    },
+    'Local artifacts checkUpdate route',
+  );
+
+  const artifactFiles = [
+    LOCAL_UPDATE_FILES.full,
+    LOCAL_UPDATE_FILES.ppkDiff,
+    ...(platform === 'android'
+      ? [LOCAL_UPDATE_FILES.apk, LOCAL_UPDATE_FILES.packageDiff]
+      : []),
+  ];
+
+  for (const fileName of artifactFiles) {
+    await waitForRequestReady(
+      `${origin}/artifacts/${platform}/${fileName}`,
+      {
+        method: 'HEAD',
+      },
+      `Local artifact ${platform}/${fileName}`,
+    );
+  }
 }
 
 async function globalSetup() {
@@ -148,6 +230,7 @@ async function globalSetup() {
   }
   startServer();
   await waitForServer();
+  await warmServer(platform as 'ios' | 'android');
   await detoxGlobalSetup();
 }
 
