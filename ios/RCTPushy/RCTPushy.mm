@@ -71,11 +71,6 @@ static NSUserDefaults *PushyDefaults(void) {
     return [NSUserDefaults standardUserDefaults];
 }
 
-static void PushyPersistDefaults(NSUserDefaults *defaults) {
-    (void)defaults;
-    CFPreferencesAppSynchronize(kCFPreferencesCurrentApplication);
-}
-
 static NSString *PushyFromStdString(const std::string &value) {
     if (value.empty()) {
         return nil;
@@ -185,7 +180,6 @@ static void PushyApplyStateToDefaults(NSUserDefaults *defaults, const pushy::sta
         defaults,
         keyRolledBackMarked,
         PushyFromStdString(state.rolled_back_version));
-    PushyPersistDefaults(defaults);
 }
 
 @interface RCTPushy ()
@@ -259,7 +253,6 @@ RCT_EXPORT_MODULE(RCTPushy);
             // bundleURL may be called many times, ignore rollbacks before process restarted again.
             ignoreRollback = true;
             [defaults setObject:@(YES) forKey:keyFirstLoadMarked];
-            PushyPersistDefaults(defaults);
         }
 
         NSString *loadVersion = PushyFromStdString(decision.load_version);
@@ -324,7 +317,7 @@ RCT_EXPORT_MODULE(RCTPushy);
         [defaults removeObjectForKey:KeyPackageUpdatedMarked];
         [self clearInvalidFiles];
     }
-    PushyPersistDefaults(defaults);
+    
 
     return ret;
 }
@@ -348,7 +341,6 @@ RCT_EXPORT_METHOD(setUuid:(NSString *)uuid  resolver:(RCTPromiseResolveBlock)res
 
     NSUserDefaults *defaults = PushyDefaults();
     [defaults setObject:uuid forKey:keyUuid];
-    PushyPersistDefaults(defaults);
     resolve(@true);
 }
 
@@ -367,7 +359,6 @@ RCT_EXPORT_METHOD(setLocalHashInfo:(NSString *)hash
     if (object && [object isKindOfClass:[NSDictionary class]]) {
         NSUserDefaults *defaults = PushyDefaults();
         [defaults setObject:value forKey:PushyHashInfoKey(hash)];
-        PushyPersistDefaults(defaults);
         
         resolve(@true);
     } else {
