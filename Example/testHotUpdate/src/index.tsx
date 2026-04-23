@@ -27,7 +27,8 @@ import TestConsole from './TestConsole';
 import _updateConfig from '../update.json';
 import { UpdateProvider, Pushy, useUpdate } from 'react-native-update';
 const { LOCAL_UPDATE_LABELS } = require('../e2e/localUpdateConfig');
-const { appKey } = _updateConfig[Platform.OS];
+const nativePlatform = Platform.OS === 'ios' ? 'ios' : 'android';
+const { appKey } = _updateConfig[nativePlatform];
 
 function App() {
   const {
@@ -184,7 +185,7 @@ function App() {
           },
         ]}
         icon={({ size }) => (
-          <Icon name="checkcircleo" size={size} color="#00f" />
+          <Icon source="checkcircleo" size={size} color="#00f" />
         )}
       >
         更新已完成，是否立即重启？
