@@ -293,7 +293,7 @@ export const UpdateProvider = ({
     const { checkStrategy, dismissErrorAfter, autoMarkSuccess } = options;
     if (autoMarkSuccess) {
       setTimeout(() => {
-        void markSuccess();
+        markSuccess();
       }, 1000);
     }
     if (checkStrategy === 'both' || checkStrategy === 'onAppResume') {

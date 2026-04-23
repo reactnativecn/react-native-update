@@ -184,7 +184,7 @@ export class Pushy {
     message?: string;
     data?: Record<string, string | number>;
   }) => {
-    log(type + ' ' + message);
+    log(`${type} ${message}`);
     await this.loggerPromise.promise;
     const { logger = noop, appKey } = this.options;
     const overridePackageVersion = this.options.overridePackageVersion;
@@ -316,14 +316,14 @@ export class Pushy {
     }
     await Promise.resolve(PushyModule.markSuccess());
     sharedState.marked = true;
-    await this.report({ type: 'markSuccess' });
+    this.report({ type: 'markSuccess' });
   };
   switchVersion = async (hash: string) => {
     if (!this.assertDebug('switchVersion()')) {
       return;
     }
     if (assertHash(hash) && !sharedState.applyingUpdate) {
-      log('switchVersion: ' + hash);
+      log(`switchVersion: ${hash}`);
       sharedState.applyingUpdate = true;
       return PushyModule.reloadUpdate({ hash });
     }
@@ -334,7 +334,7 @@ export class Pushy {
       return;
     }
     if (assertHash(hash)) {
-      log('switchVersionLater: ' + hash);
+      log(`switchVersionLater: ${hash}`);
       return PushyModule.setNeedUpdate({ hash });
     }
   };
@@ -394,7 +394,7 @@ export class Pushy {
     try {
       this.report({
         type: 'checking',
-        message: this.options.appKey + ': ' + stringifyBody,
+        message: `${this.options.appKey}: ${stringifyBody}`,
       });
       const respJsonPromise = this.fetchCheckResult(fetchPayload);
       this.lastRespJson = respJsonPromise;
@@ -495,7 +495,7 @@ export class Pushy {
       },
     });
     let lastError: any;
-    let errorMessages: string[] = [];
+    const errorMessages: string[] = [];
     const diffUrl = await testUrls(joinUrls(paths, diff));
     if (diffUrl && !__DEV__) {
       log('downloading diff');
