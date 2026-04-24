@@ -1,7 +1,5 @@
 package cn.reactnative.modules.update;
 
-import android.util.Log;
-
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.File;
@@ -64,10 +62,6 @@ public class SafeZipFile extends ZipFile {
         String canonicalPath = target.getCanonicalPath();
         if (!canonicalPath.startsWith(targetPath.getCanonicalPath() + File.separator)) {
             throw new SecurityException("Illegal name: " + name);
-        }
-
-        if (UpdateContext.DEBUG) {
-            Log.d(UpdateContext.TAG, "Unzipping " + name);
         }
 
         if (ze.isDirectory()) {

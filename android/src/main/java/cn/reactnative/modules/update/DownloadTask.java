@@ -79,10 +79,6 @@ class DownloadTask implements Runnable {
             throw new IOException("Failed to replace existing file: " + writePath);
         }
 
-        if (UpdateContext.DEBUG) {
-            Log.d(UpdateContext.TAG, "Downloading " + url);
-        }
-
         try (Response response = HTTP_CLIENT.newCall(request).execute()) {
             if (!response.isSuccessful()) {
                 throw new IOException("Server error: " + response.code() + " " + response.message());
@@ -125,9 +121,6 @@ class DownloadTask implements Runnable {
             postProgress(received, contentLength);
         }
 
-        if (UpdateContext.DEBUG) {
-            Log.d(UpdateContext.TAG, "Download finished");
-        }
     }
 
     private byte[] readBytes(InputStream input) throws IOException {
@@ -251,9 +244,6 @@ class DownloadTask implements Runnable {
             }
         }
 
-        if (UpdateContext.DEBUG) {
-            Log.d(UpdateContext.TAG, "Unzip finished");
-        }
     }
 
     private void doPatchFromApk() throws IOException, JSONException {
@@ -295,21 +285,7 @@ class DownloadTask implements Runnable {
             originBundleFile.delete();
         }
 
-        if (UpdateContext.DEBUG) {
-            Log.d(UpdateContext.TAG, "copyList size: " + copyList.size());
-            for (String from : copyList.keySet()) {
-                Log.d(
-                    UpdateContext.TAG,
-                    "copyList entry: " + from + " -> " + copyList.get(from).size() + " targets"
-                );
-            }
-        }
-
         bundledResourceCopier.copyFromResource(copyList);
-
-        if (UpdateContext.DEBUG) {
-            Log.d(UpdateContext.TAG, "Unzip finished");
-        }
     }
 
     private void doPatchFromPpk() throws IOException, JSONException {
@@ -337,15 +313,9 @@ class DownloadTask implements Runnable {
             contents.deletes.toArray(new String[0])
         );
 
-        if (UpdateContext.DEBUG) {
-            Log.d(UpdateContext.TAG, "Unzip finished");
-        }
     }
 
     private void doCleanUp() {
-        if (UpdateContext.DEBUG) {
-            Log.d(UpdateContext.TAG, "Start cleaning up");
-        }
         cleanupOldEntries(
             params.unzipDirectory.getAbsolutePath(),
             params.hash,

@@ -1,12 +1,9 @@
 package expo.modules.pushy;
 
 import android.content.Context;
-import android.util.Log;
 import androidx.annotation.Nullable;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import cn.reactnative.modules.update.UpdateContext;
 import expo.modules.core.interfaces.Package;
 import expo.modules.core.interfaces.ReactNativeHostHandler;

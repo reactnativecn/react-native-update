@@ -38,10 +38,6 @@ final class BundledResourceCopier {
     }
 
     void copyFromResource(HashMap<String, ArrayList<File>> resToCopy) throws IOException {
-        if (UpdateContext.DEBUG) {
-            Log.d(UpdateContext.TAG, "copyFromResource called, resToCopy size: " + resToCopy.size());
-        }
-
         ArrayList<String> apkPaths = collectApkPaths();
         HashMap<String, ZipEntry> availableEntries = new HashMap<String, ZipEntry>();
         HashMap<String, SafeZipFile> zipFileMap = new HashMap<String, SafeZipFile>();
@@ -73,10 +69,6 @@ final class BundledResourceCopier {
                 new HashMap<String, ArrayList<File>>(resToCopy);
 
             for (String fromPath : new ArrayList<String>(remainingFiles.keySet())) {
-                if (UpdateContext.DEBUG) {
-                    Log.d(UpdateContext.TAG, "Processing fromPath: " + fromPath);
-                }
-
                 ArrayList<File> targets = remainingFiles.get(fromPath);
                 if (targets == null || targets.isEmpty()) {
                     continue;
@@ -92,9 +84,6 @@ final class BundledResourceCopier {
                     if (actualEntry != null) {
                         entry = availableEntries.get(actualEntry);
                         actualSourcePath = actualEntry;
-                        if (UpdateContext.DEBUG) {
-                            Log.d(UpdateContext.TAG, "Normalized match: " + fromPath + " -> " + actualEntry);
-                        }
                     }
                 }
 
@@ -111,9 +100,6 @@ final class BundledResourceCopier {
 
                 File lastTarget = null;
                 for (File target : targets) {
-                    if (UpdateContext.DEBUG) {
-                        Log.d(UpdateContext.TAG, "Copying from resource " + actualSourcePath + " to " + target);
-                    }
                     try {
                         if (lastTarget != null) {
                             UpdateFileUtils.copyFile(lastTarget, target);
@@ -146,9 +132,10 @@ final class BundledResourceCopier {
             }
 
             if (!remainingFiles.isEmpty() && UpdateContext.DEBUG) {
-                for (String fromPath : remainingFiles.keySet()) {
-                    Log.w(UpdateContext.TAG, "Resource not found and no fallback available: " + fromPath);
-                }
+                Log.w(
+                    UpdateContext.TAG,
+                    "Skipped " + remainingFiles.size() + " missing bundled resources"
+                );
             }
         } finally {
             closeZipFiles(zipFileMap);
@@ -244,12 +231,6 @@ final class BundledResourceCopier {
                 resources.getValue(resourceId, typedValue, true);
             }
         } catch (Resources.NotFoundException e) {
-            if (UpdateContext.DEBUG) {
-                Log.d(
-                    UpdateContext.TAG,
-                    "Failed to resolve resource value for " + resourcePath + ": " + e.getMessage()
-                );
-            }
             return null;
         }
 
@@ -262,9 +243,6 @@ final class BundledResourceCopier {
             assetPath = assetPath.substring(1);
         }
 
-        if (UpdateContext.DEBUG) {
-            Log.d(UpdateContext.TAG, "Resolved resource path " + resourcePath + " -> " + assetPath);
-        }
         return new ResolvedResourceSource(resourceId, assetPath);
     }
 
@@ -286,9 +264,6 @@ final class BundledResourceCopier {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP && appInfo.splitSourceDirs != null) {
                 for (String splitPath : appInfo.splitSourceDirs) {
                     apkPaths.add(splitPath);
-                    if (UpdateContext.DEBUG) {
-                        Log.d(UpdateContext.TAG, "Found split APK: " + splitPath);
-                    }
                 }
             }
         } catch (PackageManager.NameNotFoundException e) {

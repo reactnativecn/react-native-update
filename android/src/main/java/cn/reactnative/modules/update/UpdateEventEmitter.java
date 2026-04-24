@@ -1,6 +1,5 @@
 package cn.reactnative.modules.update;
 
-import android.util.Log;
 import androidx.annotation.Nullable;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.modules.core.DeviceEventManagerModule;
@@ -26,9 +25,6 @@ final class UpdateEventEmitter {
     static void sendEvent(String eventName, WritableMap params) {
         ReactApplicationContext reactContext = getReactContext();
         if (reactContext == null || !reactContext.hasActiveCatalystInstance()) {
-            if (UpdateContext.DEBUG) {
-                Log.d(UpdateContext.TAG, "Skipping event " + eventName + " because React context is unavailable");
-            }
             return;
         }
 

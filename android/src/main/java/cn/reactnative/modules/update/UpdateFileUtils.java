@@ -1,6 +1,5 @@
 package cn.reactnative.modules.update;
 
-import android.util.Log;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -27,9 +26,6 @@ final class UpdateFileUtils {
     }
 
     static void removeDirectory(File file) throws IOException {
-        if (UpdateContext.DEBUG) {
-            Log.d(UpdateContext.TAG, "Removing " + file);
-        }
         if (file.isDirectory()) {
             File[] files = file.listFiles();
             if (files != null) {
