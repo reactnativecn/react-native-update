@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'bun:test';
-import { executeEndpointFallback } from '../endpoint';
+import { executeEndpointFallback, dedupeEndpoints } from '../endpoint';
 
 const delay = (ms: number) =>
   new Promise<void>(resolve => {
@@ -88,5 +88,27 @@ describe('executeEndpointFallback', () => {
     expect(result.value).toBe('c-ok');
     expect(getRemoteEndpoints).toHaveBeenCalledTimes(2);
     expect(tryEndpoint.mock.calls.map(call => call[0])).toEqual(['a', 'b', 'c']);
+  });
+});
+
+describe('dedupeEndpoints', () => {
+  test('removes duplicate endpoints', () => {
+    const result = dedupeEndpoints(['a', 'b', 'a', 'c', 'b']);
+    expect(result).toEqual(['a', 'b', 'c']);
+  });
+
+  test('preserves the original order of the first occurrence', () => {
+    const result = dedupeEndpoints(['c', 'b', 'a', 'c', 'd', 'b']);
+    expect(result).toEqual(['c', 'b', 'a', 'd']);
+  });
+
+  test('filters out falsy values', () => {
+    const result = dedupeEndpoints(['a', null, 'b', undefined, '', 'c']);
+    expect(result).toEqual(['a', 'b', 'c']);
+  });
+
+  test('returns an empty array when given an empty array', () => {
+    const result = dedupeEndpoints([]);
+    expect(result).toEqual([]);
   });
 });
