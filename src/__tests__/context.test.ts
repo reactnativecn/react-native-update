@@ -1,6 +1,7 @@
-import { describe, expect, test, mock, afterEach } from 'bun:test';
+import { describe, expect, test, mock, afterEach, afterAll } from 'bun:test';
 
 // Must set __DEV__ before importing context.ts
+const _origDEV = (globalThis as any).__DEV__;
 (globalThis as any).__DEV__ = true;
 
 const mockUseContext = mock(() => ({}));
@@ -17,6 +18,10 @@ const { useUpdate } = await import('../context');
 const { default: i18n } = await import('../i18n');
 
 describe('context', () => {
+  afterAll(() => {
+    (globalThis as any).__DEV__ = _origDEV;
+  });
+
   afterEach(() => {
     mockUseContext.mockClear();
   });
