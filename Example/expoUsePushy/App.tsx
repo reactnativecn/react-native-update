@@ -6,7 +6,7 @@ import {StyleSheet, Text, View, TouchableOpacity, Image} from 'react-native';
 import TestConsole from './TestConsole';
 
 import _updateConfig from './update.json';
-import {PushyProvider, Pushy, usePushy} from 'react-native-update';
+import { UpdateProvider, Pushy, usePushy} from 'react-native-update';
 const {appKey} = _updateConfig.android;
 
 function Home() {
@@ -214,8 +214,8 @@ const pushyClient = new Pushy({
 
 export default function HomeScreen() {
   return (
-    <PushyProvider client={pushyClient}>
+    <UpdateProvider client={pushyClient}>
       <Home />
-    </PushyProvider>
+    </UpdateProvider>
   );
 }

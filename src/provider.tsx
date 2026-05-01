@@ -421,5 +421,3 @@ export const UpdateProvider = ({
   );
 };
 
-/** @deprecated Please use `UpdateProvider` instead */
-export const PushyProvider = UpdateProvider;
