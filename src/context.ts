@@ -15,7 +15,6 @@ export const defaultContext = {
   downloadUpdate: asyncNoop,
   downloadAndInstallApk: asyncNoop,
   restartApp: asyncNoop,
-  getCurrentVersionInfo: () => Promise.resolve({}),
   parseTestQrCode: () => false,
   currentHash: '',
   packageVersion: '',
@@ -30,12 +29,6 @@ export const UpdateContext = createContext<{
   dismissError: () => void;
   downloadUpdate: () => Promise<boolean | void>;
   downloadAndInstallApk: (url: string) => Promise<void>;
-  // @deprecated use currentVersionInfo instead
-  getCurrentVersionInfo: () => Promise<{
-    name?: string;
-    description?: string;
-    metaInfo?: string;
-  }>;
   currentVersionInfo: {
     name?: string;
     description?: string;
@@ -61,6 +54,3 @@ export const useUpdate = __DEV__ ? () => {
 
   return context;
 } : () => useContext(UpdateContext);
-
-/** @deprecated Please use `useUpdate` instead */
-export const usePushy = useUpdate;

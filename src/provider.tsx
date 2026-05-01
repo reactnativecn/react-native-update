@@ -16,7 +16,6 @@ import { Pushy, Cresc, sharedState } from './client';
 import {
   currentVersion,
   packageVersion,
-  getCurrentVersionInfo,
   currentVersionInfo,
 } from './core';
 import {
@@ -411,7 +410,6 @@ export const UpdateProvider = ({
         currentHash: currentVersion,
         progress,
         downloadAndInstallApk,
-        getCurrentVersionInfo,
         currentVersionInfo,
         parseTestQrCode,
         restartApp,
@@ -420,6 +418,3 @@ export const UpdateProvider = ({
     </UpdateContext.Provider>
   );
 };
-
-/** @deprecated Please use `UpdateProvider` instead */
-export const PushyProvider = UpdateProvider;

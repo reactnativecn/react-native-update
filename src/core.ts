@@ -65,18 +65,6 @@ export const buildTime: string = PushyConstants.buildTime;
 let uuid = PushyConstants.uuid;
 
 
-async function getLocalHashInfo(hash: string) {
-  return JSON.parse(await PushyModule.getLocalHashInfo(hash));
-}
-
-// @deprecated use currentVersionInfo instead
-export async function getCurrentVersionInfo(): Promise<{
-  name?: string;
-  description?: string;
-  metaInfo?: string;
-}> {
-  return currentVersion ? (await getLocalHashInfo(currentVersion)) || {} : {};
-}
 
 export const pushyNativeEventEmitter = new NativeEventEmitter(PushyModule);
 
