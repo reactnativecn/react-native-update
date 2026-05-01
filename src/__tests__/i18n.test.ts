@@ -6,7 +6,8 @@ describe('I18n', () => {
   const getRealI18n = async () => {
     // Generate a random cache-buster so we get a fresh instance if needed,
     // although singleton is usually fine, the `setup.ts` mock needs to be bypassed.
-    const module = await import('../i18n?real');
+    const cacheKey = 'real';
+    const module = await import(`../i18n?${cacheKey}`);
     return { I18n: module.I18n, i18nSingleton: module.default };
   };
 
