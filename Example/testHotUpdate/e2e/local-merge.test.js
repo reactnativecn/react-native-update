@@ -97,7 +97,6 @@ describe('Local Update Merge E2E', () => {
 
     await openTestConsole();
     await runCommand('setLocalHashInfo');
-    await runCommand('getLocalHashInfo');
     await runCommand('setUuid');
     await runCommand('downloadFullUpdate');
     await runCommand('setNeedUpdateFull');

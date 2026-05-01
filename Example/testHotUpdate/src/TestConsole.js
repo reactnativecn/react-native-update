@@ -87,10 +87,6 @@ export default function TestConsole({visible, onClose}) {
         },
       },
       {
-        name: 'getLocalHashInfo',
-        invoke: () => {
-          setText(convertCommands('getLocalHashInfo', LOCAL_UPDATE_HASHES.full));
-        },
       },
       {
         name: 'setUuid',

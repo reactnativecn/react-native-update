@@ -59,10 +59,6 @@ export default function TestConsole({visible, onClose}) {
         },
       },
       {
-        name: 'getLocalHashInfo',
-        invoke: () => {
-          setText(`getLocalHashInfo\n${Hash}`);
-        },
       },
       {
         name: 'setUuid',
