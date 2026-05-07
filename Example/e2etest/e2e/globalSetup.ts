@@ -40,6 +40,11 @@ function findProjectRoot(...startDirs: string[]) {
 }
 
 const projectRoot = findProjectRoot(process.cwd(), __dirname);
+const packageJson = JSON.parse(
+  fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8'),
+) as { dependencies?: { 'react-native'?: string } };
+const reactNativeVersion =
+  packageJson.dependencies?.['react-native'] || 'unknown';
 const artifactsRoot = path.join(projectRoot, '.e2e-artifacts');
 const pidFile = path.join(artifactsRoot, '.server.pid');
 
@@ -177,7 +182,7 @@ async function warmServer(platform: 'ios' | 'android') {
     hash: '',
     buildTime: '0',
     cInfo: {
-      rn: '0.85.2',
+      rn: reactNativeVersion,
       os: platform,
       rnu: 'e2e-warmup',
       uuid: 'warmup',

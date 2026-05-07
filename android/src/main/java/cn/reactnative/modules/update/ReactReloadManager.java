@@ -31,7 +31,8 @@ final class ReactReloadManager {
         Activity currentActivity = reactContext.getCurrentActivity();
         String updateBundlePath = updateContext.getBundleUrl();
 
-        Object reactHost = getReactHost(currentActivity, application);
+        boolean newArchitectureEnabled = isNewArchitectureEnabled(application);
+        Object reactHost = newArchitectureEnabled ? getReactHost(currentActivity, application) : null;
         if (reactHost != null) {
             try {
                 reloadReactHost(reactHost, createBundleLoader(application, updateBundlePath, true));
@@ -63,6 +64,9 @@ final class ReactReloadManager {
             }
 
             try {
+                if (!newArchitectureEnabled) {
+                    throw err;
+                }
                 Object currentReactHost = getReactHost(currentActivity, application);
                 if (currentReactHost == null) {
                     throw err;
@@ -178,6 +182,29 @@ final class ReactReloadManager {
         }
 
         return null;
+    }
+
+    private static boolean isNewArchitectureEnabled(Context application) {
+        try {
+            Class<?> buildConfigClass = Class.forName(application.getPackageName() + ".BuildConfig");
+            Field newArchitectureField = buildConfigClass.getField("IS_NEW_ARCHITECTURE_ENABLED");
+            return newArchitectureField.getBoolean(null);
+        } catch (Throwable ignored) {
+        }
+
+        if (application instanceof ReactApplication) {
+            try {
+                ReactNativeHost reactNativeHost = ((ReactApplication) application).getReactNativeHost();
+                Method isNewArchEnabledMethod =
+                    reactNativeHost.getClass().getDeclaredMethod("isNewArchEnabled");
+                isNewArchEnabledMethod.setAccessible(true);
+                Object result = isNewArchEnabledMethod.invoke(reactNativeHost);
+                return result instanceof Boolean && (Boolean) result;
+            } catch (Throwable ignored) {
+            }
+        }
+
+        return false;
     }
 
     private static void reloadReactHost(Object reactHost, JSBundleLoader loader) throws Throwable {

@@ -49,6 +49,7 @@ Example/**/artifacts
 Example/**/.detox
 Example/**/coverage
 Example/testHotUpdate/artifacts
+.e2e-rn077-oldarch
 
 yarn-error.log
 Example/testHotUpdate/.yarn

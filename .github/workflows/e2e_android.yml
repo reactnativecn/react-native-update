@@ -144,3 +144,110 @@ jobs:
           path: Example/e2etest/artifacts
           if-no-files-found: ignore
           retention-days: 7
+
+  e2e-android-rn077-oldarch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout react-native-update
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Checkout react-native-update-cli
+        uses: actions/checkout@v6
+        with:
+          repository: reactnativecn/react-native-update-cli
+          path: react-native-update-cli
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Cache Bun dependencies
+        uses: actions/cache@v5
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-e2e-rn077-oldarch-${{ hashFiles('Example/e2etest/bun.lock', 'Example/e2etest/scripts/create-rn077-oldarch-project.js', 'react-native-update-cli/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-e2e-rn077-oldarch-
+            ${{ runner.os }}-bun-e2e-
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Create RN 0.77.3 old architecture e2e project
+        run: node Example/e2etest/scripts/create-rn077-oldarch-project.js
+
+      - name: Install RN 0.77.3 old architecture dependencies
+        run: cd .e2e-rn077-oldarch/AwesomeProject && bun install
+
+      - name: Link local react-native-update
+        run: |
+          set -euo pipefail
+          E2E_DIR=".e2e-rn077-oldarch/AwesomeProject"
+          export LOCAL_RNU_VERSION="$(node -p "require('./${E2E_DIR}/node_modules/react-native-update/package.json').version")"
+          LOCAL_RNU_DIR="$PWD/$E2E_DIR/.e2e-artifacts/local-react-native-update"
+          rm -rf "$LOCAL_RNU_DIR" "$E2E_DIR/node_modules/react-native-update"
+          mkdir -p "$LOCAL_RNU_DIR"
+          cp package.json react-native-update.podspec react-native.config.js expo-module.config.json "$LOCAL_RNU_DIR"/
+          rsync -a --exclude='.git' src ios android cpp scripts "$LOCAL_RNU_DIR"/
+          node -e "const fs = require('fs'); const file = process.env.LOCAL_RNU_DIR + '/package.json'; const pkg = JSON.parse(fs.readFileSync(file, 'utf8')); pkg.version = process.env.LOCAL_RNU_VERSION; fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + '\n');"
+          ln -s ../.e2e-artifacts/local-react-native-update "$E2E_DIR/node_modules/react-native-update"
+        env:
+          LOCAL_RNU_DIR: ${{ github.workspace }}/.e2e-rn077-oldarch/AwesomeProject/.e2e-artifacts/local-react-native-update
+
+      - name: Install react-native-update-cli dependencies
+        run: cd react-native-update-cli && bun install --frozen-lockfile && bun run build
+
+      - name: Detox build (RN 0.77.3 old arch android.emu.release)
+        env:
+          DETOX_ANDROID_ARCHS: x86_64
+          DETOX_AVD_NAME: api34
+        run: cd .e2e-rn077-oldarch/AwesomeProject && E2E_PLATFORM=android bunx detox build --configuration android.emu.release
+
+      - name: Prepare local update artifacts
+        env:
+          E2E_PLATFORM: android
+          RNU_CLI_ROOT: ${{ github.workspace }}/react-native-update-cli
+        run: cd .e2e-rn077-oldarch/AwesomeProject && bun run prepare:e2e
+
+      - name: Detox test (RN 0.77.3 old arch android.emu.release)
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          DETOX_ANDROID_ARCHS: x86_64
+          RNU_CLI_ROOT: ${{ github.workspace }}/react-native-update-cli
+          RNU_E2E_SKIP_PREPARE: 'true'
+          DETOX_AVD_NAME: api34
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          avd-name: api34
+          emulator-boot-timeout: 900
+          script: cd .e2e-rn077-oldarch/AwesomeProject && E2E_PLATFORM=android bunx detox test --configuration android.emu.release --headless --record-logs all --retries 1
+
+      - name: Upload Detox artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: e2e-android-rn077-oldarch-detox-artifacts
+          path: .e2e-rn077-oldarch/AwesomeProject/artifacts
+          if-no-files-found: ignore
+          retention-days: 7

@@ -109,7 +109,7 @@ function bundleTo(entryFile, outputFile) {
 
 async function generatePpkDiff(origin, next, output) {
   const customDiff = ensureHdiffModule();
-  await diffCommands.diff({
+  await diffCommands.hdiff({
     args: [origin, next],
     options: {
       output,
@@ -120,7 +120,7 @@ async function generatePpkDiff(origin, next, output) {
 
 async function generateAndroidPackageDiff(apkPath, next, output) {
   const customDiff = ensureHdiffModule();
-  await diffCommands.diffFromApk({
+  await diffCommands.hdiffFromApk({
     args: [apkPath, next],
     options: {
       output,

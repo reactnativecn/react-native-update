@@ -26,3 +26,13 @@ E2E_PLATFORM=android detox test --configuration android.emu.release --headless -
 架构需要跟 AVD 保持一致：Apple Silicon 本地的 `api34` AVD 用
 `arm64-v8a`；GitHub `ubuntu-latest` x64 job 用 `x86_64` emulator 和
 `DETOX_ANDROID_ARCHS=x86_64`。
+
+RN 0.77.3 旧架构 Android 兼容性由 CI 运行时生成工程验证：
+
+```sh
+node Example/e2etest/scripts/create-rn077-oldarch-project.js
+cd .e2e-rn077-oldarch/AwesomeProject
+bun install
+E2E_PLATFORM=android detox build --configuration android.emu.release
+E2E_PLATFORM=android detox test --configuration android.emu.release --headless --record-logs all
+```

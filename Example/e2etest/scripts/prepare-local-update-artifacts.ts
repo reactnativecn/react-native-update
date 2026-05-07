@@ -10,14 +10,14 @@ import {
 } from '../e2e/localUpdateConfig';
 
 type DiffCommandRunner = {
-  diff: (options: {
+  hdiff: (options: {
     args: [string, string];
     options: {
       output: string;
       customDiff: (...args: unknown[]) => unknown;
     };
   }) => Promise<void>;
-  diffFromApk: (options: {
+  hdiffFromApk: (options: {
     args: [string, string];
     options: {
       output: string;
@@ -150,7 +150,7 @@ function bundleTo(entryFile: string, outputFile: string) {
 
 async function generatePpkDiff(origin: string, next: string, output: string) {
   const customDiff = ensureHdiffModule();
-  await diffCommands.diff({
+  await diffCommands.hdiff({
     args: [origin, next],
     options: {
       output,
@@ -165,7 +165,7 @@ async function generateAndroidPackageDiff(
   output: string,
 ) {
   const customDiff = ensureHdiffModule();
-  await diffCommands.diffFromApk({
+  await diffCommands.hdiffFromApk({
     args: [apkPath, next],
     options: {
       output,
