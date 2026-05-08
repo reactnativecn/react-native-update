@@ -185,18 +185,26 @@ final class ReactReloadManager {
     }
 
     private static boolean isNewArchitectureEnabled(Context application) {
+        if (BuildConfig.IS_NEW_ARCHITECTURE_ENABLED) {
+            return true;
+        }
+
         try {
             Class<?> buildConfigClass = Class.forName(application.getPackageName() + ".BuildConfig");
             Field newArchitectureField = buildConfigClass.getField("IS_NEW_ARCHITECTURE_ENABLED");
-            return newArchitectureField.getBoolean(null);
+            if (newArchitectureField.getBoolean(null)) {
+                return true;
+            }
         } catch (Throwable ignored) {
         }
 
         if (application instanceof ReactApplication) {
             try {
                 ReactNativeHost reactNativeHost = ((ReactApplication) application).getReactNativeHost();
-                Method isNewArchEnabledMethod =
-                    reactNativeHost.getClass().getDeclaredMethod("isNewArchEnabled");
+                Method isNewArchEnabledMethod = getDeclaredMethodInHierarchy(
+                    reactNativeHost.getClass(),
+                    "isNewArchEnabled"
+                );
                 isNewArchEnabledMethod.setAccessible(true);
                 Object result = isNewArchEnabledMethod.invoke(reactNativeHost);
                 return result instanceof Boolean && (Boolean) result;
@@ -205,6 +213,20 @@ final class ReactReloadManager {
         }
 
         return false;
+    }
+
+    private static Method getDeclaredMethodInHierarchy(Class<?> clazz, String methodName)
+        throws NoSuchMethodException {
+        Class<?> current = clazz;
+        while (current != null) {
+            try {
+                return current.getDeclaredMethod(methodName);
+            } catch (NoSuchMethodException ignored) {
+                current = current.getSuperclass();
+            }
+        }
+
+        throw new NoSuchMethodException(methodName);
     }
 
     private static void reloadReactHost(Object reactHost, JSBundleLoader loader) throws Throwable {
