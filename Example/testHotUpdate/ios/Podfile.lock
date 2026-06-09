@@ -1402,7 +1402,7 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
-  - react-native-safe-area-context (5.7.0):
+  - react-native-safe-area-context (5.8.0):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -1414,8 +1414,8 @@ PODS:
     - React-graphics
     - React-ImageManager
     - React-jsi
-    - react-native-safe-area-context/common (= 5.7.0)
-    - react-native-safe-area-context/fabric (= 5.7.0)
+    - react-native-safe-area-context/common (= 5.8.0)
+    - react-native-safe-area-context/fabric (= 5.8.0)
     - React-NativeModulesApple
     - React-RCTFabric
     - React-renderercss
@@ -1426,7 +1426,7 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
-  - react-native-safe-area-context/common (5.7.0):
+  - react-native-safe-area-context/common (5.8.0):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -1448,7 +1448,7 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
-  - react-native-safe-area-context/fabric (5.7.0):
+  - react-native-safe-area-context/fabric (5.8.0):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -1471,7 +1471,7 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
-  - react-native-update (10.40.0):
+  - react-native-update (10.40.2):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -1484,7 +1484,7 @@ PODS:
     - React-graphics
     - React-ImageManager
     - React-jsi
-    - react-native-update/RCTPushy (= 10.40.0)
+    - react-native-update/RCTPushy (= 10.40.2)
     - React-NativeModulesApple
     - React-RCTFabric
     - React-renderercss
@@ -1496,7 +1496,7 @@ PODS:
     - ReactNativeDependencies
     - SSZipArchive
     - Yoga
-  - react-native-update/RCTPushy (10.40.0):
+  - react-native-update/RCTPushy (10.40.2):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -1904,7 +1904,7 @@ PODS:
     - React-perflogger (= 0.85.3)
     - React-utils (= 0.85.3)
     - ReactNativeDependencies
-  - ReactNativeCameraKit (17.0.1):
+  - ReactNativeCameraKit (18.0.0):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -1927,7 +1927,31 @@ PODS:
     - ReactNativeDependencies
     - Yoga
   - ReactNativeDependencies (0.85.3)
-  - RNSVG (15.15.4):
+  - RNSentry (8.13.0):
+    - hermes-engine
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-hermes
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Sentry (= 9.15.0)
+    - Yoga
+  - RNSVG (15.15.5):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -1948,9 +1972,9 @@ PODS:
     - ReactCommon/turbomodule/bridging
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
-    - RNSVG/common (= 15.15.4)
+    - RNSVG/common (= 15.15.5)
     - Yoga
-  - RNSVG/common (15.15.4):
+  - RNSVG/common (15.15.5):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -1994,6 +2018,9 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
+  - Sentry (9.15.0):
+    - Sentry/Core (= 9.15.0)
+  - Sentry/Core (9.15.0)
   - SSZipArchive (2.4.3)
   - Yoga (0.0.0)
 
@@ -2075,12 +2102,14 @@ DEPENDENCIES:
   - ReactCommon/turbomodule/core (from `../node_modules/react-native/ReactCommon`)
   - ReactNativeCameraKit (from `../node_modules/react-native-camera-kit`)
   - ReactNativeDependencies (from `../node_modules/react-native/third-party-podspecs/ReactNativeDependencies.podspec`)
+  - "RNSentry (from `../node_modules/@sentry/react-native`)"
   - RNSVG (from `../node_modules/react-native-svg`)
   - RNVectorIcons (from `../node_modules/react-native-vector-icons`)
   - Yoga (from `../node_modules/react-native/ReactCommon/yoga`)
 
 SPEC REPOS:
   trunk:
+    - Sentry
     - SSZipArchive
 
 EXTERNAL SOURCES:
@@ -2237,6 +2266,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native-camera-kit"
   ReactNativeDependencies:
     :podspec: "../node_modules/react-native/third-party-podspecs/ReactNativeDependencies.podspec"
+  RNSentry:
+    :path: "../node_modules/@sentry/react-native"
   RNSVG:
     :path: "../node_modules/react-native-svg"
   RNVectorIcons:
@@ -2284,8 +2315,8 @@ SPEC CHECKSUMS:
   React-Mapbuffer: fec3e025f0ffba6b32cd2a1d7bbdee3e269aae90
   React-microtasksnativemodule: ab33a818d339f5a1da308893c11b487be66121a8
   React-mutationobservernativemodule: a42d1626651ccd7d0dc02a56e69d4ec77c248893
-  react-native-safe-area-context: 6b4966397ada0f7dd481e4486a2ef936834861a1
-  react-native-update: 5236971815a7a85b59ec5752b2cb984a7fb88867
+  react-native-safe-area-context: fb5c8ee9f6dd62ef710611b3d370c501f42a4ac0
+  react-native-update: a819495065d930e13225dbbac09f4e3094eb1f6a
   React-NativeModulesApple: deba264b03bd79c6bd61014fa30e40321b5e443a
   React-networking: 35e6070b084f435429f85c5db40b4d5b38652fe9
   React-oscompat: 64a0c7ef5441855dc6e2a6afe8ba8f92aa05075e
@@ -2319,10 +2350,12 @@ SPEC CHECKSUMS:
   ReactAppDependencyProvider: 25c9c516839be2c5e3d3344f95dc7da5f7e63fc2
   ReactCodegen: c8f81e6c6f762dcf442a6203a1fb58f7dafc8014
   ReactCommon: 7dfc3250793bf36cf221096ff59e1179e13eef7f
-  ReactNativeCameraKit: d927f731400b1f45f7b441668d2f31cb873198f6
+  ReactNativeCameraKit: cf0ae8d9e1ab991453dbe97c3ba98e69f1f0bc5b
   ReactNativeDependencies: ccd3ebb763797cd6dd61e590dc5053295977e840
-  RNSVG: 04044c3abcf177fd674a1a3d13097efa1adebcbe
+  RNSentry: ce1f0007dac49bd8277c97599859e2a373f1ec94
+  RNSVG: 0e52210d4d43165e7e2cf9c890a9848b27e513ac
   RNVectorIcons: 97f26211c07d69e45b189f9dd0dbbe5e2d2b0b92
+  Sentry: d5b72948d692d369ded835e2e77baadcd3c492dd
   SSZipArchive: fe6a26b2a54d5a0890f2567b5cc6de5caa600aef
   Yoga: 77dfa8673de2874e1855002ae59c68b8be9b007b
 

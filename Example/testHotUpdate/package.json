@@ -16,15 +16,16 @@
     "aa": "cd android && ./gradlew assembleRelease bundleRelease"
   },
   "dependencies": {
+    "@sentry/react-native": "^8.13.0",
     "form-data": "^4.0.5",
     "patch-package": "^8.0.1",
     "react": "19.2.3",
     "react-native": "0.85.3",
-    "react-native-camera-kit": "^17.0.1",
-    "react-native-paper": "^5.15.0",
-    "react-native-safe-area-context": "^5.7.0",
-    "react-native-svg": "^15.15.4",
-    "react-native-update": "^10.40.0",
+    "react-native-camera-kit": "^18.0.0",
+    "react-native-paper": "^5.15.3",
+    "react-native-safe-area-context": "^5.8.0",
+    "react-native-svg": "^15.15.5",
+    "react-native-update": "^10.40.2",
     "react-native-vector-icons": "^10.3.0"
   },
   "devDependencies": {
