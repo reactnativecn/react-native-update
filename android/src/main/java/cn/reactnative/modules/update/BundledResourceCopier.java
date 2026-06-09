@@ -26,12 +26,23 @@ final class BundledResourceCopier {
     private static final class ResolvedResourceSource {
         final int resourceId;
         final String assetPath;
-        final TypedValue typedValue;
 
-        ResolvedResourceSource(int resourceId, String assetPath, TypedValue typedValue) {
+        ResolvedResourceSource(int resourceId, String assetPath) {
             this.resourceId = resourceId;
             this.assetPath = assetPath;
-            this.typedValue = typedValue;
+        }
+    }
+
+    // Holds the exact archive a CRC32 match came from, so the fallback copy
+    // reads from that archive even if another APK exposes the same entry name
+    // with different bytes.
+    private static final class ZipSource {
+        final ZipEntry entry;
+        final SafeZipFile zipFile;
+
+        ZipSource(ZipEntry entry, SafeZipFile zipFile) {
+            this.entry = entry;
+            this.zipFile = zipFile;
         }
     }
 
@@ -47,11 +58,11 @@ final class BundledResourceCopier {
         HashMap<String, ZipEntry> availableEntries = new HashMap<String, ZipEntry>();
         HashMap<String, SafeZipFile> zipFileMap = new HashMap<String, SafeZipFile>();
         HashMap<String, SafeZipFile> entryToZipFileMap = new HashMap<String, SafeZipFile>();
-        // Content checksum index: CRC32 -> entry name. Lets us locate a file by
-        // content when its origin path is not present verbatim on device (e.g.
-        // APK baseline diff applied on an AAB/split-apk install whose res/
-        // paths were shortened). First entry for a given crc wins.
-        HashMap<Long, String> crcToEntryName = new HashMap<Long, String>();
+        // Content checksum index: CRC32 -> matched archive source. Lets us
+        // locate a file by content when its origin path is not present verbatim
+        // on device (e.g. APK baseline diff applied on an AAB/split-apk install
+        // whose res/ paths were shortened). First entry for a given crc wins.
+        HashMap<Long, ZipSource> crcToEntry = new HashMap<Long, ZipSource>();
 
         try {
             for (String apkPath : apkPaths) {
@@ -66,8 +77,8 @@ final class BundledResourceCopier {
                         entryToZipFileMap.put(entryName, zipFile);
                     }
                     long crc = ze.getCrc();
-                    if (crc != -1L && !crcToEntryName.containsKey(crc)) {
-                        crcToEntryName.put(crc, entryName);
+                    if (crc != -1L && !crcToEntry.containsKey(crc)) {
+                        crcToEntry.put(crc, new ZipSource(ze, zipFile));
                     }
                 }
             }
@@ -90,6 +101,7 @@ final class BundledResourceCopier {
 
                 ZipEntry entry = availableEntries.get(fromPath);
                 String actualSourcePath = fromPath;
+                SafeZipFile matchedZipFile = null;
                 ResolvedResourceSource resolvedResource = null;
 
                 if (entry == null) {
@@ -107,10 +119,11 @@ final class BundledResourceCopier {
                 if (entry == null && crcByFrom != null) {
                     Long wantedCrc = crcByFrom.get(fromPath);
                     if (wantedCrc != null) {
-                        String matchedEntry = crcToEntryName.get(wantedCrc);
-                        if (matchedEntry != null) {
-                            entry = availableEntries.get(matchedEntry);
-                            actualSourcePath = matchedEntry;
+                        ZipSource matched = crcToEntry.get(wantedCrc);
+                        if (matched != null) {
+                            entry = matched.entry;
+                            matchedZipFile = matched.zipFile;
+                            actualSourcePath = matched.entry.getName();
                         }
                     }
                 }
@@ -119,6 +132,16 @@ final class BundledResourceCopier {
                     resolvedResource = resolveBundledResource(fromPath);
                     if (resolvedResource != null) {
                         actualSourcePath = resolvedResource.assetPath;
+                        // resolveBundledResource resolved the density-correct
+                        // file path; copy that exact entry from the already-open
+                        // archives so the right variant is used. (openRawResource
+                        // would re-resolve the id at the current configuration
+                        // density and ignore the requested one.)
+                        ZipEntry resolvedEntry = availableEntries.get(actualSourcePath);
+                        if (resolvedEntry != null) {
+                            entry = resolvedEntry;
+                            resolvedResource = null;
+                        }
                     }
                 }
 
@@ -132,7 +155,9 @@ final class BundledResourceCopier {
                         if (lastTarget != null) {
                             UpdateFileUtils.copyFile(lastTarget, target);
                         } else if (entry != null) {
-                            SafeZipFile sourceZipFile = entryToZipFileMap.get(actualSourcePath);
+                            SafeZipFile sourceZipFile = matchedZipFile != null
+                                ? matchedZipFile
+                                : entryToZipFileMap.get(actualSourcePath);
                             if (sourceZipFile == null) {
                                 sourceZipFile = baseZipFile;
                             }
@@ -271,15 +296,15 @@ final class BundledResourceCopier {
             assetPath = assetPath.substring(1);
         }
 
-        return new ResolvedResourceSource(resourceId, assetPath, typedValue);
+        return new ResolvedResourceSource(resourceId, assetPath);
     }
 
     private InputStream openResolvedResourceStream(ResolvedResourceSource source) throws IOException {
+        // Defensive fallback only: reached when the density-resolved assetPath
+        // is not present as a zip entry in any loaded APK. Best-effort, resolves
+        // at the current configuration density.
         try {
-            // Use the density-resolved TypedValue so we open the exact variant
-            // that was requested, instead of openRawResource(id) which would
-            // fall back to the device's current configuration density.
-            return context.getResources().openRawResource(source.resourceId, source.typedValue);
+            return context.getResources().openRawResource(source.resourceId);
         } catch (Resources.NotFoundException e) {
             throw new IOException("Unable to open resolved resource: " + source.assetPath, e);
         }
