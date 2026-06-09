@@ -26,10 +26,12 @@ final class BundledResourceCopier {
     private static final class ResolvedResourceSource {
         final int resourceId;
         final String assetPath;
+        final TypedValue typedValue;
 
-        ResolvedResourceSource(int resourceId, String assetPath) {
+        ResolvedResourceSource(int resourceId, String assetPath, TypedValue typedValue) {
             this.resourceId = resourceId;
             this.assetPath = assetPath;
+            this.typedValue = typedValue;
         }
     }
 
@@ -37,11 +39,19 @@ final class BundledResourceCopier {
         this.context = context.getApplicationContext();
     }
 
-    void copyFromResource(HashMap<String, ArrayList<File>> resToCopy) throws IOException {
+    void copyFromResource(
+        HashMap<String, ArrayList<File>> resToCopy,
+        HashMap<String, Long> crcByFrom
+    ) throws IOException {
         ArrayList<String> apkPaths = collectApkPaths();
         HashMap<String, ZipEntry> availableEntries = new HashMap<String, ZipEntry>();
         HashMap<String, SafeZipFile> zipFileMap = new HashMap<String, SafeZipFile>();
         HashMap<String, SafeZipFile> entryToZipFileMap = new HashMap<String, SafeZipFile>();
+        // Content checksum index: CRC32 -> entry name. Lets us locate a file by
+        // content when its origin path is not present verbatim on device (e.g.
+        // APK baseline diff applied on an AAB/split-apk install whose res/
+        // paths were shortened). First entry for a given crc wins.
+        HashMap<Long, String> crcToEntryName = new HashMap<Long, String>();
 
         try {
             for (String apkPath : apkPaths) {
@@ -54,6 +64,10 @@ final class BundledResourceCopier {
                     if (!availableEntries.containsKey(entryName)) {
                         availableEntries.put(entryName, ze);
                         entryToZipFileMap.put(entryName, zipFile);
+                    }
+                    long crc = ze.getCrc();
+                    if (crc != -1L && !crcToEntryName.containsKey(crc)) {
+                        crcToEntryName.put(crc, entryName);
                     }
                 }
             }
@@ -84,6 +98,20 @@ final class BundledResourceCopier {
                     if (actualEntry != null) {
                         entry = availableEntries.get(actualEntry);
                         actualSourcePath = actualEntry;
+                    }
+                }
+
+                // Content (CRC32) match: robust across APK/AAB packaging because
+                // the checksum is over the uncompressed file content, not its
+                // path. Preferred over the resource-id heuristic below.
+                if (entry == null && crcByFrom != null) {
+                    Long wantedCrc = crcByFrom.get(fromPath);
+                    if (wantedCrc != null) {
+                        String matchedEntry = crcToEntryName.get(wantedCrc);
+                        if (matchedEntry != null) {
+                            entry = availableEntries.get(matchedEntry);
+                            actualSourcePath = matchedEntry;
+                        }
                     }
                 }
 
@@ -243,12 +271,15 @@ final class BundledResourceCopier {
             assetPath = assetPath.substring(1);
         }
 
-        return new ResolvedResourceSource(resourceId, assetPath);
+        return new ResolvedResourceSource(resourceId, assetPath, typedValue);
     }
 
     private InputStream openResolvedResourceStream(ResolvedResourceSource source) throws IOException {
         try {
-            return context.getResources().openRawResource(source.resourceId);
+            // Use the density-resolved TypedValue so we open the exact variant
+            // that was requested, instead of openRawResource(id) which would
+            // fall back to the device's current configuration density.
+            return context.getResources().openRawResource(source.resourceId, source.typedValue);
         } catch (Resources.NotFoundException e) {
             throw new IOException("Unable to open resolved resource: " + source.assetPath, e);
         }
