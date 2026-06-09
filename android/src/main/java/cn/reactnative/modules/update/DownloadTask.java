@@ -40,6 +40,11 @@ class DownloadTask implements Runnable {
         final ArrayList<String> copyFroms = new ArrayList<String>();
         final ArrayList<String> copyTos = new ArrayList<String>();
         final ArrayList<String> deletes = new ArrayList<String>();
+        // Maps a copy source path ("from") to the CRC32 of the file content,
+        // when provided by the manifest ("copiesCrc"). Lets the resource
+        // copier locate the file by content if the path is not present on
+        // device (APK baseline -> AAB install path shortening).
+        final HashMap<String, Long> copyCrcs = new HashMap<String, Long>();
     }
 
     private final Context context;
@@ -140,8 +145,11 @@ class DownloadTask implements Runnable {
         JSONObject manifest,
         ArrayList<String> copyFroms,
         ArrayList<String> copyTos,
-        ArrayList<String> deletes
+        ArrayList<String> deletes,
+        HashMap<String, Long> copyCrcs
     ) throws JSONException {
+        JSONObject copiesCrc = manifest.optJSONObject("copiesCrc");
+
         JSONObject copies = manifest.optJSONObject("copies");
         if (copies != null) {
             Iterator<?> keys = copies.keys();
@@ -153,6 +161,11 @@ class DownloadTask implements Runnable {
                 }
                 copyFroms.add(from);
                 copyTos.add(to);
+                if (copiesCrc != null && copyCrcs != null && copiesCrc.has(to)) {
+                    // Same content => same crc, so grouping multiple "to" under
+                    // one "from" stays consistent.
+                    copyCrcs.put(from, copiesCrc.getLong(to));
+                }
             }
         }
 
@@ -220,7 +233,8 @@ class DownloadTask implements Runnable {
                         manifest,
                         contents.copyFroms,
                         contents.copyTos,
-                        contents.deletes
+                        contents.deletes,
+                        contents.copyCrcs
                     );
                     continue;
                 }
@@ -285,7 +299,7 @@ class DownloadTask implements Runnable {
             originBundleFile.delete();
         }
 
-        bundledResourceCopier.copyFromResource(copyList);
+        bundledResourceCopier.copyFromResource(copyList, contents.copyCrcs);
     }
 
     private void doPatchFromPpk() throws IOException, JSONException {

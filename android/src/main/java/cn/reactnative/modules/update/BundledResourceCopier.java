@@ -33,15 +33,36 @@ final class BundledResourceCopier {
         }
     }
 
+    // Holds the exact archive a CRC32 match came from, so the fallback copy
+    // reads from that archive even if another APK exposes the same entry name
+    // with different bytes.
+    private static final class ZipSource {
+        final ZipEntry entry;
+        final SafeZipFile zipFile;
+
+        ZipSource(ZipEntry entry, SafeZipFile zipFile) {
+            this.entry = entry;
+            this.zipFile = zipFile;
+        }
+    }
+
     BundledResourceCopier(Context context) {
         this.context = context.getApplicationContext();
     }
 
-    void copyFromResource(HashMap<String, ArrayList<File>> resToCopy) throws IOException {
+    void copyFromResource(
+        HashMap<String, ArrayList<File>> resToCopy,
+        HashMap<String, Long> crcByFrom
+    ) throws IOException {
         ArrayList<String> apkPaths = collectApkPaths();
         HashMap<String, ZipEntry> availableEntries = new HashMap<String, ZipEntry>();
         HashMap<String, SafeZipFile> zipFileMap = new HashMap<String, SafeZipFile>();
         HashMap<String, SafeZipFile> entryToZipFileMap = new HashMap<String, SafeZipFile>();
+        // Content checksum index: CRC32 -> matched archive source. Lets us
+        // locate a file by content when its origin path is not present verbatim
+        // on device (e.g. APK baseline diff applied on an AAB/split-apk install
+        // whose res/ paths were shortened). First entry for a given crc wins.
+        HashMap<Long, ZipSource> crcToEntry = new HashMap<Long, ZipSource>();
 
         try {
             for (String apkPath : apkPaths) {
@@ -54,6 +75,10 @@ final class BundledResourceCopier {
                     if (!availableEntries.containsKey(entryName)) {
                         availableEntries.put(entryName, ze);
                         entryToZipFileMap.put(entryName, zipFile);
+                    }
+                    long crc = ze.getCrc();
+                    if (crc != -1L && !crcToEntry.containsKey(crc)) {
+                        crcToEntry.put(crc, new ZipSource(ze, zipFile));
                     }
                 }
             }
@@ -76,6 +101,7 @@ final class BundledResourceCopier {
 
                 ZipEntry entry = availableEntries.get(fromPath);
                 String actualSourcePath = fromPath;
+                SafeZipFile matchedZipFile = null;
                 ResolvedResourceSource resolvedResource = null;
 
                 if (entry == null) {
@@ -87,10 +113,35 @@ final class BundledResourceCopier {
                     }
                 }
 
+                // Content (CRC32) match: robust across APK/AAB packaging because
+                // the checksum is over the uncompressed file content, not its
+                // path. Preferred over the resource-id heuristic below.
+                if (entry == null && crcByFrom != null) {
+                    Long wantedCrc = crcByFrom.get(fromPath);
+                    if (wantedCrc != null) {
+                        ZipSource matched = crcToEntry.get(wantedCrc);
+                        if (matched != null) {
+                            entry = matched.entry;
+                            matchedZipFile = matched.zipFile;
+                            actualSourcePath = matched.entry.getName();
+                        }
+                    }
+                }
+
                 if (entry == null) {
                     resolvedResource = resolveBundledResource(fromPath);
                     if (resolvedResource != null) {
                         actualSourcePath = resolvedResource.assetPath;
+                        // resolveBundledResource resolved the density-correct
+                        // file path; copy that exact entry from the already-open
+                        // archives so the right variant is used. (openRawResource
+                        // would re-resolve the id at the current configuration
+                        // density and ignore the requested one.)
+                        ZipEntry resolvedEntry = availableEntries.get(actualSourcePath);
+                        if (resolvedEntry != null) {
+                            entry = resolvedEntry;
+                            resolvedResource = null;
+                        }
                     }
                 }
 
@@ -104,7 +155,9 @@ final class BundledResourceCopier {
                         if (lastTarget != null) {
                             UpdateFileUtils.copyFile(lastTarget, target);
                         } else if (entry != null) {
-                            SafeZipFile sourceZipFile = entryToZipFileMap.get(actualSourcePath);
+                            SafeZipFile sourceZipFile = matchedZipFile != null
+                                ? matchedZipFile
+                                : entryToZipFileMap.get(actualSourcePath);
                             if (sourceZipFile == null) {
                                 sourceZipFile = baseZipFile;
                             }
@@ -247,6 +300,9 @@ final class BundledResourceCopier {
     }
 
     private InputStream openResolvedResourceStream(ResolvedResourceSource source) throws IOException {
+        // Defensive fallback only: reached when the density-resolved assetPath
+        // is not present as a zip entry in any loaded APK. Best-effort, resolves
+        // at the current configuration density.
         try {
             return context.getResources().openRawResource(source.resourceId);
         } catch (Resources.NotFoundException e) {
