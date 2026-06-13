@@ -13,9 +13,15 @@ const createJsonResponse = (payload: unknown) =>
 const setupClientMocks = ({
   isFirstTime = false,
   markSuccess = mock(() => {}),
+  downloadPatchFromPpk = mock(() => Promise.resolve()),
+  downloadPatchFromPackage = mock(() => Promise.resolve()),
+  downloadFullUpdate = mock(() => Promise.resolve()),
 }: {
   isFirstTime?: boolean;
   markSuccess?: ReturnType<typeof mock>;
+  downloadPatchFromPpk?: ReturnType<typeof mock>;
+  downloadPatchFromPackage?: ReturnType<typeof mock>;
+  downloadFullUpdate?: ReturnType<typeof mock>;
 } = {}) => {
   (globalThis as any).__DEV__ = false;
 
@@ -38,9 +44,9 @@ const setupClientMocks = ({
       markSuccess,
       reloadUpdate: mock(() => Promise.resolve()),
       setNeedUpdate: mock(() => Promise.resolve()),
-      downloadPatchFromPpk: mock(() => Promise.resolve()),
-      downloadPatchFromPackage: mock(() => Promise.resolve()),
-      downloadFullUpdate: mock(() => Promise.resolve()),
+      downloadPatchFromPpk,
+      downloadPatchFromPackage,
+      downloadFullUpdate,
       downloadAndInstallApk: mock(() => Promise.resolve()),
       restartApp: mock(() => Promise.resolve()),
     },
@@ -204,6 +210,42 @@ describe('Pushy server config', () => {
       status: 'error',
       error: fetchError,
     });
+  });
+
+  test('skips downloading when update hash is already current', async () => {
+    const downloadPatchFromPpk = mock(() => Promise.resolve());
+    const downloadPatchFromPackage = mock(() => Promise.resolve());
+    const downloadFullUpdate = mock(() => Promise.resolve());
+    const logger = mock(() => {});
+    setupClientMocks({
+      downloadPatchFromPpk,
+      downloadPatchFromPackage,
+      downloadFullUpdate,
+    });
+
+    const { Pushy } = await importFreshClient('skip-current-hash-download');
+    const client = new Pushy({
+      appKey: 'demo-app',
+      logger,
+    });
+
+    await expect(
+      client.downloadUpdate({
+        update: true,
+        hash: 'hash',
+        full: 'hash',
+        paths: ['cdn.example.com'],
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(downloadPatchFromPpk).not.toHaveBeenCalled();
+    expect(downloadPatchFromPackage).not.toHaveBeenCalled();
+    expect(downloadFullUpdate).not.toHaveBeenCalled();
+    expect(logger).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'downloading',
+      }),
+    );
   });
 
   test('waits for native markSuccess before logging success', async () => {

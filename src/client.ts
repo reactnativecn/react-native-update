@@ -452,6 +452,10 @@ export class Pushy {
     if (!updateInfo.update || !hash) {
       return;
     }
+    if (hash === currentVersion) {
+      log(`current hash ${currentVersion}, ignored`);
+      return;
+    }
     if (rolledBackVersion === hash) {
       log(`rolledback hash ${rolledBackVersion}, ignored`);
       return;

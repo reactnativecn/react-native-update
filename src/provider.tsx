@@ -23,11 +23,10 @@ import {
   CheckResult,
   ProgressData,
   UpdateTestPayload,
-  VersionInfo,
 } from './type';
 import { UpdateContext } from './context';
 import { URL } from 'react-native-url-polyfill';
-import { isInRollout } from './isInRollout';
+import { resolveCheckResult } from './resolveCheckResult';
 import { assertWeb, log } from './utils';
 
 export const UpdateProvider = ({
@@ -181,94 +180,77 @@ export const UpdateProvider = ({
       if (!rootInfo) {
         return;
       }
-      const versions = [rootInfo.expVersion, rootInfo].filter(
-        Boolean,
-      ) as VersionInfo[];
-      delete rootInfo.expVersion;
-      for (const versionInfo of versions) {
-        const info: CheckResult = {
-          ...rootInfo,
-          ...versionInfo,
-        };
-        const rollout = info.config?.rollout?.[packageVersion];
-        if (info.update && rollout) {
-          if (!isInRollout(rollout)) {
-            log(`${info.name} not in ${rollout}% rollout, ignored`);
-            continue;
-          }
-          log(`${info.name} in ${rollout}% rollout, continue`);
+      const info = resolveCheckResult(rootInfo);
+      if (info.update) {
+        info.description = info.description ?? '';
+      }
+      updateInfoRef.current = info;
+      setUpdateInfo(info);
+      if (info.expired) {
+        if (
+          options.onPackageExpired &&
+          (await options.onPackageExpired(info)) === false
+        ) {
+          log('onPackageExpired returned false, skipping');
+          return;
         }
-        if (info.update) {
-          info.description = info.description ?? '';
-        }
-        updateInfoRef.current = info;
-        setUpdateInfo(info);
-        if (info.expired) {
-          if (
-            options.onPackageExpired &&
-            (await options.onPackageExpired(info)) === false
-          ) {
-            log('onPackageExpired returned false, skipping');
-            return;
-          }
-          const { downloadUrl } = info;
-          if (downloadUrl && sharedState.apkStatus === null) {
-            if (options.updateStrategy === 'silentAndNow') {
-              if (Platform.OS === 'android' && downloadUrl.endsWith('.apk')) {
-                downloadAndInstallApk(downloadUrl);
-              } else {
-                Linking.openURL(downloadUrl);
-              }
-              return info;
+        const { downloadUrl } = info;
+        if (downloadUrl && sharedState.apkStatus === null) {
+          if (options.updateStrategy === 'silentAndNow') {
+            if (Platform.OS === 'android' && downloadUrl.endsWith('.apk')) {
+              downloadAndInstallApk(downloadUrl);
+            } else {
+              Linking.openURL(downloadUrl);
             }
-            alertUpdate(
-              client.t('alert_title'),
-              client.t('alert_app_updated'),
-              [
-                {
-                  text: client.t('alert_update_button'),
-                  onPress: () => {
-                    if (
-                      Platform.OS === 'android' &&
-                      downloadUrl.endsWith('.apk')
-                    ) {
-                      downloadAndInstallApk(downloadUrl);
-                    } else {
-                      Linking.openURL(downloadUrl);
-                    }
-                  },
-                },
-              ],
-            );
-          }
-        } else if (info.update) {
-          if (
-            options.updateStrategy === 'silentAndNow' ||
-            options.updateStrategy === 'silentAndLater'
-          ) {
-            downloadUpdate(info);
             return info;
           }
           alertUpdate(
             client.t('alert_title'),
-            client.t('alert_new_version_found', {
-              name: info.name!,
-              description: info.description!,
-            }),
+            client.t('alert_app_updated'),
             [
-              { text: client.t('alert_cancel'), style: 'cancel' },
               {
-                text: client.t('alert_confirm'),
-                style: 'default',
+                text: client.t('alert_update_button'),
                 onPress: () => {
-                  downloadUpdate();
+                  if (
+                    Platform.OS === 'android' &&
+                    downloadUrl.endsWith('.apk')
+                  ) {
+                    downloadAndInstallApk(downloadUrl);
+                  } else {
+                    Linking.openURL(downloadUrl);
+                  }
                 },
               },
             ],
           );
         }
-        return info;
+      } else if (info.update) {
+        if (
+          options.updateStrategy === 'silentAndNow' ||
+          options.updateStrategy === 'silentAndLater'
+        ) {
+          downloadUpdate(info);
+          return info;
+        }
+        alertUpdate(
+          client.t('alert_title'),
+          client.t('alert_new_version_found', {
+            name: info.name!,
+            description: info.description!,
+          }),
+          [
+            { text: client.t('alert_cancel'), style: 'cancel' },
+            {
+              text: client.t('alert_confirm'),
+              style: 'default',
+              onPress: () => {
+                downloadUpdate();
+              },
+            },
+          ],
+        );
       }
+      return info;
     },
     [
       client,
