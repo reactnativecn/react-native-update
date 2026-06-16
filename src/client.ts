@@ -18,6 +18,7 @@ import {
 } from './core';
 import { PermissionsAndroid } from './permissions';
 import {
+  BeforeReloadContext,
   CheckResult,
   ClientOptions,
   EventType,
@@ -218,6 +219,18 @@ export class Pushy {
       log('afterCheckUpdate failed:', error?.message || error);
     });
   };
+  runBeforeReload = async (context: BeforeReloadContext) => {
+    const { beforeReload } = this.options;
+    if (!beforeReload) {
+      return true;
+    }
+    const shouldReload = await beforeReload(context);
+    if (shouldReload === false) {
+      log('beforeReload returned false, skipping reload');
+      return false;
+    }
+    return true;
+  };
   getCheckUrl = (endpoint: string) => {
     return `${endpoint}/checkUpdate/${this.options.appKey}`;
   };
@@ -325,6 +338,15 @@ export class Pushy {
     if (assertHash(hash) && !sharedState.applyingUpdate) {
       log(`switchVersion: ${hash}`);
       sharedState.applyingUpdate = true;
+      try {
+        if (!(await this.runBeforeReload({ type: 'switchVersion', hash }))) {
+          sharedState.applyingUpdate = false;
+          return;
+        }
+      } catch (e) {
+        sharedState.applyingUpdate = false;
+        throw e;
+      }
       return PushyModule.reloadUpdate({ hash });
     }
   };
@@ -668,6 +690,9 @@ export class Pushy {
     }
   };
   restartApp = async () => {
+    if (!(await this.runBeforeReload({ type: 'restartApp' }))) {
+      return;
+    }
     return PushyModule.restartApp();
   };
 }

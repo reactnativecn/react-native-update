@@ -88,6 +88,11 @@ export interface UpdateServerConfig {
   queryUrls?: string[];
 }
 
+export interface BeforeReloadContext {
+  type: 'switchVersion' | 'restartApp';
+  hash?: string;
+}
+
 export interface ClientOptions {
   appKey: string;
   server?: UpdateServerConfig;
@@ -109,6 +114,9 @@ export interface ClientOptions {
   afterCheckUpdate?: (state: UpdateCheckState) => Promise<void> | void;
   beforeDownloadUpdate?: (info: CheckResult) => Promise<boolean> | boolean;
   afterDownloadUpdate?: (info: CheckResult) => Promise<boolean> | boolean;
+  beforeReload?: (
+    context: BeforeReloadContext,
+  ) => Promise<boolean | void> | boolean | void;
   onPackageExpired?: (info: CheckResult) => Promise<boolean> | boolean;
   overridePackageVersion?: string;
 }

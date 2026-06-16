@@ -13,15 +13,21 @@ const createJsonResponse = (payload: unknown) =>
 const setupClientMocks = ({
   isFirstTime = false,
   markSuccess = mock(() => {}),
+  reloadUpdate = mock(() => Promise.resolve()),
+  setNeedUpdate = mock(() => Promise.resolve()),
   downloadPatchFromPpk = mock(() => Promise.resolve()),
   downloadPatchFromPackage = mock(() => Promise.resolve()),
   downloadFullUpdate = mock(() => Promise.resolve()),
+  restartApp = mock(() => Promise.resolve()),
 }: {
   isFirstTime?: boolean;
   markSuccess?: ReturnType<typeof mock>;
+  reloadUpdate?: ReturnType<typeof mock>;
+  setNeedUpdate?: ReturnType<typeof mock>;
   downloadPatchFromPpk?: ReturnType<typeof mock>;
   downloadPatchFromPackage?: ReturnType<typeof mock>;
   downloadFullUpdate?: ReturnType<typeof mock>;
+  restartApp?: ReturnType<typeof mock>;
 } = {}) => {
   (globalThis as any).__DEV__ = false;
 
@@ -42,13 +48,13 @@ const setupClientMocks = ({
   mock.module('../core', () => ({
     PushyModule: {
       markSuccess,
-      reloadUpdate: mock(() => Promise.resolve()),
-      setNeedUpdate: mock(() => Promise.resolve()),
+      reloadUpdate,
+      setNeedUpdate,
       downloadPatchFromPpk,
       downloadPatchFromPackage,
       downloadFullUpdate,
       downloadAndInstallApk: mock(() => Promise.resolve()),
-      restartApp: mock(() => Promise.resolve()),
+      restartApp,
     },
     buildTime: '2023-01-01',
     cInfo: {
@@ -282,5 +288,79 @@ describe('Pushy server config', () => {
         type: 'markSuccess',
       }),
     );
+  });
+
+  test('waits for beforeReload before switching version', async () => {
+    const calls: string[] = [];
+    const reloadUpdate = mock(() => {
+      calls.push('reloadUpdate');
+      return Promise.resolve();
+    });
+    const beforeReload = mock(async (context: any) => {
+      calls.push('beforeReload');
+      expect(context).toEqual({
+        type: 'switchVersion',
+        hash: 'next-hash',
+      });
+    });
+    setupClientMocks({ reloadUpdate });
+
+    const { Pushy, sharedState } = await importFreshClient('before-reload-switch-version');
+    sharedState.downloadedHash = 'next-hash';
+    const client = new Pushy({
+      appKey: 'demo-app',
+      beforeReload,
+    });
+
+    await client.switchVersion('next-hash');
+
+    expect(calls).toEqual(['beforeReload', 'reloadUpdate']);
+    expect(beforeReload).toHaveBeenCalledTimes(1);
+    expect(reloadUpdate).toHaveBeenCalledWith({ hash: 'next-hash' });
+  });
+
+  test('skips switching version when beforeReload returns false', async () => {
+    const reloadUpdate = mock(() => Promise.resolve());
+    const beforeReload = mock(() => false);
+    setupClientMocks({ reloadUpdate });
+
+    const { Pushy, sharedState } = await importFreshClient('before-reload-skip-switch');
+    sharedState.downloadedHash = 'next-hash';
+    const client = new Pushy({
+      appKey: 'demo-app',
+      beforeReload,
+    });
+
+    await client.switchVersion('next-hash');
+
+    expect(beforeReload).toHaveBeenCalledTimes(1);
+    expect(reloadUpdate).not.toHaveBeenCalled();
+    expect(sharedState.applyingUpdate).toBe(false);
+  });
+
+  test('calls beforeReload before restartApp', async () => {
+    const calls: string[] = [];
+    const restartApp = mock(() => {
+      calls.push('restartApp');
+      return Promise.resolve();
+    });
+    const beforeReload = mock(async (context: any) => {
+      calls.push('beforeReload');
+      expect(context).toEqual({
+        type: 'restartApp',
+      });
+    });
+    setupClientMocks({ restartApp });
+
+    const { Pushy } = await importFreshClient('before-reload-restart-app');
+    const client = new Pushy({
+      appKey: 'demo-app',
+      beforeReload,
+    });
+
+    await client.restartApp();
+
+    expect(calls).toEqual(['beforeReload', 'restartApp']);
+    expect(restartApp).toHaveBeenCalled();
   });
 });
