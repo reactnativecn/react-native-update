@@ -7,7 +7,6 @@ import { bundleManager } from '@kit.AbilityKit';
 import logger from './Logger';
 import { UpdateContext } from './UpdateContext';
 import { EventHub } from './EventHub';
-import { util } from '@kit.ArkTS';
 
 const TAG = 'PushyTurboModule';
 
@@ -47,33 +46,6 @@ export class PushyTurboModule extends UITurboModule {
     return bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_REQUESTED_PERMISSION;
   }
 
-  private getPackageVersion(): string {
-    try {
-      const bundleInfo = bundleManager.getBundleInfoForSelfSync(
-        this.getBundleFlags(),
-      );
-      return bundleInfo?.versionName || 'Unknown';
-    } catch (error) {
-      console.error('Failed to get bundle info:', error);
-      return '';
-    }
-  }
-
-  private getBuildTime(): string {
-    try {
-      const content = this.mUiCtx.resourceManager.getRawFileContentSync(
-        'meta.json',
-      );
-      const metaData = JSON.parse(
-        new util.TextDecoder().decodeToString(content),
-      ) as Record<string, string | number | boolean | null | undefined>;
-      if (metaData.pushy_build_time) {
-        return String(metaData.pushy_build_time);
-      }
-    } catch {}
-    return '';
-  }
-
   private requireHash(hash: string, methodName: string): string {
     if (!hash) {
       throw Error(`${methodName}: empty hash`);
@@ -95,8 +67,8 @@ export class PushyTurboModule extends UITurboModule {
 
   getConstants(): Object {
     logger.debug(TAG, ',call getConstants');
-    const packageVersion = this.getPackageVersion();
-    const buildTime = this.getBuildTime();
+    const packageVersion = this.context.getPackageVersion();
+    const buildTime = this.context.getBuildTime();
     this.context.syncStateWithBinaryVersion(packageVersion, buildTime);
 
     const currentVersion = this.context.getCurrentVersion();

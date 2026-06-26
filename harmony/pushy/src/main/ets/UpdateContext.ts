@@ -3,6 +3,8 @@ import fileIo from '@ohos.file.fs';
 import { DownloadTask } from './DownloadTask';
 import common from '@ohos.app.ability.common';
 import { DownloadTaskParams } from './DownloadTaskParams';
+import { bundleManager } from '@kit.AbilityKit';
+import { util } from '@kit.ArkTS';
 import NativePatchCore, {
   STATE_OP_CLEAR_FIRST_TIME,
   STATE_OP_CLEAR_ROLLBACK_MARK,
@@ -12,6 +14,10 @@ import NativePatchCore, {
   STATE_OP_SWITCH_VERSION,
   StateCoreResult,
 } from './NativePatchCore';
+
+type FlushablePreferences = preferences.Preferences & {
+  flushSync?: () => void;
+};
 
 export class UpdateContext {
   private context: common.UIAbilityContext;
@@ -32,6 +38,10 @@ export class UpdateContext {
       console.error('Failed to create root directory:', e);
     }
     this.initPreferences();
+    this.syncStateWithBinaryVersion(
+      this.getPackageVersion(),
+      this.getBuildTime(),
+    );
   }
 
   private initPreferences() {
@@ -42,6 +52,37 @@ export class UpdateContext {
     } catch (e) {
       console.error('Failed to init preferences:', e);
     }
+  }
+
+  private getBundleFlags(): bundleManager.BundleFlag {
+    return bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_REQUESTED_PERMISSION;
+  }
+
+  public getPackageVersion(): string {
+    try {
+      const bundleInfo = bundleManager.getBundleInfoForSelfSync(
+        this.getBundleFlags(),
+      );
+      return bundleInfo?.versionName || 'Unknown';
+    } catch (error) {
+      console.error('Failed to get bundle info:', error);
+      return '';
+    }
+  }
+
+  public getBuildTime(): string {
+    try {
+      const content = this.context.resourceManager.getRawFileContentSync(
+        'meta.json',
+      );
+      const metaData = JSON.parse(
+        new util.TextDecoder().decodeToString(content),
+      ) as Record<string, string | number | boolean | null | undefined>;
+      if (metaData.pushy_build_time) {
+        return String(metaData.pushy_build_time);
+      }
+    } catch {}
+    return '';
   }
 
   private readString(key: string): string {
@@ -85,6 +126,20 @@ export class UpdateContext {
       return value !== 0;
     }
     return defaultValue;
+  }
+
+  private flushPreferences(reason: string): void {
+    try {
+      const flushablePreferences = this.preferences as FlushablePreferences;
+      if (typeof flushablePreferences.flushSync === 'function') {
+        flushablePreferences.flushSync();
+        return;
+      }
+      throw Error('preferences.flushSync is not available');
+    } catch (error) {
+      console.error(`Failed to flush preferences for ${reason}:`, error);
+      throw error;
+    }
   }
 
   private putNullableString(key: string, value?: string): void {
@@ -136,7 +191,7 @@ export class UpdateContext {
     if (options.removeStaleHash && state.staleVersionToDelete) {
       this.preferences.deleteSync(`hash_${state.staleVersionToDelete}`);
     }
-    this.preferences.flush();
+    this.flushPreferences('persist state');
     if (options.cleanUp) {
       this.cleanUp();
     }
@@ -196,7 +251,7 @@ export class UpdateContext {
 
   public setKv(key: string, value: string): void {
     this.preferences.putSync(key, value);
-    this.preferences.flush();
+    this.flushPreferences(`set key ${key}`);
   }
 
   public getKv(key: string): string {
