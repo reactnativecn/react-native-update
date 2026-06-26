@@ -16,7 +16,7 @@ mock.module('../i18n', () => {
   };
 });
 
-import { joinUrls } from '../utils';
+import { joinUrls, computeProgress } from '../utils';
 
 describe('joinUrls', () => {
   test('returns undefined when fileName is not provided', () => {
@@ -69,5 +69,32 @@ describe('joinUrls', () => {
       'https://192.168.1.1:8080/file.txt',
       'https://10.0.0.1:3000/api/file.txt',
     ]);
+  });
+});
+
+describe('computeProgress', () => {
+  test('returns 0 when total is 0', () => {
+    expect(computeProgress(0, 0)).toBe(0);
+  });
+
+  test('returns 0 when received is 0', () => {
+    expect(computeProgress(0, 1000)).toBe(0);
+  });
+
+  test('returns 100 when received equals total', () => {
+    expect(computeProgress(1000, 1000)).toBe(100);
+  });
+
+  test('returns 50 for half progress', () => {
+    expect(computeProgress(500, 1000)).toBe(50);
+  });
+
+  test('floors fractional percentages', () => {
+    expect(computeProgress(1, 3)).toBe(33);
+    expect(computeProgress(2, 3)).toBe(66);
+  });
+
+  test('handles large numbers', () => {
+    expect(computeProgress(50_000_000, 100_000_000)).toBe(50);
   });
 });

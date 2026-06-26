@@ -108,6 +108,9 @@ export const assertWeb = () => {
   return true;
 };
 
+export const computeProgress = (received: number, total: number): number =>
+  total > 0 ? Math.floor((received / total) * 100) : 0;
+
 export const fetchWithTimeout = (
   url: string,
   params: Parameters<typeof fetch>[1],
