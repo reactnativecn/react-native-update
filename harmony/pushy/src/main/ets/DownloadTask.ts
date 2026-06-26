@@ -51,6 +51,17 @@ export function parseManifestToArrays(
   };
 }
 
+function toArrayBufferSlice(
+  payload: Uint8Array,
+  offset: number,
+  length: number,
+): ArrayBuffer {
+  return payload.buffer.slice(
+    payload.byteOffset + offset,
+    payload.byteOffset + offset + length,
+  );
+}
+
 const DIFF_MANIFEST_ENTRY = '__diff.json';
 const HARMONY_BUNDLE_PATCH_ENTRY = 'bundle.harmony.js.patch';
 const TEMP_ORIGIN_BUNDLE_ENTRY = '.origin.bundle.harmony.js';
@@ -172,9 +183,13 @@ export class DownloadTask {
       let bytesWritten = 0;
 
       while (bytesWritten < payload.byteLength) {
-        const chunk = payload.subarray(bytesWritten, bytesWritten + chunkSize);
+        const chunkLength = Math.min(
+          chunkSize,
+          payload.byteLength - bytesWritten,
+        );
+        const chunk = toArrayBufferSlice(payload, bytesWritten, chunkLength);
         await fileIo.write(writer.fd, chunk);
-        bytesWritten += chunk.byteLength;
+        bytesWritten += chunkLength;
       }
     } finally {
       if (writer) {
@@ -268,7 +283,7 @@ export class DownloadTask {
           break;
         }
 
-        await fileIo.write(writer.fd, new Uint8Array(buffer, 0, readLength));
+        await fileIo.write(writer.fd, buffer.slice(0, readLength));
         offset += readLength;
 
         if (readLength < FILE_COPY_BUFFER_SIZE) {
