@@ -110,31 +110,52 @@ function runPushy(args: string[], cwd: string) {
   }
 }
 
+function installHdiffModule() {
+  const bunResult = spawnSync(
+    'bun',
+    ['add', '--no-save', 'node-hdiffpatch'],
+    {
+      cwd: cliRoot,
+      stdio: 'inherit',
+      env: process.env,
+      timeout: 120_000,
+    },
+  );
+  if (bunResult.status === 0) {
+    return;
+  }
+
+  const npmResult = spawnSync(
+    'npm',
+    [
+      'install',
+      '--no-save',
+      '--package-lock=false',
+      '--legacy-peer-deps',
+      'node-hdiffpatch',
+    ],
+    {
+      cwd: cliRoot,
+      stdio: 'inherit',
+      env: process.env,
+      timeout: 120_000,
+    },
+  );
+  if (npmResult.error) {
+    throw npmResult.error;
+  }
+  if (npmResult.status !== 0) {
+    throw new Error(
+      `npm install node-hdiffpatch failed with exit code ${npmResult.status}`,
+    );
+  }
+}
+
 function ensureHdiffModule() {
   const modulePath = path.join(cliRoot, 'node_modules/node-hdiffpatch');
   if (!fs.existsSync(modulePath)) {
     console.log('node-hdiffpatch not found, installing...');
-    const result = spawnSync(
-      'npm',
-      [
-        'install',
-        '--no-save',
-        '--package-lock=false',
-        '--legacy-peer-deps',
-        'node-hdiffpatch',
-      ],
-      {
-        cwd: cliRoot,
-        stdio: 'inherit',
-        env: process.env,
-      },
-    );
-
-    if (result.status !== 0) {
-      throw new Error(
-        `npm install node-hdiffpatch failed with exit code ${result.status}`,
-      );
-    }
+    installHdiffModule();
   }
   if (!fs.existsSync(modulePath)) {
     throw new Error(`Failed to install node-hdiffpatch under: ${cliRoot}`);
