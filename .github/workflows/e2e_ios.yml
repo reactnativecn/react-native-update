@@ -80,7 +80,7 @@ jobs:
           xcode-version: '26.4'
 
       - name: Install applesimutils
-        run: HOMEBREW_NO_AUTO_UPDATE=1 brew tap wix/brew && HOMEBREW_NO_AUTO_UPDATE=1 brew install applesimutils
+        run: brew trust wix/brew && HOMEBREW_NO_AUTO_UPDATE=1 brew install wix/brew/applesimutils
 
       - name: Install e2etest dependencies
         run: cd Example/e2etest && bun install --frozen-lockfile
