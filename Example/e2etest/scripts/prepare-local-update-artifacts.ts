@@ -9,6 +9,25 @@ import {
   LOCAL_UPDATE_LABELS,
 } from '../e2e/localUpdateConfig';
 
+type DiffCommandRunner = {
+  hdiff: (options: {
+    args: [string, string];
+    options: {
+      output: string;
+      customDiff: (oldSource?: Buffer, newSource?: Buffer) => Buffer;
+      'no-interactive': true;
+    };
+  }) => Promise<void>;
+  hdiffFromApk: (options: {
+    args: [string, string];
+    options: {
+      output: string;
+      customDiff: (oldSource?: Buffer, newSource?: Buffer) => Buffer;
+      'no-interactive': true;
+    };
+  }) => Promise<void>;
+};
+
 const projectRoot = process.cwd();
 const platform = process.env.E2E_PLATFORM || 'ios';
 const artifactsRoot = path.join(projectRoot, '.e2e-artifacts');
@@ -56,6 +75,10 @@ if (!['ios', 'android'].includes(platform)) {
 if (!fs.existsSync(cliEntry)) {
   throw new Error(`react-native-update-cli entry not found: ${cliEntry}`);
 }
+
+const { diffCommands } = require(path.join(cliRoot, 'lib/exports.js')) as {
+  diffCommands: DiffCommandRunner;
+};
 
 function runPushy(args: string[], cwd: string) {
   const cliNodeModules = path.join(cliRoot, 'node_modules');
@@ -116,6 +139,16 @@ function ensureHdiffModule() {
   if (!fs.existsSync(modulePath)) {
     throw new Error(`Failed to install node-hdiffpatch under: ${projectRoot}`);
   }
+  const hdiffModule = require(modulePath) as {
+    diff?: (oldSource?: Buffer, newSource?: Buffer) => Buffer;
+  } & ((oldSource?: Buffer, newSource?: Buffer) => Buffer);
+  const customDiff = hdiffModule.diff || hdiffModule;
+  if (typeof customDiff !== 'function') {
+    throw new Error(
+      `node-hdiffpatch did not expose a diff function: ${modulePath}`,
+    );
+  }
+  return customDiff;
 }
 
 function prepareDir() {
@@ -151,22 +184,49 @@ function verifyGeneratedFile(label: string, filePath: string) {
   );
 }
 
-function generatePpkDiff(origin: string, next: string, output: string) {
-  runPushy(
-    ['hdiff', origin, next, '--output', output, '--no-interactive'],
-    projectRoot,
+async function keepProcessAlive<T>(promise: Promise<T>) {
+  const timer = setInterval(() => {}, 1000);
+  try {
+    return await promise;
+  } finally {
+    clearInterval(timer);
+  }
+}
+
+async function generatePpkDiff(
+  origin: string,
+  next: string,
+  output: string,
+  customDiff: (oldSource?: Buffer, newSource?: Buffer) => Buffer,
+) {
+  await keepProcessAlive(
+    diffCommands.hdiff({
+      args: [origin, next],
+      options: {
+        output,
+        customDiff,
+        'no-interactive': true,
+      },
+    }),
   );
   verifyGeneratedFile('ppk diff', output);
 }
 
-function generateAndroidPackageDiff(
+async function generateAndroidPackageDiff(
   apkPath: string,
   next: string,
   output: string,
+  customDiff: (oldSource?: Buffer, newSource?: Buffer) => Buffer,
 ) {
-  runPushy(
-    ['hdiffFromApk', apkPath, next, '--output', output, '--no-interactive'],
-    projectRoot,
+  await keepProcessAlive(
+    diffCommands.hdiffFromApk({
+      args: [apkPath, next],
+      options: {
+        output,
+        customDiff,
+        'no-interactive': true,
+      },
+    }),
   );
   verifyGeneratedFile('package diff', output);
 }
@@ -183,10 +243,10 @@ async function main() {
   bundleTo('e2e/entry.v2.ts', v2);
   bundleTo('e2e/entry.v3.ts', v3);
 
-  ensureHdiffModule();
+  const customDiff = ensureHdiffModule();
 
   console.log('Generating ppk diff...');
-  generatePpkDiff(v1, v2, ppkDiff);
+  await generatePpkDiff(v1, v2, ppkDiff, customDiff);
 
   if (platform === 'android') {
     const apkPath = path.join(
@@ -206,10 +266,11 @@ async function main() {
       artifactsDir,
       LOCAL_UPDATE_FILES.packageDiff,
     );
-    generateAndroidPackageDiff(
+    await generateAndroidPackageDiff(
       apkPath,
       v3,
       packageDiffPath,
+      customDiff,
     );
   }
 
