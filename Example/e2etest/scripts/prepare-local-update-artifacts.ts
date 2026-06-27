@@ -111,7 +111,7 @@ function runPushy(args: string[], cwd: string) {
 }
 
 function ensureHdiffModule() {
-  const modulePath = path.join(projectRoot, 'node_modules/node-hdiffpatch');
+  const modulePath = path.join(cliRoot, 'node_modules/node-hdiffpatch');
   if (!fs.existsSync(modulePath)) {
     console.log('node-hdiffpatch not found, installing...');
     const result = spawnSync(
@@ -124,7 +124,7 @@ function ensureHdiffModule() {
         'node-hdiffpatch',
       ],
       {
-        cwd: projectRoot,
+        cwd: cliRoot,
         stdio: 'inherit',
         env: process.env,
       },
@@ -137,7 +137,7 @@ function ensureHdiffModule() {
     }
   }
   if (!fs.existsSync(modulePath)) {
-    throw new Error(`Failed to install node-hdiffpatch under: ${projectRoot}`);
+    throw new Error(`Failed to install node-hdiffpatch under: ${cliRoot}`);
   }
   const hdiffModule = require(modulePath) as {
     diff?: (oldSource?: Buffer, newSource?: Buffer) => Buffer;
