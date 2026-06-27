@@ -9,23 +9,6 @@ import {
   LOCAL_UPDATE_LABELS,
 } from '../e2e/localUpdateConfig';
 
-type DiffCommandRunner = {
-  hdiff: (options: {
-    args: [string, string];
-    options: {
-      output: string;
-      customDiff: (...args: unknown[]) => unknown;
-    };
-  }) => Promise<void>;
-  hdiffFromApk: (options: {
-    args: [string, string];
-    options: {
-      output: string;
-      customDiff: (...args: unknown[]) => unknown;
-    };
-  }) => Promise<void>;
-};
-
 const projectRoot = process.cwd();
 const platform = process.env.E2E_PLATFORM || 'ios';
 const artifactsRoot = path.join(projectRoot, '.e2e-artifacts');
@@ -65,9 +48,6 @@ if (!binRelative) {
   );
 }
 const cliEntry = path.join(cliRoot, binRelative);
-const { diffCommands } = require(path.join(cliRoot, 'lib/diff.js')) as {
-  diffCommands: DiffCommandRunner;
-};
 
 if (!['ios', 'android'].includes(platform)) {
   throw new Error(`Unsupported E2E_PLATFORM: ${platform}`);
@@ -98,41 +78,6 @@ function runPushy(args: string[], cwd: string) {
       `pushy ${args.join(' ')} failed with exit code ${result.status}`,
     );
   }
-}
-
-function ensureHdiffModule() {
-  const modulePath = path.join(cliRoot, 'node_modules/node-hdiffpatch');
-  if (!fs.existsSync(modulePath)) {
-    console.log('node-hdiffpatch not found, installing...');
-    const result = spawnSync(
-      'npm',
-      [
-        'install',
-        '--no-save',
-        '--package-lock=false',
-        '--legacy-peer-deps',
-        'node-hdiffpatch',
-      ],
-      {
-        cwd: cliRoot,
-        stdio: 'inherit',
-        env: process.env,
-      },
-    );
-
-    if (result.status !== 0) {
-      throw new Error(
-        `npm install node-hdiffpatch failed with exit code ${result.status}`,
-      );
-    }
-  }
-  if (!fs.existsSync(modulePath)) {
-    throw new Error(`Failed to install node-hdiffpatch under: ${cliRoot}`);
-  }
-  const hdiffModule = require(modulePath) as {
-    diff?: (...args: unknown[]) => unknown;
-  } & ((...args: unknown[]) => unknown);
-  return hdiffModule.diff || hdiffModule;
 }
 
 function prepareDir() {
@@ -171,16 +116,11 @@ async function main() {
   bundleTo('e2e/entry.v2.ts', v2);
   bundleTo('e2e/entry.v3.ts', v3);
 
-  const customDiff = ensureHdiffModule();
-
   console.log('Generating ppk diff...');
-  await diffCommands.hdiff({
-    args: [v1, v2],
-    options: {
-      output: ppkDiff,
-      customDiff,
-    },
-  });
+  runPushy(
+    ['hdiff', v1, v2, '--output', ppkDiff, '--no-interactive'],
+    projectRoot,
+  );
   console.log('Ppk diff generated.');
 
   if (platform === 'android') {
@@ -197,13 +137,17 @@ async function main() {
 
     fs.copyFileSync(apkPath, path.join(artifactsDir, LOCAL_UPDATE_FILES.apk));
     console.log('Generating package diff...');
-    await diffCommands.hdiffFromApk({
-      args: [apkPath, v3],
-      options: {
-        output: path.join(artifactsDir, LOCAL_UPDATE_FILES.packageDiff),
-        customDiff,
-      },
-    });
+    runPushy(
+      [
+        'hdiffFromApk',
+        apkPath,
+        v3,
+        '--output',
+        path.join(artifactsDir, LOCAL_UPDATE_FILES.packageDiff),
+        '--no-interactive',
+      ],
+      projectRoot,
+    );
     console.log('Package diff generated.');
   }
 
