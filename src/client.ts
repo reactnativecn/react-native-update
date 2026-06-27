@@ -520,7 +520,7 @@ export class Pushy {
           );
       }
     }
-    const maxRetries = this.options.maxRetries ?? 3;
+    const maxRetries = Math.max(0, Math.floor(this.options.maxRetries ?? 3));
     let succeeded = '';
     let lastError: any;
     const errorMessages: string[] = [];

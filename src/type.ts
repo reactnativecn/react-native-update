@@ -33,7 +33,7 @@ export interface ProgressData {
   hash: string;
   received: number;
   total: number;
-  /** Download progress percentage (0-100), computed as Math.floor(received / total * 100). Only populated in downloadUpdate callbacks. */
+  /** Download progress percentage (0-100), computed from received / total and clamped to range. Only populated in downloadUpdate callbacks. */
   progress?: number;
 }
 
