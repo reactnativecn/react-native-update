@@ -20,7 +20,9 @@ export const LOCAL_UPDATE_LABELS = {
 
 export const LOCAL_UPDATE_FILES = {
   full: 'v1.ppk',
+  ppkFull: 'v2.ppk',
   ppkDiff: 'v1-to-v2.ppk.patch',
+  packageFull: 'v3.ppk',
   packageDiff: 'base-to-v3.apk.patch',
   apk: 'app-release.apk',
 } as const;

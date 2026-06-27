@@ -28,6 +28,7 @@ import {
 } from './type';
 import {
   assertWeb,
+  computeProgress,
   DEFAULT_FETCH_TIMEOUT_MS,
   emptyObj,
   fetchWithTimeout,
@@ -491,13 +492,19 @@ export class Pushy {
     }
     const patchStartTime = Date.now();
     if (onDownloadProgress) {
+      const wrapProgress = (data: ProgressData) => {
+        onDownloadProgress({
+          ...data,
+          progress: computeProgress(data.received, data.total),
+        });
+      };
       // @ts-expect-error harmony not in existing platforms
       if (Platform.OS === 'harmony') {
         sharedState.progressHandlers[hash] = DeviceEventEmitter.addListener(
           'RCTPushyDownloadProgress',
-          progressData => {
+          (progressData: ProgressData) => {
             if (progressData.hash === hash) {
-              onDownloadProgress(progressData);
+              wrapProgress(progressData);
             }
           },
         );
@@ -505,54 +512,47 @@ export class Pushy {
         sharedState.progressHandlers[hash] =
           pushyNativeEventEmitter.addListener(
             'RCTPushyDownloadProgress',
-            progressData => {
+            (progressData: ProgressData) => {
               if (progressData.hash === hash) {
-                onDownloadProgress(progressData);
+                wrapProgress(progressData);
               }
             },
           );
       }
     }
+    const maxRetries = Math.max(0, Math.floor(this.options.maxRetries ?? 3));
     let succeeded = '';
-    this.report({
-      type: 'downloading',
-      data: {
-        newVersion: hash,
-      },
-    });
     let lastError: any;
     const errorMessages: string[] = [];
-    const diffUrl = await testUrls(joinUrls(paths, diff));
-    if (diffUrl && !__DEV__) {
-      log('downloading diff');
-      try {
-        await PushyModule.downloadPatchFromPpk({
-          updateUrl: diffUrl,
-          hash,
-          originHash: currentVersion,
-        });
-        succeeded = 'diff';
-      } catch (e: any) {
-        const errorMessage = this.t('error_diff_failed', {
-          message: e.message,
-        });
-        errorMessages.push(errorMessage);
-        lastError = Error(errorMessage);
-        log(errorMessage);
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      if (attempt > 0) {
+        const backoffMs = Math.min(1000 * 2 ** (attempt - 1), 10000);
+        log(`retry attempt ${attempt}/${maxRetries}, waiting ${backoffMs}ms`);
+        await new Promise(r => setTimeout(r, backoffMs));
+        errorMessages.length = 0;
+        lastError = undefined;
+        succeeded = '';
       }
-    }
-    if (!succeeded) {
-      const pdiffUrl = await testUrls(joinUrls(paths, pdiff));
-      if (pdiffUrl && !__DEV__) {
-        log('downloading pdiff');
+      this.report({
+        type: 'downloading',
+        data: {
+          newVersion: hash,
+          attempt,
+        },
+      });
+      const diffUrl = await testUrls(joinUrls(paths, diff));
+      if (diffUrl && !__DEV__) {
+        log('downloading diff');
         try {
-          await PushyModule.downloadPatchFromPackage({
-            updateUrl: pdiffUrl,
+          await PushyModule.downloadPatchFromPpk({
+            updateUrl: diffUrl,
             hash,
+            originHash: currentVersion,
           });
-          succeeded = 'pdiff';
+          succeeded = 'diff';
         } catch (e: any) {
-          const errorMessage = this.t('error_pdiff_failed', {
+          const errorMessage = this.t('error_diff_failed', {
             message: e.message,
           });
           errorMessages.push(errorMessage);
@@ -560,28 +560,51 @@ export class Pushy {
           log(errorMessage);
         }
       }
-    }
-    if (!succeeded) {
-      const fullUrl = await testUrls(joinUrls(paths, full));
-      if (fullUrl) {
-        log('downloading full patch');
-        try {
-          await PushyModule.downloadFullUpdate({
-            updateUrl: fullUrl,
-            hash,
-          });
+      if (!succeeded) {
+        const pdiffUrl = await testUrls(joinUrls(paths, pdiff));
+        if (pdiffUrl && !__DEV__) {
+          log('downloading pdiff');
+          try {
+            await PushyModule.downloadPatchFromPackage({
+              updateUrl: pdiffUrl,
+              hash,
+            });
+            succeeded = 'pdiff';
+          } catch (e: any) {
+            const errorMessage = this.t('error_pdiff_failed', {
+              message: e.message,
+            });
+            errorMessages.push(errorMessage);
+            lastError = Error(errorMessage);
+            log(errorMessage);
+          }
+        }
+      }
+      if (!succeeded) {
+        const fullUrl = await testUrls(joinUrls(paths, full));
+        if (fullUrl) {
+          log('downloading full patch');
+          try {
+            await PushyModule.downloadFullUpdate({
+              updateUrl: fullUrl,
+              hash,
+            });
+            succeeded = 'full';
+          } catch (e: any) {
+            const errorMessage = this.t('error_full_patch_failed', {
+              message: e.message,
+            });
+            errorMessages.push(errorMessage);
+            lastError = Error(errorMessage);
+            log(errorMessage);
+          }
+        } else if (__DEV__) {
+          log(this.t('dev_incremental_update_disabled'));
           succeeded = 'full';
-        } catch (e: any) {
-          const errorMessage = this.t('error_full_patch_failed', {
-            message: e.message,
-          });
-          errorMessages.push(errorMessage);
-          lastError = Error(errorMessage);
-          log(errorMessage);
         }
-      } else if (__DEV__) {
-        log(this.t('dev_incremental_update_disabled'));
-        succeeded = 'full';
+      }
+      if (succeeded) {
+        break;
       }
     }
     if (sharedState.progressHandlers[hash]) {

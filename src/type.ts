@@ -33,6 +33,8 @@ export interface ProgressData {
   hash: string;
   received: number;
   total: number;
+  /** Download progress percentage (0-100), computed from received / total and clamped to range. Only populated in downloadUpdate callbacks. */
+  progress?: number;
 }
 
 // 用于描述一次检查结束后的最终状态，便于业务侧感知成功、跳过或失败
@@ -119,6 +121,8 @@ export interface ClientOptions {
   ) => Promise<boolean | void> | boolean | void;
   onPackageExpired?: (info: CheckResult) => Promise<boolean> | boolean;
   overridePackageVersion?: string;
+  /** Maximum number of retry attempts for failed downloads (default: 3) */
+  maxRetries?: number;
 }
 
 export interface UpdateTestPayload {

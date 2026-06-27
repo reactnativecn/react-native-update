@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { afterEach, describe, expect, mock, test } from 'bun:test';
 
 const importFreshClient = (cacheKey: string) => import(`../client?${cacheKey}`);
 
@@ -18,6 +18,7 @@ const setupClientMocks = ({
   downloadPatchFromPpk = mock(() => Promise.resolve()),
   downloadPatchFromPackage = mock(() => Promise.resolve()),
   downloadFullUpdate = mock(() => Promise.resolve()),
+  addProgressListener = mock(() => ({ remove: mock(() => {}) })),
   restartApp = mock(() => Promise.resolve()),
 }: {
   isFirstTime?: boolean;
@@ -27,6 +28,7 @@ const setupClientMocks = ({
   downloadPatchFromPpk?: ReturnType<typeof mock>;
   downloadPatchFromPackage?: ReturnType<typeof mock>;
   downloadFullUpdate?: ReturnType<typeof mock>;
+  addProgressListener?: ReturnType<typeof mock>;
   restartApp?: ReturnType<typeof mock>;
 } = {}) => {
   (globalThis as any).__DEV__ = false;
@@ -69,7 +71,7 @@ const setupClientMocks = ({
     isRolledBack: false,
     packageVersion: '1.0.0',
     pushyNativeEventEmitter: {
-      addListener: mock(() => ({ remove: mock(() => {}) })),
+      addListener: addProgressListener,
     },
     rolledBackVersion: '',
     setLocalHashInfo: mock(() => {}),
@@ -362,5 +364,303 @@ describe('Pushy server config', () => {
 
     expect(calls).toEqual(['beforeReload', 'restartApp']);
     expect(restartApp).toHaveBeenCalled();
+  });
+});
+
+describe('downloadUpdate fallback chain', () => {
+  const realSetTimeout = globalThis.setTimeout;
+
+  afterEach(() => {
+    globalThis.setTimeout = realSetTimeout;
+  });
+
+  const setupDownloadMocks = ({
+    downloadPatchFromPpk = mock(() => Promise.resolve()),
+    downloadPatchFromPackage = mock(() => Promise.resolve()),
+    downloadFullUpdate = mock(() => Promise.resolve()),
+    addProgressListener = mock(() => ({ remove: mock(() => {}) })),
+  }: {
+    downloadPatchFromPpk?: ReturnType<typeof mock>;
+    downloadPatchFromPackage?: ReturnType<typeof mock>;
+    downloadFullUpdate?: ReturnType<typeof mock>;
+    addProgressListener?: ReturnType<typeof mock>;
+  } = {}) => {
+    setupClientMocks({
+      downloadPatchFromPpk,
+      downloadPatchFromPackage,
+      downloadFullUpdate,
+      addProgressListener,
+    });
+
+    // Override setTimeout to skip real backoff delays in retry tests
+    globalThis.setTimeout = ((fn: (...args: any[]) => void, _ms?: number) =>
+      realSetTimeout(fn, 0)) as unknown as typeof setTimeout;
+
+    // Mock testUrls to return urls directly (skip actual HEAD ping)
+    mock.module('../utils', () => ({
+      __esModule: true,
+      assertWeb: () => true,
+      computeProgress: (received: number, total: number) =>
+        total > 0
+          ? Math.min(100, Math.max(0, Math.floor((received / total) * 100)))
+          : 0,
+      DEFAULT_FETCH_TIMEOUT_MS: 5000,
+      emptyObj: {},
+      fetchWithTimeout: mock(() => Promise.resolve()),
+      info: mock(() => {}),
+      joinUrls: (paths: string[], fileName?: string) =>
+        fileName ? paths.map(p => `${p}/${fileName}`) : undefined,
+      log: mock(() => {}),
+      noop: () => {},
+      promiseAny: mock(() => Promise.resolve()),
+      testUrls: (urls?: string[]) =>
+        Promise.resolve(urls?.[0] || null),
+    }));
+
+    return { downloadPatchFromPpk, downloadPatchFromPackage, downloadFullUpdate };
+  };
+
+  const updateInfo = {
+    update: true as const,
+    hash: 'new-hash',
+    diff: 'diff.ppk',
+    pdiff: 'pdiff.ppk',
+    full: 'full.ppk',
+    paths: ['https://cdn.example.com'],
+    name: 'v2.0',
+    description: 'test update',
+  };
+
+  test('uses diff when available', async () => {
+    const { downloadPatchFromPpk } = setupDownloadMocks();
+    const { Pushy, sharedState } = await importFreshClient('dl-diff-ok');
+    sharedState.downloadedHash = undefined;
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    const hash = await client.downloadUpdate(updateInfo);
+
+    expect(hash).toBe('new-hash');
+    expect(downloadPatchFromPpk).toHaveBeenCalledTimes(1);
+  });
+
+  test('adds computed progress to download progress callbacks', async () => {
+    let progressListener:
+      | ((data: {
+          hash: string;
+          received: number;
+          total: number;
+        }) => void)
+      | undefined;
+    const addProgressListener = mock(
+      (_event: string, listener: typeof progressListener) => {
+        progressListener = listener;
+        return { remove: mock(() => {}) };
+      },
+    );
+    const onDownloadProgress = mock(() => {});
+    setupDownloadMocks({
+      addProgressListener,
+      downloadPatchFromPpk: mock(async () => {
+        progressListener?.({
+          hash: 'new-hash',
+          received: 1200,
+          total: 1000,
+        });
+      }),
+    });
+    const { Pushy, sharedState } = await importFreshClient('dl-progress');
+    sharedState.downloadedHash = undefined;
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    await client.downloadUpdate(updateInfo, onDownloadProgress);
+
+    expect(onDownloadProgress).toHaveBeenCalledWith({
+      hash: 'new-hash',
+      received: 1200,
+      total: 1000,
+      progress: 100,
+    });
+  });
+
+  test('falls back to pdiff when diff fails', async () => {
+    const { downloadPatchFromPpk, downloadPatchFromPackage } =
+      setupDownloadMocks({
+        downloadPatchFromPpk: mock(() => Promise.reject(Error('diff fail'))),
+      });
+    const { Pushy, sharedState } = await importFreshClient('dl-fallback-pdiff');
+    sharedState.downloadedHash = undefined;
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    const hash = await client.downloadUpdate(updateInfo);
+
+    expect(hash).toBe('new-hash');
+    expect(downloadPatchFromPpk).toHaveBeenCalledTimes(1);
+    expect(downloadPatchFromPackage).toHaveBeenCalledTimes(1);
+  });
+
+  test('falls back to full when diff and pdiff fail', async () => {
+    const { downloadPatchFromPpk, downloadPatchFromPackage, downloadFullUpdate } =
+      setupDownloadMocks({
+        downloadPatchFromPpk: mock(() => Promise.reject(Error('diff fail'))),
+        downloadPatchFromPackage: mock(() =>
+          Promise.reject(Error('pdiff fail')),
+        ),
+      });
+    const { Pushy, sharedState } = await importFreshClient('dl-fallback-full');
+    sharedState.downloadedHash = undefined;
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    const hash = await client.downloadUpdate(updateInfo);
+
+    expect(hash).toBe('new-hash');
+    expect(downloadPatchFromPpk).toHaveBeenCalledTimes(1);
+    expect(downloadPatchFromPackage).toHaveBeenCalledTimes(1);
+    expect(downloadFullUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  test('throws when all download methods fail', async () => {
+    setupDownloadMocks({
+      downloadPatchFromPpk: mock(() => Promise.reject(Error('diff fail'))),
+      downloadPatchFromPackage: mock(() => Promise.reject(Error('pdiff fail'))),
+      downloadFullUpdate: mock(() => Promise.reject(Error('full fail'))),
+    });
+    const { Pushy, sharedState } = await importFreshClient('dl-all-fail');
+    sharedState.downloadedHash = undefined;
+    const client = new Pushy({ appKey: 'demo-app', maxRetries: 0 });
+
+    await expect(client.downloadUpdate(updateInfo)).rejects.toThrow(
+      'error_full_patch_failed',
+    );
+  });
+
+  test('treats negative maxRetries as zero retries', async () => {
+    const { downloadFullUpdate } = setupDownloadMocks({
+      downloadPatchFromPpk: mock(() => Promise.reject(Error('diff fail'))),
+      downloadPatchFromPackage: mock(() => Promise.reject(Error('pdiff fail'))),
+      downloadFullUpdate: mock(() => Promise.reject(Error('full fail'))),
+    });
+    const { Pushy, sharedState } = await importFreshClient('dl-negative-retries');
+    sharedState.downloadedHash = undefined;
+    const client = new Pushy({ appKey: 'demo-app', maxRetries: -1 });
+
+    await expect(client.downloadUpdate(updateInfo)).rejects.toThrow(
+      'error_full_patch_failed',
+    );
+    expect(downloadFullUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  test('retries download when maxRetries is set', async () => {
+    let callCount = 0;
+    const { downloadFullUpdate } = setupDownloadMocks({
+      downloadPatchFromPpk: mock(() => Promise.reject(Error('diff fail'))),
+      downloadPatchFromPackage: mock(() => Promise.reject(Error('pdiff fail'))),
+      downloadFullUpdate: mock(() => {
+        callCount++;
+        if (callCount === 1) {
+          return Promise.reject(Error('full fail attempt 1'));
+        }
+        return Promise.resolve();
+      }),
+    });
+    const { Pushy, sharedState } = await importFreshClient('dl-retry-ok');
+    sharedState.downloadedHash = undefined;
+    const client = new Pushy({ appKey: 'demo-app', maxRetries: 2 });
+
+    const hash = await client.downloadUpdate(updateInfo);
+
+    expect(hash).toBe('new-hash');
+    expect(downloadFullUpdate).toHaveBeenCalledTimes(2);
+  });
+
+  test('defaults to 3 retries when maxRetries is not set', async () => {
+    const { downloadFullUpdate } = setupDownloadMocks({
+      downloadPatchFromPpk: mock(() => Promise.reject(Error('diff fail'))),
+      downloadPatchFromPackage: mock(() => Promise.reject(Error('pdiff fail'))),
+      downloadFullUpdate: mock(() => Promise.reject(Error('full fail'))),
+    });
+    const { Pushy, sharedState } = await importFreshClient('dl-default-retries');
+    sharedState.downloadedHash = undefined;
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    await expect(client.downloadUpdate(updateInfo)).rejects.toThrow();
+    // 1 initial + 3 retries = 4 calls
+    expect(downloadFullUpdate).toHaveBeenCalledTimes(4);
+  });
+
+  test('exhausts retries and throws on persistent failure', async () => {
+    setupDownloadMocks({
+      downloadPatchFromPpk: mock(() => Promise.reject(Error('diff fail'))),
+      downloadPatchFromPackage: mock(() => Promise.reject(Error('pdiff fail'))),
+      downloadFullUpdate: mock(() => Promise.reject(Error('full fail'))),
+    });
+    const { Pushy, sharedState } = await importFreshClient('dl-retry-exhaust');
+    sharedState.downloadedHash = undefined;
+    const client = new Pushy({ appKey: 'demo-app', maxRetries: 2 });
+
+    await expect(client.downloadUpdate(updateInfo)).rejects.toThrow(
+      'error_full_patch_failed',
+    );
+  });
+});
+
+describe('Cresc class', () => {
+  test('uses Cresc server endpoints', async () => {
+    setupClientMocks();
+
+    const { Cresc } = await importFreshClient('cresc-endpoints');
+    const client = new Cresc({ appKey: 'demo-app' });
+
+    expect(client.getConfiguredCheckEndpoints()).toEqual([
+      'https://api.cresc.dev',
+      'https://api.cresc.app',
+    ]);
+  });
+
+  test('defaults locale to en for Cresc', async () => {
+    setupClientMocks();
+    // Override i18n mock AFTER setupClientMocks to avoid being overwritten
+    const setLocale = mock(() => {});
+    mock.module('../i18n', () => ({
+      default: {
+        t: (key: string) => key,
+        setLocale,
+      },
+    }));
+
+    const { Cresc } = await importFreshClient('cresc-locale');
+    const client = new Cresc({ appKey: 'demo-app' });
+
+    expect(client.clientType).toBe('Cresc');
+    expect(setLocale).toHaveBeenCalledWith('en');
+  });
+
+  test('Cresc is instance of Pushy', async () => {
+    setupClientMocks();
+
+    const { Cresc, Pushy } = await importFreshClient('cresc-instanceof');
+    const client = new Cresc({ appKey: 'demo-app' });
+
+    expect(client).toBeInstanceOf(Pushy);
+    expect(client).toBeInstanceOf(Cresc);
+  });
+
+  test('Cresc custom server overrides default endpoints', async () => {
+    setupClientMocks();
+
+    const { Cresc } = await importFreshClient('cresc-custom-server');
+    const client = new Cresc({
+      appKey: 'demo-app',
+      server: {
+        main: ['https://custom.example.com'],
+        queryUrls: ['https://q.example.com'],
+      },
+    });
+
+    expect(client.getConfiguredCheckEndpoints()).toEqual([
+      'https://custom.example.com',
+    ]);
+    expect(client.options.server?.queryUrls).toEqual([
+      'https://q.example.com',
+    ]);
   });
 });
