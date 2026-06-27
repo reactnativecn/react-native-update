@@ -85,6 +85,14 @@ describe('computeProgress', () => {
     expect(computeProgress(1000, 1000)).toBe(100);
   });
 
+  test('caps progress at 100 when received exceeds total', () => {
+    expect(computeProgress(1200, 1000)).toBe(100);
+  });
+
+  test('floors progress at 0 when received is negative', () => {
+    expect(computeProgress(-100, 1000)).toBe(0);
+  });
+
   test('returns 50 for half progress', () => {
     expect(computeProgress(500, 1000)).toBe(50);
   });
