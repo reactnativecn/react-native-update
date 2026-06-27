@@ -66,7 +66,7 @@ function runPushy(args: string[], cwd: string) {
   }
   const result = spawnSync('node', [cliEntry, ...args], {
     cwd,
-    stdio: 'pipe',
+    stdio: 'inherit',
     env: {
       ...process.env,
       NODE_PATH: nodePath.join(path.delimiter),
@@ -77,12 +77,9 @@ function runPushy(args: string[], cwd: string) {
     timeout: 120_000,
   });
 
-  const stdout = result.stdout?.toString() ?? '';
-  const stderr = result.stderr?.toString() ?? '';
-  if (stdout) console.log(`[pushy ${args[0]}] stdout:`, stdout.trim());
-  if (stderr) console.log(`[pushy ${args[0]}] stderr:`, stderr.trim());
-  console.log(`[pushy ${args[0]}] exit code: ${result.status}, signal: ${result.signal}`);
-
+  if (result.error) {
+    throw result.error;
+  }
   if (result.status !== 0) {
     throw new Error(
       `pushy ${args.join(' ')} failed with exit code ${result.status}`,
@@ -126,32 +123,6 @@ function prepareDir() {
   fs.mkdirSync(artifactsDir, { recursive: true });
 }
 
-function runHdiffWrapper(mode: 'ppk' | 'apk', oldFile: string, newFile: string, outputFile: string) {
-  // Use projectRoot (source dir) not __dirname (which may be .ts-build/)
-  const wrapperScript = path.join(projectRoot, 'scripts', 'run-hdiff-wrapper.js');
-  console.log(`[runHdiffWrapper] script=${wrapperScript} cliRoot=${cliRoot} mode=${mode}`);
-  console.log(`[runHdiffWrapper] args: [${cliRoot}, ${mode}, ${oldFile}, ${newFile}, ${outputFile}]`);
-  const result = spawnSync(
-    process.execPath,
-    [wrapperScript, cliRoot, mode, oldFile, newFile, outputFile],
-    {
-      cwd: projectRoot,
-      stdio: 'inherit',
-      env: {
-        ...process.env,
-        NODE_PATH: [
-          path.join(projectRoot, 'node_modules'),
-          path.join(cliRoot, 'node_modules'),
-        ].join(path.delimiter),
-      },
-    },
-  );
-
-  if (result.status !== 0) {
-    throw new Error(`${mode} wrapper failed with exit code ${result.status}`);
-  }
-}
-
 function bundleTo(entryFile: string, outputFile: string) {
   runPushy(
     [
@@ -171,6 +142,35 @@ function bundleTo(entryFile: string, outputFile: string) {
   );
 }
 
+function verifyGeneratedFile(label: string, filePath: string) {
+  if (!fs.existsSync(filePath)) {
+    throw new Error(`${label} file not found after generation: ${filePath}`);
+  }
+  console.log(
+    `Verified ${label}: ${filePath} (${fs.statSync(filePath).size} bytes)`,
+  );
+}
+
+function generatePpkDiff(origin: string, next: string, output: string) {
+  runPushy(
+    ['hdiff', origin, next, '--output', output, '--no-interactive'],
+    projectRoot,
+  );
+  verifyGeneratedFile('ppk diff', output);
+}
+
+function generateAndroidPackageDiff(
+  apkPath: string,
+  next: string,
+  output: string,
+) {
+  runPushy(
+    ['hdiffFromApk', apkPath, next, '--output', output, '--no-interactive'],
+    projectRoot,
+  );
+  verifyGeneratedFile('package diff', output);
+}
+
 async function main() {
   prepareDir();
 
@@ -186,11 +186,7 @@ async function main() {
   ensureHdiffModule();
 
   console.log('Generating ppk diff...');
-  runHdiffWrapper('ppk', v1, v2, ppkDiff);
-  if (!fs.existsSync(ppkDiff)) {
-    throw new Error(`ppk diff file not found after generation: ${ppkDiff}`);
-  }
-  console.log(`Verified ppk diff: ${ppkDiff} (${fs.statSync(ppkDiff).size} bytes)`);
+  generatePpkDiff(v1, v2, ppkDiff);
 
   if (platform === 'android') {
     const apkPath = path.join(
@@ -206,17 +202,15 @@ async function main() {
 
     fs.copyFileSync(apkPath, path.join(artifactsDir, LOCAL_UPDATE_FILES.apk));
     console.log('Generating package diff...');
-    runHdiffWrapper(
-      'apk',
+    const packageDiffPath = path.join(
+      artifactsDir,
+      LOCAL_UPDATE_FILES.packageDiff,
+    );
+    generateAndroidPackageDiff(
       apkPath,
       v3,
-      path.join(artifactsDir, LOCAL_UPDATE_FILES.packageDiff),
+      packageDiffPath,
     );
-    const packageDiffPath = path.join(artifactsDir, LOCAL_UPDATE_FILES.packageDiff);
-    if (!fs.existsSync(packageDiffPath)) {
-      throw new Error(`Package diff file not found after generation: ${packageDiffPath}`);
-    }
-    console.log(`Verified package diff: ${packageDiffPath} (${fs.statSync(packageDiffPath).size} bytes)`);
   }
 
   const manifestPath = path.join(artifactsDir, 'manifest.json');

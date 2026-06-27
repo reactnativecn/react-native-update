@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { afterEach, describe, expect, mock, test } from 'bun:test';
 
 const importFreshClient = (cacheKey: string) => import(`../client?${cacheKey}`);
 
@@ -366,6 +366,12 @@ describe('Pushy server config', () => {
 });
 
 describe('downloadUpdate fallback chain', () => {
+  const realSetTimeout = globalThis.setTimeout;
+
+  afterEach(() => {
+    globalThis.setTimeout = realSetTimeout;
+  });
+
   const setupDownloadMocks = ({
     downloadPatchFromPpk = mock(() => Promise.resolve()),
     downloadPatchFromPackage = mock(() => Promise.resolve()),
@@ -382,7 +388,6 @@ describe('downloadUpdate fallback chain', () => {
     });
 
     // Override setTimeout to skip real backoff delays in retry tests
-    const realSetTimeout = globalThis.setTimeout.bind(globalThis);
     globalThis.setTimeout = ((fn: (...args: any[]) => void, _ms?: number) =>
       realSetTimeout(fn, 0)) as unknown as typeof setTimeout;
 
