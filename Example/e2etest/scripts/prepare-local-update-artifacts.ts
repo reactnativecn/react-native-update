@@ -127,7 +127,8 @@ function prepareDir() {
 }
 
 function runHdiffWrapper(mode: 'ppk' | 'apk', oldFile: string, newFile: string, outputFile: string) {
-  const wrapperScript = path.join(__dirname, 'run-hdiff-wrapper.js');
+  // Use projectRoot (source dir) not __dirname (which may be .ts-build/)
+  const wrapperScript = path.join(projectRoot, 'scripts', 'run-hdiff-wrapper.js');
   console.log(`[runHdiffWrapper] script=${wrapperScript} cliRoot=${cliRoot} mode=${mode}`);
   console.log(`[runHdiffWrapper] args: [${cliRoot}, ${mode}, ${oldFile}, ${newFile}, ${outputFile}]`);
   const result = spawnSync(
