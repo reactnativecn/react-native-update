@@ -126,6 +126,29 @@ function prepareDir() {
   fs.mkdirSync(artifactsDir, { recursive: true });
 }
 
+function runHdiffWrapper(command: string, origin: string, next: string, output: string) {
+  const wrapperScript = path.join(__dirname, 'run-hdiff-wrapper.js');
+  const result = spawnSync(
+    process.execPath,
+    [wrapperScript, cliRoot, command, origin, next, output],
+    {
+      cwd: projectRoot,
+      stdio: 'inherit',
+      env: {
+        ...process.env,
+        NODE_PATH: [
+          path.join(projectRoot, 'node_modules'),
+          path.join(cliRoot, 'node_modules'),
+        ].join(path.delimiter),
+      },
+    },
+  );
+
+  if (result.status !== 0) {
+    throw new Error(`${command} wrapper failed with exit code ${result.status}`);
+  }
+}
+
 function bundleTo(entryFile: string, outputFile: string) {
   runPushy(
     [
@@ -160,10 +183,7 @@ async function main() {
   ensureHdiffModule();
 
   console.log('Generating ppk diff...');
-  runPushy(
-    ['hdiff', v1, v2, '--output', ppkDiff, '--no-interactive'],
-    projectRoot,
-  );
+  runHdiffWrapper('hdiff', v1, v2, ppkDiff);
   if (!fs.existsSync(ppkDiff)) {
     throw new Error(`ppk diff file not found after generation: ${ppkDiff}`);
   }
@@ -183,16 +203,11 @@ async function main() {
 
     fs.copyFileSync(apkPath, path.join(artifactsDir, LOCAL_UPDATE_FILES.apk));
     console.log('Generating package diff...');
-    runPushy(
-      [
-        'hdiffFromApk',
-        apkPath,
-        v3,
-        '--output',
-        path.join(artifactsDir, LOCAL_UPDATE_FILES.packageDiff),
-        '--no-interactive',
-      ],
-      projectRoot,
+    runHdiffWrapper(
+      'hdiffFromApk',
+      apkPath,
+      v3,
+      path.join(artifactsDir, LOCAL_UPDATE_FILES.packageDiff),
     );
     const packageDiffPath = path.join(artifactsDir, LOCAL_UPDATE_FILES.packageDiff);
     if (!fs.existsSync(packageDiffPath)) {
