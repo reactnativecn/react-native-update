@@ -159,32 +159,6 @@ function bundleTo(entryFile: string, outputFile: string) {
   );
 }
 
-async function generatePpkDiff(origin: string, next: string, output: string) {
-  const customDiff = ensureHdiffModule();
-  await diffCommands.hdiff({
-    args: [origin, next],
-    options: {
-      output,
-      customDiff,
-    },
-  });
-}
-
-async function generateAndroidPackageDiff(
-  apkPath: string,
-  next: string,
-  output: string,
-) {
-  const customDiff = ensureHdiffModule();
-  await diffCommands.hdiffFromApk({
-    args: [apkPath, next],
-    options: {
-      output,
-      customDiff,
-    },
-  });
-}
-
 async function main() {
   prepareDir();
 
@@ -196,7 +170,18 @@ async function main() {
   bundleTo('e2e/entry.v1.ts', v1);
   bundleTo('e2e/entry.v2.ts', v2);
   bundleTo('e2e/entry.v3.ts', v3);
-  await generatePpkDiff(v1, v2, ppkDiff);
+
+  const customDiff = ensureHdiffModule();
+
+  console.log('Generating ppk diff...');
+  await diffCommands.hdiff({
+    args: [v1, v2],
+    options: {
+      output: ppkDiff,
+      customDiff,
+    },
+  });
+  console.log('Ppk diff generated.');
 
   if (platform === 'android') {
     const apkPath = path.join(
@@ -211,15 +196,20 @@ async function main() {
     }
 
     fs.copyFileSync(apkPath, path.join(artifactsDir, LOCAL_UPDATE_FILES.apk));
-    await generateAndroidPackageDiff(
-      apkPath,
-      v3,
-      path.join(artifactsDir, LOCAL_UPDATE_FILES.packageDiff),
-    );
+    console.log('Generating package diff...');
+    await diffCommands.hdiffFromApk({
+      args: [apkPath, v3],
+      options: {
+        output: path.join(artifactsDir, LOCAL_UPDATE_FILES.packageDiff),
+        customDiff,
+      },
+    });
+    console.log('Package diff generated.');
   }
 
+  const manifestPath = path.join(artifactsDir, 'manifest.json');
   fs.writeFileSync(
-    path.join(artifactsDir, 'manifest.json'),
+    manifestPath,
     JSON.stringify(
       {
         platform,
@@ -232,9 +222,15 @@ async function main() {
       2,
     ),
   );
+  console.log(`Manifest written to ${manifestPath}`);
 }
 
-main().catch(error => {
-  console.error(error);
-  process.exit(1);
-});
+main()
+  .then(() => {
+    console.log('prepare-local-update-artifacts completed successfully.');
+  })
+  .catch(error => {
+    console.error('prepare-local-update-artifacts failed:');
+    console.error(error);
+    process.exit(1);
+  });
