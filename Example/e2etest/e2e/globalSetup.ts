@@ -93,6 +93,18 @@ function ensurePreparedArtifacts(platform: string) {
   }
 }
 
+function usesFullFallbackArtifacts(platform: string) {
+  const manifestPath = path.join(artifactsRoot, platform, 'manifest.json');
+  try {
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as {
+      fullFallback?: unknown;
+    };
+    return manifest.fullFallback === true;
+  } catch {
+    return false;
+  }
+}
+
 function startServer() {
   const serverScript = path.join(projectRoot, 'scripts/local-e2e-server.ts');
   fs.mkdirSync(artifactsRoot, { recursive: true });
@@ -202,11 +214,16 @@ async function warmServer(platform: 'ios' | 'android') {
     'Local artifacts checkUpdate route',
   );
 
+  const fullFallback = usesFullFallbackArtifacts(platform);
   const artifactFiles = [
     LOCAL_UPDATE_FILES.full,
     LOCAL_UPDATE_FILES.ppkDiff,
+    ...(fullFallback ? [LOCAL_UPDATE_FILES.ppkFull] : []),
     ...(platform === 'android'
       ? [LOCAL_UPDATE_FILES.apk, LOCAL_UPDATE_FILES.packageDiff]
+      : []),
+    ...(platform === 'android' && fullFallback
+      ? [LOCAL_UPDATE_FILES.packageFull]
       : []),
   ];
 

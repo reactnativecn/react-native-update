@@ -29,6 +29,18 @@ const contentTypes: Record<string, string> = {
   '.apk': 'application/vnd.android.package-archive',
 };
 
+function usesFullFallback(platform: string) {
+  const manifestPath = path.join(artifactsRoot, platform, 'manifest.json');
+  try {
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as {
+      fullFallback?: unknown;
+    };
+    return manifest.fullFallback === true;
+  } catch {
+    return false;
+  }
+}
+
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -57,6 +69,7 @@ function buildUpdateResponse(
   origin: string,
 ) {
   const assetBasePath = `${origin}/artifacts/${platform}`;
+  const fullFallback = usesFullFallback(platform);
 
   if (!currentHash) {
     return {
@@ -79,6 +92,7 @@ function buildUpdateResponse(
       metaInfo: JSON.stringify({ stage: 'diff', platform }),
       paths: [assetBasePath],
       diff: LOCAL_UPDATE_FILES.ppkDiff,
+      ...(fullFallback ? { full: LOCAL_UPDATE_FILES.ppkFull } : {}),
     };
   }
 
@@ -91,6 +105,7 @@ function buildUpdateResponse(
       metaInfo: JSON.stringify({ stage: 'pdiff', platform }),
       paths: [assetBasePath],
       pdiff: LOCAL_UPDATE_FILES.packageDiff,
+      ...(fullFallback ? { full: LOCAL_UPDATE_FILES.packageFull } : {}),
     };
   }
 

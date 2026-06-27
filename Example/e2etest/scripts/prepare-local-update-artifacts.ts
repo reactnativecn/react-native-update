@@ -35,6 +35,9 @@ const artifactsDir = path.join(artifactsRoot, platform);
 const diffTimeoutMs = 5 * 60_000;
 const localRegistry =
   process.env.PUSHY_REGISTRY || process.env.RNU_API || 'http://127.0.0.1:65535';
+const useFullFallbackArtifacts =
+  process.env.RNU_E2E_FULL_FALLBACK === 'true' ||
+  (platform === 'android' && process.platform === 'linux');
 
 function resolveCliRoot() {
   const candidates = [
@@ -259,6 +262,18 @@ function verifyGeneratedFile(label: string, filePath: string) {
   );
 }
 
+function writeFallbackPatch(label: string, filePath: string) {
+  fs.writeFileSync(
+    filePath,
+    [
+      `Invalid ${label} placeholder.`,
+      'The local e2e server advertises a full package fallback for this artifact.',
+      '',
+    ].join('\n'),
+  );
+  verifyGeneratedFile(`${label} fallback`, filePath);
+}
+
 async function keepProcessAlive<T>(
   label: string,
   promise: Promise<T>,
@@ -331,18 +346,13 @@ async function main() {
   prepareDir();
 
   const v1 = path.join(artifactsDir, LOCAL_UPDATE_FILES.full);
-  const v2 = path.join(artifactsDir, 'v2.ppk');
-  const v3 = path.join(artifactsDir, 'v3.ppk');
+  const v2 = path.join(artifactsDir, LOCAL_UPDATE_FILES.ppkFull);
+  const v3 = path.join(artifactsDir, LOCAL_UPDATE_FILES.packageFull);
   const ppkDiff = path.join(artifactsDir, LOCAL_UPDATE_FILES.ppkDiff);
 
   bundleTo('e2e/entry.v1.ts', v1);
   bundleTo('e2e/entry.v2.ts', v2);
   bundleTo('e2e/entry.v3.ts', v3);
-
-  const customDiff = ensureHdiffModule();
-
-  console.log('Generating ppk diff...');
-  await generatePpkDiff(v1, v2, ppkDiff, customDiff);
 
   if (platform === 'android') {
     const apkPath = path.join(
@@ -357,17 +367,36 @@ async function main() {
     }
 
     fs.copyFileSync(apkPath, path.join(artifactsDir, LOCAL_UPDATE_FILES.apk));
-    console.log('Generating package diff...');
     const packageDiffPath = path.join(
       artifactsDir,
       LOCAL_UPDATE_FILES.packageDiff,
     );
-    await generateAndroidPackageDiff(
-      apkPath,
-      v3,
-      packageDiffPath,
-      customDiff,
-    );
+
+    if (useFullFallbackArtifacts) {
+      console.log(
+        'Using full package fallback artifacts for Android on Linux.',
+      );
+      writeFallbackPatch('ppk diff', ppkDiff);
+      writeFallbackPatch('package diff', packageDiffPath);
+    } else {
+      const customDiff = ensureHdiffModule();
+
+      console.log('Generating ppk diff...');
+      await generatePpkDiff(v1, v2, ppkDiff, customDiff);
+
+      console.log('Generating package diff...');
+      await generateAndroidPackageDiff(
+        apkPath,
+        v3,
+        packageDiffPath,
+        customDiff,
+      );
+    }
+  } else {
+    const customDiff = ensureHdiffModule();
+
+    console.log('Generating ppk diff...');
+    await generatePpkDiff(v1, v2, ppkDiff, customDiff);
   }
 
   const manifestPath = path.join(artifactsDir, 'manifest.json');
@@ -380,6 +409,7 @@ async function main() {
         hashes: LOCAL_UPDATE_HASHES,
         labels: LOCAL_UPDATE_LABELS,
         files: LOCAL_UPDATE_FILES,
+        fullFallback: useFullFallbackArtifacts,
       },
       null,
       2,
