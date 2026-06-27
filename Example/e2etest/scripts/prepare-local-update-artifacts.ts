@@ -58,15 +58,18 @@ if (!fs.existsSync(cliEntry)) {
 }
 
 function runPushy(args: string[], cwd: string) {
-  const nodePath = path.join(cliRoot, 'node_modules');
+  const cliNodeModules = path.join(cliRoot, 'node_modules');
+  const projectNodeModules = path.join(projectRoot, 'node_modules');
+  const nodePath = [projectNodeModules, cliNodeModules];
+  if (process.env.NODE_PATH) {
+    nodePath.push(process.env.NODE_PATH);
+  }
   const result = spawnSync('node', [cliEntry, ...args], {
     cwd,
     stdio: 'inherit',
     env: {
       ...process.env,
-      NODE_PATH: process.env.NODE_PATH
-        ? `${nodePath}${path.delimiter}${process.env.NODE_PATH}`
-        : nodePath,
+      NODE_PATH: nodePath.join(path.delimiter),
       NO_INTERACTIVE: 'true',
       PUSHY_REGISTRY: localRegistry,
       RNU_API: localRegistry,
