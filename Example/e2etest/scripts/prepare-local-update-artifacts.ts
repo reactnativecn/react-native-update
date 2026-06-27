@@ -66,7 +66,7 @@ function runPushy(args: string[], cwd: string) {
   }
   const result = spawnSync('node', [cliEntry, ...args], {
     cwd,
-    stdio: 'inherit',
+    stdio: 'pipe',
     env: {
       ...process.env,
       NODE_PATH: nodePath.join(path.delimiter),
@@ -74,7 +74,14 @@ function runPushy(args: string[], cwd: string) {
       PUSHY_REGISTRY: localRegistry,
       RNU_API: localRegistry,
     },
+    timeout: 120_000,
   });
+
+  const stdout = result.stdout?.toString() ?? '';
+  const stderr = result.stderr?.toString() ?? '';
+  if (stdout) console.log(`[pushy ${args[0]}] stdout:`, stdout.trim());
+  if (stderr) console.log(`[pushy ${args[0]}] stderr:`, stderr.trim());
+  console.log(`[pushy ${args[0]}] exit code: ${result.status}, signal: ${result.signal}`);
 
   if (result.status !== 0) {
     throw new Error(
