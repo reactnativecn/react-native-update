@@ -97,10 +97,13 @@ function startServer() {
   const serverScript = path.join(projectRoot, 'scripts/local-e2e-server.ts');
   fs.mkdirSync(artifactsRoot, { recursive: true });
 
+  const logFile = path.join(artifactsRoot, '.server.log');
+  const logFd = fs.openSync(logFile, 'w');
+
   const child = spawn('bun', [serverScript], {
     cwd: projectRoot,
     detached: true,
-    stdio: 'ignore',
+    stdio: ['ignore', logFd, logFd],
     env: {
       ...process.env,
       E2E_ASSET_PORT: String(LOCAL_UPDATE_PORT),
@@ -108,6 +111,7 @@ function startServer() {
   });
   child.unref();
   fs.writeFileSync(pidFile, String(child.pid));
+  // Keep logFd open for the server lifetime — it will be cleaned up on process exit.
 }
 
 function waitForServer(timeoutMs = 30000) {
@@ -235,6 +239,27 @@ async function globalSetup() {
   }
   startServer();
   await waitForServer();
+
+  // Diagnostic: list artifacts via debug endpoint and local filesystem
+  const origin = `http://127.0.0.1:${LOCAL_UPDATE_PORT}`;
+  try {
+    const debugRes = await fetch(`${origin}/debug/artifacts`);
+    if (debugRes.ok) {
+      console.log('[globalSetup] Server artifacts:', await debugRes.text());
+    } else {
+      console.log('[globalSetup] Debug endpoint returned:', debugRes.status);
+    }
+  } catch (e) {
+    console.log('[globalSetup] Debug endpoint error:', e);
+  }
+  const localArtifactsDir = path.join(artifactsRoot, platform);
+  if (fs.existsSync(localArtifactsDir)) {
+    const files = fs.readdirSync(localArtifactsDir);
+    console.log(`[globalSetup] Local artifacts dir (${localArtifactsDir}):`, files);
+  } else {
+    console.log(`[globalSetup] Local artifacts dir MISSING: ${localArtifactsDir}`);
+  }
+
   await warmServer(platform as 'ios' | 'android');
   await detoxGlobalSetup();
 }

@@ -154,7 +154,10 @@ async function main() {
     ['hdiff', v1, v2, '--output', ppkDiff, '--no-interactive'],
     projectRoot,
   );
-  console.log('Ppk diff generated.');
+  if (!fs.existsSync(ppkDiff)) {
+    throw new Error(`ppk diff file not found after generation: ${ppkDiff}`);
+  }
+  console.log(`Verified ppk diff: ${ppkDiff} (${fs.statSync(ppkDiff).size} bytes)`);
 
   if (platform === 'android') {
     const apkPath = path.join(
@@ -181,7 +184,11 @@ async function main() {
       ],
       projectRoot,
     );
-    console.log('Package diff generated.');
+    const packageDiffPath = path.join(artifactsDir, LOCAL_UPDATE_FILES.packageDiff);
+    if (!fs.existsSync(packageDiffPath)) {
+      throw new Error(`Package diff file not found after generation: ${packageDiffPath}`);
+    }
+    console.log(`Verified package diff: ${packageDiffPath} (${fs.statSync(packageDiffPath).size} bytes)`);
   }
 
   const manifestPath = path.join(artifactsDir, 'manifest.json');

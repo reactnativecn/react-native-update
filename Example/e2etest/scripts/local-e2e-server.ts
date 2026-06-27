@@ -140,6 +140,9 @@ const server = Bun.serve({
         !fs.existsSync(filePath) ||
         fs.statSync(filePath).isDirectory()
       ) {
+        console.error(
+          `[404] ${url.pathname} -> ${filePath} (exists: ${filePath ? fs.existsSync(filePath) : 'null'})`,
+        );
         return new Response('not found', { status: 404 });
       }
 
@@ -153,6 +156,22 @@ const server = Bun.serve({
           'Content-Length': String(file.size),
           'Cache-Control': 'no-store',
         },
+      });
+    }
+
+    if (url.pathname === '/debug/artifacts') {
+      const entries = fs.readdirSync(artifactsRoot, { recursive: true });
+      const listing = entries.map(e => {
+        const fullPath = path.join(artifactsRoot, String(e));
+        try {
+          const stat = fs.statSync(fullPath);
+          return `${e} (${stat.size} bytes, ${stat.isDirectory() ? 'dir' : 'file'})`;
+        } catch {
+          return `${e} (stat failed)`;
+        }
+      });
+      return new Response(JSON.stringify({ artifactsRoot, entries: listing }, null, 2), {
+        headers: { 'Content-Type': 'application/json' },
       });
     }
 
