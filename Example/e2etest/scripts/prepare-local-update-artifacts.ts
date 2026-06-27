@@ -32,6 +32,7 @@ const projectRoot = process.cwd();
 const platform = process.env.E2E_PLATFORM || 'ios';
 const artifactsRoot = path.join(projectRoot, '.e2e-artifacts');
 const artifactsDir = path.join(artifactsRoot, platform);
+const diffTimeoutMs = 5 * 60_000;
 const localRegistry =
   process.env.PUSHY_REGISTRY || process.env.RNU_API || 'http://127.0.0.1:65535';
 
@@ -178,6 +179,7 @@ function prepareDir() {
 }
 
 function bundleTo(entryFile: string, outputFile: string) {
+  console.log(`Bundling ${entryFile} -> ${outputFile}`);
   runPushy(
     [
       'bundle',
@@ -194,6 +196,7 @@ function bundleTo(entryFile: string, outputFile: string) {
     ],
     projectRoot,
   );
+  verifyGeneratedFile(`bundle ${entryFile}`, outputFile);
 }
 
 function verifyGeneratedFile(label: string, filePath: string) {
@@ -205,12 +208,25 @@ function verifyGeneratedFile(label: string, filePath: string) {
   );
 }
 
-async function keepProcessAlive<T>(promise: Promise<T>) {
+async function keepProcessAlive<T>(
+  label: string,
+  promise: Promise<T>,
+  timeoutMs = diffTimeoutMs,
+) {
   const timer = setInterval(() => {}, 1000);
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
   try {
-    return await promise;
+    return await Promise.race([promise, timeoutPromise]);
   } finally {
     clearInterval(timer);
+    if (timeout) {
+      clearTimeout(timeout);
+    }
   }
 }
 
@@ -220,7 +236,11 @@ async function generatePpkDiff(
   output: string,
   customDiff: (oldSource?: Buffer, newSource?: Buffer) => Buffer,
 ) {
+  console.log(
+    `Running hdiff ppk: ${origin} -> ${next} (${fs.statSync(origin).size} -> ${fs.statSync(next).size} bytes)`,
+  );
   await keepProcessAlive(
+    'ppk diff',
     diffCommands.hdiff({
       args: [origin, next],
       options: {
@@ -239,7 +259,11 @@ async function generateAndroidPackageDiff(
   output: string,
   customDiff: (oldSource?: Buffer, newSource?: Buffer) => Buffer,
 ) {
+  console.log(
+    `Running hdiffFromApk: ${apkPath} -> ${next} (${fs.statSync(apkPath).size} -> ${fs.statSync(next).size} bytes)`,
+  );
   await keepProcessAlive(
+    'package diff',
     diffCommands.hdiffFromApk({
       args: [apkPath, next],
       options: {
