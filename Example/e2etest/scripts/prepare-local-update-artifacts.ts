@@ -155,61 +155,6 @@ function installHdiffModule() {
   }
 }
 
-function createHdiffProcessDiff(modulePath: string) {
-  const hdiffCli = path.join(modulePath, 'bin/hdiffpatch.js');
-  if (!fs.existsSync(hdiffCli)) {
-    throw new Error(`node-hdiffpatch CLI not found: ${hdiffCli}`);
-  }
-
-  return (oldSource?: Buffer, newSource?: Buffer) => {
-    if (!oldSource || !newSource) {
-      throw new Error('node-hdiffpatch diff requires both source buffers.');
-    }
-
-    const tempDir = fs.mkdtempSync(path.join(artifactsRoot, 'hdiff-'));
-    const oldPath = path.join(tempDir, 'old.bin');
-    const newPath = path.join(tempDir, 'new.bin');
-    const patchPath = path.join(tempDir, 'patch.bin');
-
-    try {
-      fs.writeFileSync(oldPath, oldSource);
-      fs.writeFileSync(newPath, newSource);
-
-      const result = spawnSync(
-        'node',
-        [hdiffCli, 'diff', oldPath, newPath, patchPath],
-        {
-          cwd: cliRoot,
-          encoding: 'utf8',
-          env: process.env,
-          timeout: diffTimeoutMs,
-        },
-      );
-      if (result.error) {
-        throw result.error;
-      }
-      if (result.status !== 0) {
-        throw new Error(
-          [
-            `node-hdiffpatch diff failed with exit code ${result.status}`,
-            result.stdout,
-            result.stderr,
-          ]
-            .filter(Boolean)
-            .join('\n'),
-        );
-      }
-      if (!fs.existsSync(patchPath)) {
-        throw new Error(`node-hdiffpatch did not create patch: ${patchPath}`);
-      }
-
-      return fs.readFileSync(patchPath);
-    } finally {
-      fs.rmSync(tempDir, { recursive: true, force: true });
-    }
-  };
-}
-
 function ensureHdiffModule() {
   const modulePath = path.join(cliRoot, 'node_modules/node-hdiffpatch');
   if (!fs.existsSync(modulePath)) {
@@ -219,7 +164,15 @@ function ensureHdiffModule() {
   if (!fs.existsSync(modulePath)) {
     throw new Error(`Failed to install node-hdiffpatch under: ${cliRoot}`);
   }
-  const customDiff = createHdiffProcessDiff(modulePath);
+  const hdiffModule = require(modulePath) as {
+    diff?: (oldSource?: Buffer, newSource?: Buffer) => Buffer;
+  } & ((oldSource?: Buffer, newSource?: Buffer) => Buffer);
+  const customDiff = hdiffModule.diff || hdiffModule;
+  if (typeof customDiff !== 'function') {
+    throw new Error(
+      `node-hdiffpatch did not expose a diff function: ${modulePath}`,
+    );
+  }
   customDiff(
     Buffer.from('rnu-hdiff-smoke-old'),
     Buffer.from('rnu-hdiff-smoke-new'),
