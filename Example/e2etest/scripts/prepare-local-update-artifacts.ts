@@ -80,6 +80,37 @@ function runPushy(args: string[], cwd: string) {
   }
 }
 
+function ensureHdiffModule() {
+  const modulePath = path.join(projectRoot, 'node_modules/node-hdiffpatch');
+  if (!fs.existsSync(modulePath)) {
+    console.log('node-hdiffpatch not found, installing...');
+    const result = spawnSync(
+      'npm',
+      [
+        'install',
+        '--no-save',
+        '--package-lock=false',
+        '--legacy-peer-deps',
+        'node-hdiffpatch',
+      ],
+      {
+        cwd: projectRoot,
+        stdio: 'inherit',
+        env: process.env,
+      },
+    );
+
+    if (result.status !== 0) {
+      throw new Error(
+        `npm install node-hdiffpatch failed with exit code ${result.status}`,
+      );
+    }
+  }
+  if (!fs.existsSync(modulePath)) {
+    throw new Error(`Failed to install node-hdiffpatch under: ${projectRoot}`);
+  }
+}
+
 function prepareDir() {
   fs.rmSync(artifactsDir, { recursive: true, force: true });
   fs.mkdirSync(artifactsDir, { recursive: true });
@@ -115,6 +146,8 @@ async function main() {
   bundleTo('e2e/entry.v1.ts', v1);
   bundleTo('e2e/entry.v2.ts', v2);
   bundleTo('e2e/entry.v3.ts', v3);
+
+  ensureHdiffModule();
 
   console.log('Generating ppk diff...');
   runPushy(
