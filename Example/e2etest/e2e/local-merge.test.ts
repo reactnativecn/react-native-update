@@ -9,7 +9,6 @@ const RETRYABLE_RELOAD_TIMEOUT = 45000;
 const MARK_SUCCESS_TIMEOUT = 30000;
 const MARK_SUCCESS_SETTLE_MS = 1500;
 const DOWNLOAD_SUCCESS_TIMEOUT = 120000;
-const TRANSIENT_ERROR_TIMEOUT = 5000;
 const MAX_CHECK_UPDATE_ATTEMPTS = 2;
 
 function getDetoxLaunchArgs() {
@@ -47,30 +46,6 @@ async function waitForBundleLabel(
     .withTimeout(timeoutMs);
 }
 
-async function matchesText(
-  testId: string,
-  text: string,
-  timeoutMs = TRANSIENT_ERROR_TIMEOUT,
-) {
-  try {
-    await waitFor(element(by.id(testId)))
-      .toHaveText(text)
-      .withTimeout(timeoutMs);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function didHitTransientCheckError() {
-  const [hasCheckError, hasErrorEvent] = await Promise.all([
-    matchesText('last-check-status', 'lastCheckStatus: error'),
-    matchesText('last-event', 'lastEvent: errorChecking'),
-  ]);
-
-  return hasCheckError && hasErrorEvent;
-}
-
 async function tapCheckUpdateAndWaitForBundleLabel(expectedLabel: string) {
   let lastError: unknown;
 
@@ -88,11 +63,7 @@ async function tapCheckUpdateAndWaitForBundleLabel(expectedLabel: string) {
     } catch (error) {
       lastError = error;
 
-      const shouldRetry =
-        attempt < MAX_CHECK_UPDATE_ATTEMPTS &&
-        (await didHitTransientCheckError());
-
-      if (!shouldRetry) {
+      if (attempt >= MAX_CHECK_UPDATE_ATTEMPTS) {
         throw error;
       }
 
