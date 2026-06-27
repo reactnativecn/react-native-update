@@ -135,7 +135,6 @@ const server = Bun.serve({
 
     if (url.pathname.startsWith('/artifacts/')) {
       const filePath = safeResolve(url.pathname);
-      console.log(`[server] ${url.pathname} -> ${filePath}, exists: ${filePath ? fs.existsSync(filePath) : 'null'}`);
       if (
         !filePath ||
         !fs.existsSync(filePath) ||

@@ -100,20 +100,11 @@ function startServer() {
   const child = spawn('bun', [serverScript], {
     cwd: projectRoot,
     detached: true,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: 'ignore',
     env: {
       ...process.env,
       E2E_ASSET_PORT: String(LOCAL_UPDATE_PORT),
     },
-  });
-  child.stdout?.on('data', (data: Buffer) => {
-    console.log(`[e2e-server] ${data.toString().trim()}`);
-  });
-  child.stderr?.on('data', (data: Buffer) => {
-    console.error(`[e2e-server] ${data.toString().trim()}`);
-  });
-  child.on('error', (err) => {
-    console.error(`[e2e-server] spawn error: ${err}`);
   });
   child.unref();
   fs.writeFileSync(pidFile, String(child.pid));
@@ -171,9 +162,8 @@ async function waitForRequestReady(
       if (response.ok) {
         return;
       }
-      console.log(`[warmServer] ${label}: status ${response.status}`);
-    } catch (err) {
-      console.log(`[warmServer] ${label}: fetch error: ${err}`);
+    } catch {
+      // Keep polling until the timeout expires.
     }
 
     if (Date.now() - start > timeoutMs) {
