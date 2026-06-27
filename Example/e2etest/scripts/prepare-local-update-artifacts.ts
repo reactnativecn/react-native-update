@@ -41,8 +41,7 @@ function resolveCliRoot() {
   ].filter(Boolean) as string[];
 
   for (const candidate of candidates) {
-    const cliEntry = path.join(candidate, 'lib/index.js');
-    if (fs.existsSync(cliEntry)) {
+    if (fs.existsSync(path.join(candidate, 'package.json'))) {
       return candidate;
     }
   }
@@ -53,7 +52,19 @@ function resolveCliRoot() {
 }
 
 const cliRoot = resolveCliRoot();
-const cliEntry = path.join(cliRoot, 'lib/index.js');
+const cliPkg = JSON.parse(
+  fs.readFileSync(path.join(cliRoot, 'package.json'), 'utf8'),
+);
+const binRelative =
+  typeof cliPkg.bin === 'string'
+    ? cliPkg.bin
+    : cliPkg.bin?.pushy ?? Object.values(cliPkg.bin ?? {})[0];
+if (!binRelative) {
+  throw new Error(
+    `react-native-update-cli package.json has no bin entry. Tried: ${cliRoot}`,
+  );
+}
+const cliEntry = path.join(cliRoot, binRelative);
 const { diffCommands } = require(path.join(cliRoot, 'lib/diff.js')) as {
   diffCommands: DiffCommandRunner;
 };
