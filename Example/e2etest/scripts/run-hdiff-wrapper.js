@@ -1,16 +1,14 @@
 #!/usr/bin/env node
 /**
  * run-hdiff-wrapper.js
- * Directly require CLI's diff module to generate hdiff patches.
- * Bypasses the pushy CLI entirely (avoids bin.ts argument parsing issues).
- * 
- * Usage:
- *   node run-hdiff-wrapper.js <cliRoot> <ppk|apk> <old> <new> <output>
+ * Directly invoke CLI's diff handlers with node-hdiffpatch pre-loaded.
+ * Bypasses CLI bin.ts and the loadModule resolution issue.
+ *
+ * Usage: node run-hdiff-wrapper.js <cliRoot> <ppk|apk> <old> <new> <output>
  */
 
-const { existsSync, statSync } = require('node:fs');
-const { resolve, dirname, join } = require('node:path');
-const { createRequire } = require('node:module');
+const path = require('path');
+const fs = require('fs');
 
 const [cliRoot, mode, oldPath, newPath, outputPath] = process.argv.slice(2);
 
@@ -25,63 +23,55 @@ console.log(`[hdiff-wrapper] old=${oldPath}`);
 console.log(`[hdiff-wrapper] new=${newPath}`);
 console.log(`[hdiff-wrapper] output=${outputPath}`);
 
-if (!existsSync(oldPath)) {
+if (!fs.existsSync(oldPath)) {
   console.error(`[hdiff-wrapper] ERROR: old file not found: ${oldPath}`);
   process.exit(1);
 }
-if (!existsSync(newPath)) {
+if (!fs.existsSync(newPath)) {
   console.error(`[hdiff-wrapper] ERROR: new file not found: ${newPath}`);
   process.exit(1);
 }
 
-// Load diff module directly from CLI's lib directory
-const cliPkg = require(resolve(cliRoot, 'package.json'));
-const mainEntry = cliPkg.main || 'lib/index.js';
-const libDir = resolve(cliRoot, dirname(mainEntry));
-
-console.log(`[hdiff-wrapper] libDir=${libDir}`);
-
-// Set NODE_PATH so loadModule('node-hdiffpatch') can find it
-const projectRoot = resolve(__dirname, '..', '..', '..');
-const nodePathDirs = [
-  resolve(projectRoot, 'node_modules'),
-  resolve(cliRoot, 'node_modules'),
-];
-if (process.env.NODE_PATH) {
-  nodePathDirs.push(process.env.NODE_PATH);
+// Pre-load node-hdiffpatch from project's node_modules (cwd = projectRoot)
+let hdiffModule;
+try {
+  hdiffModule = require('node-hdiffpatch');
+  console.log(`[hdiff-wrapper] node-hdiffpatch loaded: ${typeof hdiffModule}, keys: ${Object.keys(hdiffModule).join(', ')}`);
+} catch (err) {
+  console.error(`[hdiff-wrapper] ERROR: Failed to load node-hdiffpatch: ${err.message}`);
+  process.exit(1);
 }
-process.env.NODE_PATH = nodePathDirs.join(':');
-console.log(`[hdiff-wrapper] NODE_PATH=${process.env.NODE_PATH}`);
 
-// Require the diff module directly
-const requireFromLib = createRequire(resolve(libDir, '__placeholder.js'));
-const diffModule = requireFromLib('./diff');
+// Load CLI's diff module using absolute path
+const diffModule = require(path.join(cliRoot, 'lib/diff'));
 const { diffCommands } = diffModule;
-
 console.log(`[hdiff-wrapper] diffCommands: ${Object.keys(diffCommands).join(', ')}`);
 
 (async () => {
   try {
+    // Pass customHdiffModule so CLI doesn't need to resolve it via loadModule
+    const options = { output: outputPath, 'no-interactive': true, customHdiffModule: hdiffModule };
+
     if (mode === 'ppk') {
       console.log(`[hdiff-wrapper] Calling diffCommands.hdiff...`);
-      await diffCommands.hdiff(oldPath, newPath, outputPath);
+      await diffCommands.hdiff({ args: [oldPath, newPath], options });
     } else if (mode === 'apk') {
       console.log(`[hdiff-wrapper] Calling diffCommands.hdiffFromApk...`);
-      await diffCommands.hdiffFromApk(oldPath, newPath, outputPath);
+      await diffCommands.hdiffFromApk({ args: [oldPath, newPath], options });
     } else {
       console.error(`[hdiff-wrapper] ERROR: Unknown mode: ${mode}`);
       process.exit(1);
     }
 
-    if (existsSync(outputPath)) {
-      console.log(`[hdiff-wrapper] SUCCESS: ${outputPath} (${statSync(outputPath).size} bytes)`);
+    if (fs.existsSync(outputPath)) {
+      console.log(`[hdiff-wrapper] SUCCESS: ${outputPath} (${fs.statSync(outputPath).size} bytes)`);
     } else {
       console.error(`[hdiff-wrapper] ERROR: Output file not created: ${outputPath}`);
       process.exit(1);
     }
   } catch (err) {
     console.error(`[hdiff-wrapper] ERROR: ${err.message}`);
-    console.error(`[hdiff-wrapper] Stack: ${err.stack}`);
+    if (err.stack) console.error(`[hdiff-wrapper] Stack: ${err.stack}`);
     process.exit(1);
   }
 })();
