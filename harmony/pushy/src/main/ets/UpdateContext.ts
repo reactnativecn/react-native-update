@@ -281,6 +281,8 @@ export class UpdateContext {
 
   public clearFirstTime(): void {
     this.runStateOperation(STATE_OP_CLEAR_FIRST_TIME, '', { cleanUp: true });
+    this.preferences.deleteSync('firstLoadMarked');
+    this.flushPreferences('clear first time');
   }
 
   public clearRollbackMark(): void {
@@ -373,7 +375,8 @@ export class UpdateContext {
   public consumeFirstLoadMarker(): boolean {
     const marked = this.readString('firstLoadMarked') === 'true';
     if (marked) {
-      this.setKv('firstLoadMarked', 'false');
+      this.preferences.deleteSync('firstLoadMarked');
+      this.flushPreferences('clear first load marker');
     }
     return marked;
   }
