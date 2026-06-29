@@ -25,6 +25,7 @@ export class UpdateContext {
   private preferences!: preferences.Preferences;
   private static DEBUG: boolean = false;
   private static isUsingBundleUrl: boolean = false;
+  private static ignoreRollback: boolean = false;
 
   constructor(context: common.UIAbilityContext) {
     this.context = context;
@@ -245,6 +246,7 @@ export class UpdateContext {
       return;
     }
 
+    UpdateContext.ignoreRollback = false;
     this.cleanUp();
     this.persistState(nextState, { clearExisting: true });
   }
@@ -361,10 +363,19 @@ export class UpdateContext {
       }
 
       this.runStateOperation(STATE_OP_SWITCH_VERSION, hash);
+      UpdateContext.ignoreRollback = false;
     } catch (e) {
       console.error('Failed to switch version:', e);
       throw e;
     }
+  }
+
+  public consumeFirstLoadMarker(): boolean {
+    const marked = this.readString('firstLoadMarked') === 'true';
+    if (marked) {
+      this.setKv('firstLoadMarked', 'false');
+    }
+    return marked;
   }
 
   public getBundleUrl() {
@@ -373,11 +384,17 @@ export class UpdateContext {
       STATE_OP_RESOLVE_LAUNCH,
       this.getStateSnapshot(),
       '',
-      false,
-      false,
+      UpdateContext.ignoreRollback,
+      true,
     );
     if (launchState.didRollback || launchState.consumedFirstTime) {
       this.persistState(launchState);
+      if (launchState.consumedFirstTime) {
+        this.setKv('firstLoadMarked', 'true');
+      }
+    }
+    if (launchState.consumedFirstTime) {
+      UpdateContext.ignoreRollback = true;
     }
 
     let version = launchState.loadVersion || '';
