@@ -73,9 +73,8 @@ export class UpdateContext {
 
   public getBuildTime(): string {
     try {
-      const content = this.context.resourceManager.getRawFileContentSync(
-        'meta.json',
-      );
+      const content =
+        this.context.resourceManager.getRawFileContentSync('meta.json');
       const metaData = JSON.parse(
         new util.TextDecoder().decodeToString(content),
       ) as Record<string, string | number | boolean | null | undefined>;
@@ -183,6 +182,8 @@ export class UpdateContext {
       clearExisting?: boolean;
       removeStaleHash?: boolean;
       cleanUp?: boolean;
+      markFirstLoadMarker?: boolean;
+      clearFirstLoadMarker?: boolean;
     } = {},
   ): void {
     if (options.clearExisting) {
@@ -191,6 +192,12 @@ export class UpdateContext {
     this.applyState(state);
     if (options.removeStaleHash && state.staleVersionToDelete) {
       this.preferences.deleteSync(`hash_${state.staleVersionToDelete}`);
+    }
+    if (options.markFirstLoadMarker) {
+      this.preferences.putSync('firstLoadMarked', 'true');
+    }
+    if (options.clearFirstLoadMarker) {
+      this.preferences.deleteSync('firstLoadMarked');
     }
     this.flushPreferences('persist state');
     if (options.cleanUp) {
@@ -204,6 +211,7 @@ export class UpdateContext {
     options: {
       removeStaleHash?: boolean;
       cleanUp?: boolean;
+      clearFirstLoadMarker?: boolean;
     } = {},
   ): StateCoreResult {
     const nextState = NativePatchCore.runStateCore(
@@ -280,9 +288,10 @@ export class UpdateContext {
   }
 
   public clearFirstTime(): void {
-    this.runStateOperation(STATE_OP_CLEAR_FIRST_TIME, '', { cleanUp: true });
-    this.preferences.deleteSync('firstLoadMarked');
-    this.flushPreferences('clear first time');
+    this.runStateOperation(STATE_OP_CLEAR_FIRST_TIME, '', {
+      cleanUp: true,
+      clearFirstLoadMarker: true,
+    });
   }
 
   public clearRollbackMark(): void {
@@ -391,10 +400,9 @@ export class UpdateContext {
       true,
     );
     if (launchState.didRollback || launchState.consumedFirstTime) {
-      this.persistState(launchState);
-      if (launchState.consumedFirstTime) {
-        this.setKv('firstLoadMarked', 'true');
-      }
+      this.persistState(launchState, {
+        markFirstLoadMarker: launchState.consumedFirstTime,
+      });
     }
     if (launchState.consumedFirstTime) {
       UpdateContext.ignoreRollback = true;
