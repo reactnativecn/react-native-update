@@ -75,7 +75,7 @@ export class PushyTurboModule extends UITurboModule {
     const currentVersionInfo = currentVersion
       ? this.context.getKv(`hash_${currentVersion}`)
       : '';
-    const isFirstTime = this.context.isFirstTime();
+    const isFirstTime = this.context.consumeFirstLoadMarker();
     const rolledBackVersion = this.context.rolledBackVersion();
     const uuid = this.context.getKv('uuid');
     const isUsingBundleUrl = this.context.getIsUsingBundleUrl();

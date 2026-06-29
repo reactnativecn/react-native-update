@@ -25,6 +25,7 @@ export class UpdateContext {
   private preferences!: preferences.Preferences;
   private static DEBUG: boolean = false;
   private static isUsingBundleUrl: boolean = false;
+  private static ignoreRollback: boolean = false;
 
   constructor(context: common.UIAbilityContext) {
     this.context = context;
@@ -72,9 +73,8 @@ export class UpdateContext {
 
   public getBuildTime(): string {
     try {
-      const content = this.context.resourceManager.getRawFileContentSync(
-        'meta.json',
-      );
+      const content =
+        this.context.resourceManager.getRawFileContentSync('meta.json');
       const metaData = JSON.parse(
         new util.TextDecoder().decodeToString(content),
       ) as Record<string, string | number | boolean | null | undefined>;
@@ -182,6 +182,8 @@ export class UpdateContext {
       clearExisting?: boolean;
       removeStaleHash?: boolean;
       cleanUp?: boolean;
+      markFirstLoadMarker?: boolean;
+      clearFirstLoadMarker?: boolean;
     } = {},
   ): void {
     if (options.clearExisting) {
@@ -190,6 +192,12 @@ export class UpdateContext {
     this.applyState(state);
     if (options.removeStaleHash && state.staleVersionToDelete) {
       this.preferences.deleteSync(`hash_${state.staleVersionToDelete}`);
+    }
+    if (options.markFirstLoadMarker) {
+      this.preferences.putSync('firstLoadMarked', 'true');
+    }
+    if (options.clearFirstLoadMarker) {
+      this.preferences.deleteSync('firstLoadMarked');
     }
     this.flushPreferences('persist state');
     if (options.cleanUp) {
@@ -203,6 +211,7 @@ export class UpdateContext {
     options: {
       removeStaleHash?: boolean;
       cleanUp?: boolean;
+      clearFirstLoadMarker?: boolean;
     } = {},
   ): StateCoreResult {
     const nextState = NativePatchCore.runStateCore(
@@ -245,6 +254,7 @@ export class UpdateContext {
       return;
     }
 
+    UpdateContext.ignoreRollback = false;
     this.cleanUp();
     this.persistState(nextState, { clearExisting: true });
   }
@@ -278,7 +288,10 @@ export class UpdateContext {
   }
 
   public clearFirstTime(): void {
-    this.runStateOperation(STATE_OP_CLEAR_FIRST_TIME, '', { cleanUp: true });
+    this.runStateOperation(STATE_OP_CLEAR_FIRST_TIME, '', {
+      cleanUp: true,
+      clearFirstLoadMarker: true,
+    });
   }
 
   public clearRollbackMark(): void {
@@ -361,10 +374,20 @@ export class UpdateContext {
       }
 
       this.runStateOperation(STATE_OP_SWITCH_VERSION, hash);
+      UpdateContext.ignoreRollback = false;
     } catch (e) {
       console.error('Failed to switch version:', e);
       throw e;
     }
+  }
+
+  public consumeFirstLoadMarker(): boolean {
+    const marked = this.readString('firstLoadMarked') === 'true';
+    if (marked) {
+      this.preferences.deleteSync('firstLoadMarked');
+      this.flushPreferences('clear first load marker');
+    }
+    return marked;
   }
 
   public getBundleUrl() {
@@ -373,11 +396,16 @@ export class UpdateContext {
       STATE_OP_RESOLVE_LAUNCH,
       this.getStateSnapshot(),
       '',
-      false,
-      false,
+      UpdateContext.ignoreRollback,
+      true,
     );
     if (launchState.didRollback || launchState.consumedFirstTime) {
-      this.persistState(launchState);
+      this.persistState(launchState, {
+        markFirstLoadMarker: launchState.consumedFirstTime,
+      });
+    }
+    if (launchState.consumedFirstTime) {
+      UpdateContext.ignoreRollback = true;
     }
 
     let version = launchState.loadVersion || '';
