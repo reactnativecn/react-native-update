@@ -25,6 +25,12 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "./plugins/with-rct-bridge-bridging-header",
+      "expo-font",
+      "expo-router",
+      "expo-web-browser"
+    ]
   }
 }

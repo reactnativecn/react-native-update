@@ -100,5 +100,4 @@ log('bootup status', {
 	isFirstTimeDebug,
 	isDebugChannel,
 	cInfo,
-	uuid,
 });
