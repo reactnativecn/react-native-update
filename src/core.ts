@@ -1,28 +1,28 @@
-import { NativeEventEmitter, NativeModules, Platform } from "react-native";
-import i18n from "./i18n";
-import { emptyModule, error, log } from "./utils";
+import { NativeEventEmitter, NativeModules, Platform } from 'react-native';
+import i18n from './i18n';
+import { emptyModule, error, log } from './utils';
 
 /* eslint-disable @react-native/no-deep-imports */
 const {
 	version: v,
-} = require("react-native/Libraries/Core/ReactNativeVersion");
+} = require('react-native/Libraries/Core/ReactNativeVersion');
 const RNVersion = `${v.major}.${v.minor}.${v.patch}`;
 const isTurboModuleEnabled =
 	// https://github.com/facebook/react-native/pull/48362
 	(global as any).__turboModuleProxy || (global as any).RN$Bridgeless;
 
 export const PushyModule =
-	Platform.OS === "web"
+	Platform.OS === 'web'
 		? emptyModule
 		: isTurboModuleEnabled
-			? require("./NativePushy").default
+			? require('./NativePushy').default
 			: NativeModules.Pushy;
 
 export const UpdateModule = PushyModule;
 
 if (!PushyModule) {
 	throw Error(
-		"Failed to load react-native-update native module, please try to recompile",
+		'Failed to load react-native-update native module, please try to recompile',
 	);
 }
 
@@ -51,7 +51,7 @@ if (currentVersionInfoString) {
 		}
 	} catch {
 		error(
-			i18n.t("error_parse_version_info", { info: currentVersionInfoString }),
+			i18n.t('error_parse_version_info', { info: currentVersionInfoString }),
 		);
 	}
 }
@@ -81,18 +81,18 @@ export async function getCurrentVersionInfo(): Promise<{
 export const pushyNativeEventEmitter = new NativeEventEmitter(PushyModule);
 
 if (!uuid) {
-	uuid = require("nanoid/non-secure").nanoid();
+	uuid = require('nanoid/non-secure').nanoid();
 	PushyModule.setUuid(uuid);
 }
 
 export const cInfo = {
-	rnu: require("../package.json").version,
+	rnu: require('../package.json').version,
 	rn: RNVersion,
 	os: `${Platform.OS} ${Platform.Version}`,
 	uuid,
 };
 
-log("bootup status", {
+log('bootup status', {
 	packageVersion,
 	currentVersion,
 	currentVersionInfo,
