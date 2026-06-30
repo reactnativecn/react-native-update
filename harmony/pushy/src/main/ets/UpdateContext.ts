@@ -26,6 +26,8 @@ export class UpdateContext {
   private static DEBUG: boolean = false;
   private static isUsingBundleUrl: boolean = false;
   private static ignoreRollback: boolean = false;
+  private static cachedPackageVersion: string = '';
+  private static cachedBuildTime: string = '';
 
   constructor(context: common.UIAbilityContext) {
     this.context = context;
@@ -60,11 +62,15 @@ export class UpdateContext {
   }
 
   public getPackageVersion(): string {
+    if (UpdateContext.cachedPackageVersion) {
+      return UpdateContext.cachedPackageVersion;
+    }
     try {
       const bundleInfo = bundleManager.getBundleInfoForSelfSync(
         this.getBundleFlags(),
       );
-      return bundleInfo?.versionName || 'Unknown';
+      UpdateContext.cachedPackageVersion = bundleInfo?.versionName || 'Unknown';
+      return UpdateContext.cachedPackageVersion;
     } catch (error) {
       console.error('Failed to get bundle info:', error);
       return '';
@@ -72,6 +78,9 @@ export class UpdateContext {
   }
 
   public getBuildTime(): string {
+    if (UpdateContext.cachedBuildTime) {
+      return UpdateContext.cachedBuildTime;
+    }
     try {
       const content =
         this.context.resourceManager.getRawFileContentSync('meta.json');
@@ -79,9 +88,12 @@ export class UpdateContext {
         new util.TextDecoder().decodeToString(content),
       ) as Record<string, string | number | boolean | null | undefined>;
       if (metaData.pushy_build_time) {
-        return String(metaData.pushy_build_time);
+        UpdateContext.cachedBuildTime = String(metaData.pushy_build_time);
+        return UpdateContext.cachedBuildTime;
       }
-    } catch {}
+    } catch (error) {
+      console.error('Failed to read build time from raw file:', error);
+    }
     return '';
   }
 
@@ -244,6 +256,9 @@ export class UpdateContext {
     packageVersion: string,
     buildTime: string,
   ): void {
+    if (!packageVersion || !buildTime) {
+      return;
+    }
     const currentState = this.getStateSnapshot();
     const nextState = NativePatchCore.syncStateWithBinaryVersion(
       packageVersion,
