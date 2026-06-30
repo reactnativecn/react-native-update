@@ -65,6 +65,17 @@ export class PushyTurboModule extends UITurboModule {
     await this.mUiCtx.startAbility(want);
   }
 
+  private async reloadBridge(): Promise<void> {
+    const devToolsController = (this.ctx as Record<string, any>).devToolsController;
+    if (devToolsController) {
+      logger.debug(TAG, 'reloadBridge via devToolsController RELOAD');
+      devToolsController.eventEmitter.emit("RELOAD", { reason: 'HotReload2' });
+    } else {
+      logger.debug(TAG, 'reloadBridge via restartAbility');
+      await this.restartAbility();
+    }
+  }
+
   getConstants(): Object {
     logger.debug(TAG, ',call getConstants');
     const packageVersion = this.context.getPackageVersion();
@@ -121,7 +132,7 @@ export class PushyTurboModule extends UITurboModule {
 
     try {
       this.context.switchVersion(hash);
-      await this.restartAbility();
+      await this.reloadBridge();
     } catch (error) {
       logger.error(TAG, `reloadUpdate failed: ${getErrorMessage(error)}`);
       throw Error(`switchVersion failed ${getErrorMessage(error)}`);
@@ -131,7 +142,7 @@ export class PushyTurboModule extends UITurboModule {
   async restartApp(): Promise<void> {
     logger.debug(TAG, ',call restartApp');
     try {
-      await this.restartAbility();
+      await this.reloadBridge();
     } catch (error) {
       logger.error(TAG, `restartApp failed: ${getErrorMessage(error)}`);
       throw Error(`restartApp failed ${getErrorMessage(error)}`);

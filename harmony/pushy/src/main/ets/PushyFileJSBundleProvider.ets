@@ -9,36 +9,35 @@ import { UpdateContext } from './UpdateContext';
 
 export class PushyFileJSBundleProvider extends JSBundleProvider {
   private updateContext: UpdateContext;
-  private path: string = '';
 
   constructor(context: common.UIAbilityContext) {
     super();
     this.updateContext = new UpdateContext(context);
-    this.path = this.updateContext.getBundleUrl();
   }
 
   getURL(): string {
-    return this.path;
+    return this.updateContext.getBundleUrl();
   }
 
   async getBundle(): Promise<FileJSBundle> {
-    if (!this.path) {
+    const path = this.updateContext.getBundleUrl();
+    if (!path) {
       throw new JSBundleProviderError({
         whatHappened: 'No pushy bundle found. using default bundle',
         howCanItBeFixed: [''],
       });
     }
     try {
-      await fs.access(this.path, fs.OpenMode.READ_ONLY);
+      await fs.access(path, fs.OpenMode.READ_ONLY);
       return {
-        filePath: this.path,
+        filePath: path,
       };
     } catch (error) {
       throw new JSBundleProviderError({
-        whatHappened: `Couldn't load JSBundle from ${this.path}`,
+        whatHappened: `Couldn't load JSBundle from ${path}`,
         extraData: error,
         howCanItBeFixed: [
-          `Check if a bundle exists at "${this.path}" on your device.`,
+          `Check if a bundle exists at "${path}" on your device.`,
         ],
       });
     }
