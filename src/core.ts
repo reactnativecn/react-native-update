@@ -85,11 +85,18 @@ if (!uuid) {
   PushyModule.setUuid(uuid);
 }
 
-log('uuid: ' + uuid);
-
 export const cInfo = {
-  rnu: require('../package.json').version,
-  rn: RNVersion,
-  os: Platform.OS + ' ' + Platform.Version,
-  uuid,
+	rnu: require("../package.json").version,
+	rn: RNVersion,
+	os: `${Platform.OS} ${Platform.Version}`,
+	uuid,
 };
+
+log('bootup status', {
+	currentVersionInfo,
+	isFirstTime,
+	isFirstTimeDebug,
+	isDebugChannel,
+	cInfo,
+	uuid,
+});
