@@ -38,7 +38,7 @@ export class PushyTurboModule extends UITurboModule {
     super(ctx);
     logger.debug(TAG, ',PushyTurboModule constructor');
     this.mUiCtx = ctx.uiAbilityContext;
-    this.context = new UpdateContext(this.mUiCtx);
+    this.context = UpdateContext.getInstance(this.mUiCtx);
     EventHub.getInstance().setRNInstance(ctx.rnInstance);
   }
 
@@ -78,6 +78,7 @@ export class PushyTurboModule extends UITurboModule {
 
   getConstants(): Object {
     logger.debug(TAG, ',call getConstants');
+    this.context.logStateSnapshot('getConstants:enter');
     const packageVersion = this.context.getPackageVersion();
     const buildTime = this.context.getBuildTime();
     this.context.syncStateWithBinaryVersion(packageVersion, buildTime);

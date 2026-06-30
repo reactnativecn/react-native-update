@@ -5,6 +5,7 @@ import common from '@ohos.app.ability.common';
 import { DownloadTaskParams } from './DownloadTaskParams';
 import { bundleManager } from '@kit.AbilityKit';
 import { util } from '@kit.ArkTS';
+import logger from './Logger';
 import NativePatchCore, {
   STATE_OP_CLEAR_FIRST_TIME,
   STATE_OP_CLEAR_ROLLBACK_MARK,
@@ -28,10 +29,23 @@ export class UpdateContext {
   private static ignoreRollback: boolean = false;
   private static cachedPackageVersion: string = '';
   private static cachedBuildTime: string = '';
+  // 单例：确保 bundle provider 与 TurboModule 共用同一份 preferences 内存状态，
+  // 避免 RNOH RN 实例重建后两处 UpdateContext 各自持有 preferences 缓存导致读写分裂。
+  private static instance: UpdateContext | null = null;
+  private static instanceCounter: number = 0;
+  private readonly instanceId: string;
+
+  public static getInstance(context: common.UIAbilityContext): UpdateContext {
+    if (!UpdateContext.instance) {
+      UpdateContext.instance = new UpdateContext(context);
+    }
+    return UpdateContext.instance;
+  }
 
   constructor(context: common.UIAbilityContext) {
     this.context = context;
     this.rootDir = context.filesDir + '/_update';
+    this.instanceId = `uc#${++UpdateContext.instanceCounter}`;
 
     try {
       if (!fileIo.accessSync(this.rootDir)) {
@@ -41,10 +55,34 @@ export class UpdateContext {
       console.error('Failed to create root directory:', e);
     }
     this.initPreferences();
+    this.trace('ctor');
     this.syncStateWithBinaryVersion(
       this.getPackageVersion(),
       this.getBuildTime(),
     );
+  }
+
+  /**
+   * 诊断日志：打印本实例 id 与关键状态，用于定位 preferences 多实例 / 状态分裂问题。
+   * 通过 hilog 输出，prefix=pushy，可在 hilog 中按 "UpdateContext" 过滤。
+   */
+  private trace(point: string): void {
+    const snap = this.getStateSnapshot();
+    logger.info(
+      'UpdateContext',
+      `trace id=${this.instanceId} ${point}` +
+        ` pkg=${snap.packageVersion} bt=${snap.buildTime}` +
+        ` cv=${snap.currentVersion} lv=${snap.lastVersion}` +
+        ` ft=${snap.firstTime} fto=${snap.firstTimeOk}` +
+        ` rb=${snap.rolledBackVersion}` +
+        ` flm=${this.readString('firstLoadMarked')}` +
+        ` uuid=${this.readString('uuid')}`,
+    );
+  }
+
+  /** 对外诊断入口，供 TurboModule 在 getConstants 等关键节点打印状态。 */
+  public logStateSnapshot(point: string): void {
+    this.trace(point);
   }
 
   private initPreferences() {
@@ -269,9 +307,17 @@ export class UpdateContext {
       return;
     }
 
+    logger.info(
+      'UpdateContext',
+      `binary version changed, resetting update state id=${this.instanceId}`,
+    );
     UpdateContext.ignoreRollback = false;
     this.cleanUp();
-    this.persistState(nextState, { clearExisting: true });
+    // 仅重置状态机字段（currentVersion / lastVersion / firstTime / firstTimeOk /
+    // rolledBackVersion）。不再 clearExisting，避免连带清除 uuid / firstLoadMarked /
+    // hash_* 等与 binary 版本无关的 KV —— 它们在多实例场景下本就脆弱，连带清除会
+    // 让 getConstants() 永远读到空，从而 isFirstTime=false、markSuccess 永不执行。
+    this.persistState(nextState);
   }
 
   public setKv(key: string, value: string): void {
@@ -388,8 +434,10 @@ export class UpdateContext {
         throw Error(`Bundle version ${hash} not found.`);
       }
 
+      this.trace(`switchVersion:before ${hash}`);
       this.runStateOperation(STATE_OP_SWITCH_VERSION, hash);
       UpdateContext.ignoreRollback = false;
+      this.trace(`switchVersion:after ${hash}`);
     } catch (e) {
       console.error('Failed to switch version:', e);
       throw e;
@@ -398,6 +446,7 @@ export class UpdateContext {
 
   public consumeFirstLoadMarker(): boolean {
     const marked = this.readString('firstLoadMarked') === 'true';
+    this.trace(`consumeFirstLoadMarker:marked=${marked}`);
     if (marked) {
       this.preferences.deleteSync('firstLoadMarked');
       this.flushPreferences('clear first load marker');
@@ -407,6 +456,7 @@ export class UpdateContext {
 
   public getBundleUrl() {
     UpdateContext.isUsingBundleUrl = true;
+    this.trace('getBundleUrl:enter');
     const launchState = NativePatchCore.runStateCore(
       STATE_OP_RESOLVE_LAUNCH,
       this.getStateSnapshot(),
@@ -422,6 +472,11 @@ export class UpdateContext {
     if (launchState.consumedFirstTime) {
       UpdateContext.ignoreRollback = true;
     }
+    this.trace(
+      `getBundleUrl:load=${launchState.loadVersion}` +
+        ` consumed=${launchState.consumedFirstTime}` +
+        ` rollback=${launchState.didRollback}`,
+    );
 
     let version = launchState.loadVersion || '';
     while (version) {
@@ -442,7 +497,9 @@ export class UpdateContext {
   }
 
   public getCurrentVersion(): string {
-    return this.getStateSnapshot().currentVersion || '';
+    const cv = this.getStateSnapshot().currentVersion || '';
+    this.trace(`getCurrentVersion:${cv}`);
+    return cv;
   }
 
   private rollBack(): string {
