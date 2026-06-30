@@ -8,6 +8,12 @@ function normalizeVersion(version: string): string {
   return version.trim().replace(/^refs\/tags\//, '').replace(/^v/, '');
 }
 
+const SEMVER_REGEX = /^\d+\.\d+\.\d+(-.+)?$/;
+
+function isValidSemver(version: string): boolean {
+  return SEMVER_REGEX.test(version);
+}
+
 function getVersionFromEnvironment(): string | null {
   const candidates = [
     process.env.RELEASE_VERSION,
@@ -134,6 +140,13 @@ async function main(): Promise<void> {
   try {
     if (isGitHubCI()) {
       const version = await resolveVersion();
+      if (!isValidSemver(version)) {
+        throw new Error(
+          `Resolved version "${version}" is not a valid semantic version. ` +
+            `Please ensure RELEASE_VERSION, GITHUB_REF, or GITHUB_REF_NAME is set correctly, ` +
+            `or that the git history is fully fetched.`
+        );
+      }
       console.log(`Using publish version ${version}`);
       await modifyPackageJson({ version });
     } else {

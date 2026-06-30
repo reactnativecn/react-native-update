@@ -3,6 +3,9 @@ on:
   release:
     types: [published]
 
+env:
+  RELEASE_VERSION: ${{ github.event.release.tag_name || github.ref_name }}
+
 permissions:
   id-token: write  # Required for OIDC
   contents: read
