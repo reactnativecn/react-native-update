@@ -45,7 +45,7 @@ jobs:
     if: needs.check_changes.outputs.harmony_changed == 'true'
     runs-on: ubuntu-latest
     container: ghcr.io/sanchuanhehe/harmony-next-pipeline-docker/harmonyos-ci-image:latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
       BUN_INSTALL_CACHE_DIR: ${{ github.workspace }}/.bun-cache
       OHPM_CACHE_DIR: ${{ github.workspace }}/.ohpm-cache
