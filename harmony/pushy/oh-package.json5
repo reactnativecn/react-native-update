@@ -9,7 +9,7 @@
   main: 'index.ets',
   version: '10.35.1',
   dependencies: {
-    '@rnoh/react-native-openharmony': '^0.72.96',
+    '@rnoh/react-native-openharmony': '>=0.72.96',
   },
   modelVersion: '5.0.0',
 }
