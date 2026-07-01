@@ -16,7 +16,11 @@ export class PushyFileJSBundleProvider extends JSBundleProvider {
   }
 
   getURL(): string {
-    return this.updateContext.getBundleUrl();
+    const path = this.updateContext.getBundleUrl();
+    if (path && !path.startsWith('file://')) {
+      return 'file://' + path;
+    }
+    return path;
   }
 
   async getBundle(): Promise<FileJSBundle> {
