@@ -46,6 +46,9 @@ jobs:
     runs-on: ubuntu-latest
     container: ghcr.io/sanchuanhehe/harmony-next-pipeline-docker/harmonyos-ci-image:latest
     timeout-minutes: 10
+    env:
+      BUN_INSTALL_CACHE_DIR: ${{ github.workspace }}/.bun-cache
+      OHPM_CACHE_DIR: ${{ github.workspace }}/.ohpm-cache
     steps:
       - uses: actions/checkout@v6
         with:
@@ -55,11 +58,37 @@ jobs:
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git submodule foreach --recursive 'git config --global --add safe.directory "$toplevel/$sm_path"'
       - uses: oven-sh/setup-bun@v2
+      - name: Cache Bun dependencies
+        uses: actions/cache@v4
+        with:
+          path: .bun-cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
       # Setup .npmrc file to publish to npm
       - uses: actions/setup-node@v6
         with:
           node-version: 24
           registry-url: 'https://registry.npmjs.org'
+      - name: Cache OHPM dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            .ohpm-cache
+            harmony/pushy/oh_modules
+            harmony/har-wrapper/oh_modules
+          key: ${{ runner.os }}-ohpm-${{ hashFiles('harmony/pushy/oh-package-lock.json5') }}
+          restore-keys: |
+            ${{ runner.os }}-ohpm-
+      - name: Cache Hvigor build outputs
+        uses: actions/cache@v4
+        with:
+          path: |
+            harmony/pushy/.hvigor
+            harmony/har-wrapper/.hvigor
+          key: ${{ runner.os }}-hvigor-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-hvigor-
       - run: bun install --frozen-lockfile
       - name: Build Harmony HAR
         run: npm run build:harmony-har -- --build-mode release
@@ -79,6 +108,8 @@ jobs:
     if: needs.check_changes.outputs.harmony_changed == 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      BUN_INSTALL_CACHE_DIR: ${{ github.workspace }}/.bun-cache
     steps:
       - uses: actions/checkout@v6
         with:
@@ -88,6 +119,13 @@ jobs:
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git submodule foreach --recursive 'git config --global --add safe.directory "$toplevel/$sm_path"'
       - uses: oven-sh/setup-bun@v2
+      - name: Cache Bun dependencies
+        uses: actions/cache@v4
+        with:
+          path: .bun-cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
       # Setup .npmrc file to publish to npm
       - uses: actions/setup-node@v6
         with:
