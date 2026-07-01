@@ -42,7 +42,7 @@ export class UpdateContext {
     return UpdateContext.instance;
   }
 
-  constructor(context: common.UIAbilityContext) {
+  private constructor(context: common.UIAbilityContext) {
     this.context = context;
     this.rootDir = context.filesDir + '/_update';
     this.instanceId = `uc#${++UpdateContext.instanceCounter}`;
@@ -76,7 +76,7 @@ export class UpdateContext {
         ` ft=${snap.firstTime} fto=${snap.firstTimeOk}` +
         ` rb=${snap.rolledBackVersion}` +
         ` flm=${this.readString('firstLoadMarked')}` +
-        ` uuid=${this.readString('uuid')}`,
+        ` uuidSet=${!!this.readString('uuid')}`,
     );
   }
 

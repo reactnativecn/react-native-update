@@ -96,7 +96,7 @@ export class PushyTurboModule extends UITurboModule {
       this.context.clearRollbackMark();
     }
 
-    return {
+    const result = {
       downloadRootDir: `${this.mUiCtx.filesDir}/_update`,
       currentVersionInfo,
       packageVersion,
@@ -107,6 +107,19 @@ export class PushyTurboModule extends UITurboModule {
       rolledBackVersion,
       uuid,
     };
+    const logResult = {
+      downloadRootDir: result.downloadRootDir,
+      currentVersionInfo: result.currentVersionInfo,
+      packageVersion: result.packageVersion,
+      currentVersion: result.currentVersion,
+      buildTime: result.buildTime,
+      isUsingBundleUrl: result.isUsingBundleUrl,
+      isFirstTime: result.isFirstTime,
+      rolledBackVersion: result.rolledBackVersion,
+      uuidSet: !!result.uuid,
+    };
+    logger.info(TAG, `,getConstants result: ${JSON.stringify(logResult)}`);
+    return result;
   }
 
   setLocalHashInfo(hash: string, info: string): boolean {
