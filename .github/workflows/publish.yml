@@ -44,27 +44,57 @@ jobs:
     needs: check_changes
     if: needs.check_changes.outputs.harmony_changed == 'true'
     runs-on: ubuntu-latest
-    container: ghcr.io/sanchuanhehe/harmony-next-pipeline-docker/harmonyos-ci-image:latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
         with:
           submodules: recursive
-      - name: Configure git safe.directory
-        run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          git submodule foreach --recursive 'git config --global --add safe.directory "$toplevel/$sm_path"'
-      - uses: oven-sh/setup-bun@v2
-      # Setup .npmrc file to publish to npm
+
+      # 1. Setup Node.js
       - uses: actions/setup-node@v6
         with:
           node-version: 24
           registry-url: 'https://registry.npmjs.org'
+
+      # 2. Setup JDK 17 (required by hvigor / DevEco toolchain)
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      # 3. Setup OpenHarmony SDK (API Level 12 / 5.0.0 Release)
+      - name: Setup OpenHarmony SDK
+        uses: openharmony-rs/setup-ohos-sdk@v1.0.0
+        id: setup-sdk
+        with:
+          version: '5.0.0'
+          cache: 'true'
+
+      # 4. Configure SDK Environment Variables & ohpm bin path
+      - name: Configure SDK Environment Variables
+        run: |
+          echo "DEVECO_SDK_HOME=${{ steps.setup-sdk.outputs.sdk-path }}" >> $GITHUB_ENV
+          echo "OHOS_SDK_HOME=${{ steps.setup-sdk.outputs.sdk-path }}" >> $GITHUB_ENV
+          # Dynamically locate the directory containing the ohpm executable and add it to PATH
+          OHPM_BIN=$(find ${{ steps.setup-sdk.outputs.sdk-path }} -name ohpm -type f -exec dirname {} \; | head -n 1)
+          if [ -n "$OHPM_BIN" ]; then
+            echo "$OHPM_BIN" >> $GITHUB_PATH
+            echo "Successfully added ohpm from $OHPM_BIN to PATH"
+          else
+            echo "Warning: ohpm executable not found in SDK"
+          fi
+
+      # 5. Setup Bun
+      - uses: oven-sh/setup-bun@v2
+
       - run: bun install --frozen-lockfile
+
       - name: Build Harmony HAR
         run: npm run build:harmony-har -- --build-mode release
+
       - name: Verify Harmony HAR artifact
         run: test -f harmony/pushy.har
+
       - name: Publish to npm
         shell: bash
         run: |
