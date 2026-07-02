@@ -70,26 +70,46 @@ jobs:
           version: '5.0.0'
           cache: 'true'
 
-      # 4. Configure SDK Environment Variables & ohpm bin path
+      # 4. Configure SDK Environment Variables & Find ohpm path
       - name: Configure SDK Environment Variables
         run: |
           echo "DEVECO_SDK_HOME=${{ steps.setup-sdk.outputs.sdk-path }}" >> $GITHUB_ENV
           echo "OHOS_SDK_HOME=${{ steps.setup-sdk.outputs.sdk-path }}" >> $GITHUB_ENV
-          # Dynamically locate the directory containing the ohpm executable and add it to PATH
-          OHPM_BIN=$(find ${{ steps.setup-sdk.outputs.sdk-path }} -name ohpm -type f -exec dirname {} \; | head -n 1)
-          if [ -n "$OHPM_BIN" ]; then
-            echo "$OHPM_BIN" >> $GITHUB_PATH
-            echo "Successfully added ohpm from $OHPM_BIN to PATH"
+          # Dynamically locate the ohpm executable and store its path in GITHUB_ENV
+          OHPM_BIN_PATH=$(find ${{ steps.setup-sdk.outputs.sdk-path }} -name ohpm -type f | head -n 1)
+          if [ -n "$OHPM_BIN_PATH" ]; then
+            echo "OHPM_PATH=$OHPM_BIN_PATH" >> $GITHUB_ENV
+            echo "Successfully found ohpm at $OHPM_BIN_PATH"
           else
             echo "Warning: ohpm executable not found in SDK"
           fi
 
-      # 5. Setup Bun
+      # 5. Setup Custom Hvigor wrapper
+      - name: Setup Custom Hvigor wrapper
+        run: |
+          mkdir -p $HOME/hvigor-bin
+          cd $HOME/hvigor-bin
+          npm init -y
+          npm config set @ohos:registry https://repo.harmonyos.com/npm/
+          npm install @ohos/hvigor@6.26.1 @ohos/hvigor-ohos-plugin@6.26.1
+          
+          # Create hvigorw script at repo root
+          cd ${{ github.workspace }}
+          cat << 'EOF' > hvigorw
+          #!/bin/bash
+          node "$HOME/hvigor-bin/node_modules/@ohos/hvigor/bin/hvigor.js" "$@"
+          EOF
+          chmod +x hvigorw
+
+      # 6. Setup Bun
       - uses: oven-sh/setup-bun@v2
 
       - run: bun install --frozen-lockfile
 
       - name: Build Harmony HAR
+        env:
+          HVIGORW_PATH: ${{ github.workspace }}/hvigorw
+          OHPM_PATH: ${{ env.OHPM_PATH }}
         run: npm run build:harmony-har -- --build-mode release
 
       - name: Verify Harmony HAR artifact
