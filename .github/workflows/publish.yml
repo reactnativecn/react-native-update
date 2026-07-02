@@ -47,7 +47,6 @@ jobs:
     container: ghcr.io/sanchuanhehe/harmony-next-pipeline-docker/harmonyos-ci-image:latest
     timeout-minutes: 15
     env:
-      BUN_INSTALL_CACHE_DIR: ${{ github.workspace }}/.bun-cache
       OHPM_CACHE_DIR: ${{ github.workspace }}/.ohpm-cache
     steps:
       - uses: actions/checkout@v6
@@ -58,13 +57,6 @@ jobs:
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git submodule foreach --recursive 'git config --global --add safe.directory "$toplevel/$sm_path"'
       - uses: oven-sh/setup-bun@v2
-      - name: Cache Bun dependencies
-        uses: actions/cache@v4
-        with:
-          path: .bun-cache
-          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-bun-
       # Setup .npmrc file to publish to npm
       - uses: actions/setup-node@v6
         with:
@@ -108,8 +100,6 @@ jobs:
     if: needs.check_changes.outputs.harmony_changed == 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      BUN_INSTALL_CACHE_DIR: ${{ github.workspace }}/.bun-cache
     steps:
       - uses: actions/checkout@v6
         with:
@@ -119,13 +109,6 @@ jobs:
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git submodule foreach --recursive 'git config --global --add safe.directory "$toplevel/$sm_path"'
       - uses: oven-sh/setup-bun@v2
-      - name: Cache Bun dependencies
-        uses: actions/cache@v4
-        with:
-          path: .bun-cache
-          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-bun-
       # Setup .npmrc file to publish to npm
       - uses: actions/setup-node@v6
         with:
