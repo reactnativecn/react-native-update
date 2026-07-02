@@ -258,6 +258,9 @@ class DownloadTask implements Runnable {
             }
         }
 
+        if (params.targetFile.exists()) {
+            params.targetFile.delete();
+        }
     }
 
     private void doPatchFromApk() throws IOException, JSONException {
@@ -300,6 +303,9 @@ class DownloadTask implements Runnable {
         }
 
         bundledResourceCopier.copyFromResource(copyList, contents.copyCrcs);
+        if (params.targetFile.exists()) {
+            params.targetFile.delete();
+        }
     }
 
     private void doPatchFromPpk() throws IOException, JSONException {
@@ -326,7 +332,9 @@ class DownloadTask implements Runnable {
             contents.copyTos.toArray(new String[0]),
             contents.deletes.toArray(new String[0])
         );
-
+        if (params.targetFile.exists()) {
+            params.targetFile.delete();
+        }
     }
 
     private void doCleanUp() {
@@ -334,7 +342,7 @@ class DownloadTask implements Runnable {
             params.unzipDirectory.getAbsolutePath(),
             params.hash,
             params.originHash,
-            7
+            3
         );
     }
 

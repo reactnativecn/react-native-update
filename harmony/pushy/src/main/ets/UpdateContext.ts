@@ -513,7 +513,7 @@ export class UpdateContext {
       this.rootDir,
       state.currentVersion || '',
       state.lastVersion || '',
-      7,
+      3,
     );
   }
 

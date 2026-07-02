@@ -748,7 +748,7 @@ RCT_EXPORT_METHOD(markSuccess:(RCTPromiseResolveBlock)resolve
             PushyToStdString(downloadDir),
             state.current_version,
             state.last_version,
-            7
+            3
         );
         if (!status.ok) {
             RCTLogWarn(@"Pushy cleanup error: %s", status.message.c_str());

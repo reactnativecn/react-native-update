@@ -442,6 +442,13 @@ export class DownloadTask {
     await this.downloadFile(params);
     await this.recreateDirectory(params.unzipDirectory);
     await zlib.decompressFile(params.targetFile, params.unzipDirectory);
+    try {
+      if (fileIo.accessSync(params.targetFile)) {
+        await fileIo.unlink(params.targetFile);
+      }
+    } catch (e) {
+      console.error('Failed to delete temporary zip file after decompression:', e);
+    }
   }
 
   private async doPatchFromApp(params: DownloadTaskParams): Promise<void> {
@@ -484,6 +491,13 @@ export class DownloadTask {
       ),
       params.unzipDirectory,
     );
+    try {
+      if (fileIo.accessSync(params.targetFile)) {
+        await fileIo.unlink(params.targetFile);
+      }
+    } catch (e) {
+      console.error('Failed to delete temporary zip file after patching:', e);
+    }
   }
 
   private async doPatchFromPpk(params: DownloadTaskParams): Promise<void> {
@@ -517,6 +531,13 @@ export class DownloadTask {
       enableMerge: plan.enableMerge,
     });
     console.info('Patch from PPK completed');
+    try {
+      if (fileIo.accessSync(params.targetFile)) {
+        await fileIo.unlink(params.targetFile);
+      }
+    } catch (e) {
+      console.error('Failed to delete temporary patch file after patching:', e);
+    }
   }
 
   private async copyFromResource(
@@ -548,27 +569,35 @@ export class DownloadTask {
             parentDirs.map(dir => this.ensureDirectory(dir)),
           );
           await Promise.all(
-            targets.map(target => this.writeFileContent(target, mediaBuffer.buffer)),
+            targets.map(target => this.writeFileContent(target, mediaBuffer)),
           );
           continue;
         }
         const fromContent = await resourceManager.getRawFd(currentFrom);
-        const [firstTarget, ...restTargets] = targets;
-        const parentDirs = [
-          ...new Set(
-            targets.map(t => t.substring(0, t.lastIndexOf('/'))).filter(Boolean),
-          ),
-        ];
-        await Promise.all(
-          parentDirs.map(dir => this.ensureDirectory(dir))
-        );
-        if (fileIo.accessSync(firstTarget)) {
-          await fileIo.unlink(firstTarget);
+        try {
+          const [firstTarget, ...restTargets] = targets;
+          const parentDirs = [
+            ...new Set(
+              targets.map(t => t.substring(0, t.lastIndexOf('/'))).filter(Boolean),
+            ),
+          ];
+          await Promise.all(
+            parentDirs.map(dir => this.ensureDirectory(dir))
+          );
+          if (fileIo.accessSync(firstTarget)) {
+            await fileIo.unlink(firstTarget);
+          }
+          saveFileToSandbox(fromContent, firstTarget);
+          await Promise.all(
+            restTargets.map(target => this.copySandboxFile(firstTarget, target)),
+          );
+        } finally {
+          try {
+            await resourceManager.closeRawFd(currentFrom);
+          } catch (closeError) {
+            console.error(`Failed to close raw fd for ${currentFrom}:`, closeError);
+          }
         }
-        saveFileToSandbox(fromContent, firstTarget);
-        await Promise.all(
-          restTargets.map(target => this.copySandboxFile(firstTarget, target)),
-        );
       }
     } catch (error) {
       error.message =
@@ -589,7 +618,7 @@ export class DownloadTask {
         params.unzipDirectory,
         params.hash || '',
         params.originHash || '',
-        7,
+        3,
       );
     } catch (error) {
       error.message = 'Cleanup failed:' + error.message;
