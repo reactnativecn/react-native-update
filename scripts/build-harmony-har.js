@@ -134,22 +134,29 @@ function buildHar() {
   }
 
   if (!skipInstall) {
-    runCommand(ohpmPath, ['install'], {
-      cwd: harmonyModuleDir,
-      env,
-      label: 'Install Harmony dependencies',
-    });
+    if (hasDependencies(harmonyModuleDir)) {
+      runCommand(ohpmPath, ['install'], {
+        cwd: harmonyModuleDir,
+        env,
+        label: 'Install Harmony dependencies',
+      });
+    }
 
-    runCommand(ohpmPath, ['install'], {
-      cwd: wrapperProjectDir,
-      env,
-      label: 'Install wrapper project dependencies',
-    });
+    if (hasDependencies(wrapperProjectDir)) {
+      runCommand(ohpmPath, ['install'], {
+        cwd: wrapperProjectDir,
+        env,
+        label: 'Install wrapper project dependencies',
+      });
+    }
   }
 
   const hvigorArgs = ['assembleHar'];
   if (buildMode !== 'debug') {
     hvigorArgs.push('-p', `buildMode=${buildMode}`);
+  }
+  if (process.env.CI === 'true') {
+    hvigorArgs.push('--no-daemon');
   }
 
   runCommand(hvigorwPath, hvigorArgs, {
@@ -436,4 +443,21 @@ function relativeToProject(filePath) {
 
 function fail(message) {
   throw new Error(message);
+}
+
+function hasDependencies(dir) {
+  try {
+    const pkgPath = path.join(dir, 'oh-package.json5');
+    if (!fs.existsSync(pkgPath)) {
+      return false;
+    }
+    const pkgContent = fs.readFileSync(pkgPath, 'utf8');
+    const cleanJson = pkgContent.replace(/\/\*[\s\S]*?\*\/|([^\\:]|^)\/\/.*$/gm, '');
+    const pkg = eval('(' + cleanJson + ')');
+    const hasDeps = pkg.dependencies && Object.keys(pkg.dependencies).length > 0;
+    const hasDevDeps = pkg.devDependencies && Object.keys(pkg.devDependencies).length > 0;
+    return !!(hasDeps || hasDevDeps);
+  } catch (e) {
+    return true;
+  }
 }

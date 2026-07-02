@@ -68,3 +68,19 @@ if(TARGET rnoh)
     target_include_directories(rnoh_pushy PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(rnoh_pushy PUBLIC rnoh)
 endif()
+
+# Optimize binary size and performance for Release builds
+if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+    # Enable Link Time Optimization (LTO / IPO)
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT ipo_supported OUTPUT error)
+    if(ipo_supported)
+        set_property(TARGET rnupdate PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+        if(TARGET rnoh_pushy)
+            set_property(TARGET rnoh_pushy PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+        endif()
+    endif()
+
+    # Strip debug symbols and perform garbage collection of unused code sections
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--gc-sections -s")
+endif()
