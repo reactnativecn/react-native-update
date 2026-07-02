@@ -82,4 +82,8 @@ babel.config.js
 tsconfig.json
 bunfig.toml
 
+# Ignore temporary files created by npm pack during CI builds
+*.tgz
+package
+
 

@@ -109,6 +109,8 @@ jobs:
           else
             echo "No harmony/pushy.har found in previous release or fetch failed."
           fi
+          # Clean up temporary pack and extraction files to prevent publishing them
+          rm -rf react-native-update-${PREV_VERSION}.tgz package || true
       - name: Publish to npm
         shell: bash
         run: |

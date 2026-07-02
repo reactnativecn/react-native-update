@@ -73,3 +73,6 @@ harmony/pushy/src/main/cpp/android-generated
 **/ios/.xcode.env.local
 .bun-cache
 .ohpm-cache
+*.tgz
+package
+
