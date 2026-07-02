@@ -66,6 +66,10 @@ harmony/**
 
 .tmp
 .cursor
+.e2e-rn077-oldarch
+.claude
+.bun-cache
+.ohpm-cache
 
 android/jni/lzma/bin
 android/jni/lzma/DOC
