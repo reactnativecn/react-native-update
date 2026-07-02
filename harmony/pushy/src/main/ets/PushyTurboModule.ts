@@ -61,18 +61,62 @@ export class PushyTurboModule extends UITurboModule {
       bundleName: bundleInfo.name,
       abilityName: this.mUiCtx.abilityInfo?.name,
     };
-    await this.mUiCtx.terminateSelf();
-    await this.mUiCtx.startAbility(want);
+    try {
+      const applicationContext = this.mUiCtx.getApplicationContext();
+      if (applicationContext && typeof (applicationContext as any).restartApp === 'function') {
+        logger.debug(TAG, 'restartAbility via applicationContext.restartApp');
+        (applicationContext as any).restartApp(want);
+        return;
+      }
+    } catch (e) {
+      logger.error(TAG, `restartAbility via restartApp failed: ${getErrorMessage(e)}`);
+    }
+
+    logger.debug(TAG, 'restartAbility via startAbility fallback');
+    try {
+      await this.mUiCtx.startAbility(want);
+      await this.mUiCtx.terminateSelf();
+    } catch (e) {
+      logger.error(TAG, `restartAbility via startAbility/terminateSelf fallback failed: ${getErrorMessage(e)}`);
+      // Last resort: terminateSelf first
+      await this.mUiCtx.terminateSelf();
+      await this.mUiCtx.startAbility(want);
+    }
   }
 
   private async reloadBridge(): Promise<void> {
-    const devToolsController = (this.ctx as Record<string, any>).devToolsController;
-    if (devToolsController) {
-      logger.debug(TAG, 'reloadBridge via devToolsController RELOAD');
-      devToolsController.eventEmitter.emit("RELOAD", { reason: 'HotReload2' });
+    if (this.ctx.isDebugModeEnabled) {
+      logger.debug(TAG, 'reloadBridge via devToolsController RELOAD (debug mode)');
+      const devToolsController = (this.ctx as Record<string, any>).devToolsController;
+      if (devToolsController) {
+        devToolsController.eventEmitter.emit("RELOAD", { reason: 'HotReload2' });
+      }
     } else {
-      logger.debug(TAG, 'reloadBridge via restartAbility');
-      await this.restartAbility();
+      logger.debug(TAG, 'reloadBridge via restartAbility (release mode)');
+      let restarted = false;
+      const fallbackTimer = setTimeout(() => {
+        if (!restarted) {
+          logger.warn(TAG, 'restartAbility did not restart the app within 1.5s, triggering soft reload fallback');
+          const devToolsController = (this.ctx as Record<string, any>).devToolsController;
+          if (devToolsController) {
+            devToolsController.eventEmitter.emit("RELOAD", { reason: 'HotReload2' });
+          }
+        }
+      }, 1500);
+
+      try {
+        await this.restartAbility();
+        restarted = true;
+        clearTimeout(fallbackTimer);
+      } catch (error) {
+        restarted = false;
+        clearTimeout(fallbackTimer);
+        logger.error(TAG, `restartAbility failed: ${getErrorMessage(error)}, triggering soft reload fallback`);
+        const devToolsController = (this.ctx as Record<string, any>).devToolsController;
+        if (devToolsController) {
+          devToolsController.eventEmitter.emit("RELOAD", { reason: 'HotReload2' });
+        }
+      }
     }
   }
 
