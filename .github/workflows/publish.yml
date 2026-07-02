@@ -46,8 +46,6 @@ jobs:
     runs-on: ubuntu-latest
     container: ghcr.io/sanchuanhehe/harmony-next-pipeline-docker/harmonyos-ci-image:latest
     timeout-minutes: 15
-    env:
-      OHPM_CACHE_DIR: ${{ github.workspace }}/.ohpm-cache
     steps:
       - uses: actions/checkout@v6
         with:
@@ -62,25 +60,6 @@ jobs:
         with:
           node-version: 24
           registry-url: 'https://registry.npmjs.org'
-      - name: Cache OHPM dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            .ohpm-cache
-            harmony/pushy/oh_modules
-            harmony/har-wrapper/oh_modules
-          key: ${{ runner.os }}-ohpm-${{ hashFiles('harmony/pushy/oh-package-lock.json5') }}
-          restore-keys: |
-            ${{ runner.os }}-ohpm-
-      - name: Cache Hvigor build outputs
-        uses: actions/cache@v4
-        with:
-          path: |
-            harmony/pushy/.hvigor
-            harmony/har-wrapper/.hvigor
-          key: ${{ runner.os }}-hvigor-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-hvigor-
       - run: bun install --frozen-lockfile
       - name: Build Harmony HAR
         run: npm run build:harmony-har -- --build-mode release
