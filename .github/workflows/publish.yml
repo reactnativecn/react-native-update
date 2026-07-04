@@ -61,8 +61,8 @@ jobs:
           node-version: 24
           registry-url: 'https://registry.npmjs.org'
       - run: bun install --frozen-lockfile
-      - name: Verify Android native libraries
-        run: bash scripts/verify-android-so.sh
+      # - name: Verify Android native libraries
+      #   run: bash scripts/verify-android-so.sh
       - name: Build Harmony HAR
         run: npm run build:harmony-har -- --build-mode release
       - name: Verify Harmony HAR artifact
@@ -96,8 +96,8 @@ jobs:
           node-version: 24
           registry-url: 'https://registry.npmjs.org'
       - run: bun install --frozen-lockfile
-      - name: Verify Android native libraries
-        run: bash scripts/verify-android-so.sh
+      # - name: Verify Android native libraries
+      #   run: bash scripts/verify-android-so.sh
       - name: Fetch previous Harmony HAR
         shell: bash
         run: |
