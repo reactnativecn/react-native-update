@@ -554,15 +554,22 @@ int main() {
       {"StateCoreSwitchToSameVersion", TestStateCoreSwitchToSameVersion},
   };
 
+  int failures = 0;
   for (const auto& test : tests) {
     try {
       test.second();
       std::fprintf(stdout, "[PASS] %s\n", test.first.c_str());
     } catch (const std::exception& error) {
       std::fprintf(stderr, "[FAIL] %s: %s\n", test.first.c_str(), error.what());
-      return 1;
+      ++failures;
     }
   }
 
-  return 0;
+  std::fprintf(
+      stdout,
+      "\n%zu tests, %d passed, %d failed\n",
+      tests.size(),
+      static_cast<int>(tests.size()) - failures,
+      failures);
+  return failures == 0 ? 0 : 1;
 }
