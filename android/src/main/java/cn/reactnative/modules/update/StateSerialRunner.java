@@ -6,6 +6,7 @@ import com.facebook.react.bridge.Promise;
 
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
 
 /**
  * Runs state-persistence operations (switchVersion / markSuccess / setUuid /
@@ -27,8 +28,15 @@ final class StateSerialRunner {
     }
 
     // Single worker thread -> operations stay serialized in submission order,
-    // matching the previous UI-thread behavior.
-    private static final Executor EXECUTOR = Executors.newSingleThreadExecutor();
+    // matching the previous UI-thread behavior. The thread is named so it is
+    // identifiable in thread dumps / ANR traces when diagnosing persistence.
+    private static final Executor EXECUTOR = Executors.newSingleThreadExecutor(
+        new ThreadFactory() {
+            @Override
+            public Thread newThread(Runnable r) {
+                return new Thread(r, "pushy-state-serial");
+            }
+        });
 
     private StateSerialRunner() {
     }
