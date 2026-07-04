@@ -2,6 +2,13 @@ import { afterEach, describe, expect, mock, test } from 'bun:test';
 
 const importFreshClient = (cacheKey: string) => import(`../client?${cacheKey}`);
 
+const originalDev = (globalThis as any).__DEV__;
+
+afterEach(() => {
+  mock.restore();
+  (globalThis as any).__DEV__ = originalDev;
+});
+
 const createJsonResponse = (payload: unknown) =>
   ({
     ok: true,
