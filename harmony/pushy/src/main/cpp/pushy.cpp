@@ -716,6 +716,34 @@ napi_value BuildCopyGroups(napi_env env, napi_callback_info info) {
   return NewCopyGroupArray(env, groups);
 }
 
+// ---------------------------------------------------------------------------
+// Async work plumbing for the heavy patch operations.
+//
+// applyPatchFromFileSource and cleanupOldEntries run hdiff / recursive file IO
+// that can take hundreds of ms to seconds. The Pushy TurboModule executes on
+// the UI thread, so running these synchronously froze the UI. These are now
+// wrapped in napi_create_async_work: arguments are parsed on the JS thread, the
+// heavy work runs on a libuv worker thread, and the returned Promise is settled
+// back on the JS thread.
+// ---------------------------------------------------------------------------
+
+struct ApplyPatchWork {
+  napi_async_work work = nullptr;
+  napi_deferred deferred = nullptr;
+  pushy::patch::FileSourcePatchOptions options;
+  pushy::patch::Status status{false, ""};
+};
+
+struct CleanupWork {
+  napi_async_work work = nullptr;
+  napi_deferred deferred = nullptr;
+  std::string root_dir;
+  std::string keep_current;
+  std::string keep_previous;
+  int32_t max_age_days = 0;
+  pushy::patch::Status status{false, ""};
+};
+
 napi_value ApplyPatchFromFileSource(napi_env env, napi_callback_info info) {
   napi_value args[1] = {nullptr};
   size_t argc = 1;
@@ -755,26 +783,55 @@ napi_value ApplyPatchFromFileSource(napi_env env, napi_callback_info info) {
     return nullptr;
   }
 
-  pushy::patch::FileSourcePatchOptions options;
-  options.manifest = BuildManifest(copy_froms, copy_tos, deletes);
-  options.source_root = source_root;
-  options.target_root = target_root;
-  options.origin_bundle_path = origin_bundle_path;
-  options.bundle_patch_path = bundle_patch_path;
-  options.bundle_output_path = bundle_output_path;
-  options.merge_source_subdir = merge_source_subdir;
-  options.enable_merge = enable_merge;
+  auto* work_data = new ApplyPatchWork();
+  work_data->options.manifest = BuildManifest(copy_froms, copy_tos, deletes);
+  work_data->options.source_root = source_root;
+  work_data->options.target_root = target_root;
+  work_data->options.origin_bundle_path = origin_bundle_path;
+  work_data->options.bundle_patch_path = bundle_patch_path;
+  work_data->options.bundle_output_path = bundle_output_path;
+  work_data->options.merge_source_subdir = merge_source_subdir;
+  work_data->options.enable_merge = enable_merge;
 
-  const pushy::patch::Status status =
-      pushy::patch::ApplyPatchFromFileSource(options);
-  if (!status.ok) {
-    ThrowError(env, status.message);
+  napi_value promise = nullptr;
+  if (napi_create_promise(env, &work_data->deferred, &promise) != napi_ok) {
+    delete work_data;
+    ThrowError(env, "Unable to create promise");
     return nullptr;
   }
 
-  napi_value undefined_value = nullptr;
-  napi_get_undefined(env, &undefined_value);
-  return undefined_value;
+  napi_value resource_name = nullptr;
+  napi_create_string_utf8(
+      env, "applyPatchFromFileSource", NAPI_AUTO_LENGTH, &resource_name);
+  napi_create_async_work(
+      env,
+      nullptr,
+      resource_name,
+      [](napi_env, void* data) {
+        auto* w = static_cast<ApplyPatchWork*>(data);
+        w->status = pushy::patch::ApplyPatchFromFileSource(w->options);
+      },
+      [](napi_env cb_env, napi_status, void* data) {
+        auto* w = static_cast<ApplyPatchWork*>(data);
+        if (w->status.ok) {
+          napi_value undefined_value = nullptr;
+          napi_get_undefined(cb_env, &undefined_value);
+          napi_resolve_deferred(cb_env, w->deferred, undefined_value);
+        } else {
+          napi_value error = nullptr;
+          napi_value message = nullptr;
+          napi_create_string_utf8(
+              cb_env, w->status.message.c_str(), NAPI_AUTO_LENGTH, &message);
+          napi_create_error(cb_env, nullptr, message, &error);
+          napi_reject_deferred(cb_env, w->deferred, error);
+        }
+        napi_delete_async_work(cb_env, w->work);
+        delete w;
+      },
+      work_data,
+      &work_data->work);
+  napi_queue_async_work(env, work_data->work);
+  return promise;
 }
 
 napi_value CleanupOldEntries(napi_env env, napi_callback_info info) {
@@ -803,19 +860,52 @@ napi_value CleanupOldEntries(napi_env env, napi_callback_info info) {
     return nullptr;
   }
 
-  const pushy::patch::Status status = pushy::patch::CleanupOldEntries(
-      root_dir,
-      keep_current,
-      keep_previous,
-      max_age_days);
-  if (!status.ok) {
-    ThrowError(env, status.message);
+  auto* work_data = new CleanupWork();
+  work_data->root_dir = root_dir;
+  work_data->keep_current = keep_current;
+  work_data->keep_previous = keep_previous;
+  work_data->max_age_days = max_age_days;
+
+  napi_value promise = nullptr;
+  if (napi_create_promise(env, &work_data->deferred, &promise) != napi_ok) {
+    delete work_data;
+    ThrowError(env, "Unable to create promise");
     return nullptr;
   }
 
-  napi_value undefined_value = nullptr;
-  napi_get_undefined(env, &undefined_value);
-  return undefined_value;
+  napi_value resource_name = nullptr;
+  napi_create_string_utf8(
+      env, "cleanupOldEntries", NAPI_AUTO_LENGTH, &resource_name);
+  napi_create_async_work(
+      env,
+      nullptr,
+      resource_name,
+      [](napi_env, void* data) {
+        auto* w = static_cast<CleanupWork*>(data);
+        w->status = pushy::patch::CleanupOldEntries(
+            w->root_dir, w->keep_current, w->keep_previous, w->max_age_days);
+      },
+      [](napi_env cb_env, napi_status, void* data) {
+        auto* w = static_cast<CleanupWork*>(data);
+        if (w->status.ok) {
+          napi_value undefined_value = nullptr;
+          napi_get_undefined(cb_env, &undefined_value);
+          napi_resolve_deferred(cb_env, w->deferred, undefined_value);
+        } else {
+          napi_value error = nullptr;
+          napi_value message = nullptr;
+          napi_create_string_utf8(
+              cb_env, w->status.message.c_str(), NAPI_AUTO_LENGTH, &message);
+          napi_create_error(cb_env, nullptr, message, &error);
+          napi_reject_deferred(cb_env, w->deferred, error);
+        }
+        napi_delete_async_work(cb_env, w->work);
+        delete w;
+      },
+      work_data,
+      &work_data->work);
+  napi_queue_async_work(env, work_data->work);
+  return promise;
 }
 
 bool ExportFunction(

@@ -75,13 +75,13 @@ interface NativePatchCoreBindings {
     bundlePatchEntryName?: string,
   ): ArchivePatchPlanResult;
   buildCopyGroups(copyFroms: string[], copyTos: string[]): CopyGroupResult[];
-  applyPatchFromFileSource(options: FileSourcePatchRequest): void;
+  applyPatchFromFileSource(options: FileSourcePatchRequest): Promise<void>;
   cleanupOldEntries(
     rootDir: string,
     keepCurrent: string,
     keepPrevious: string,
     maxAgeDays: number,
-  ): void;
+  ): Promise<void>;
 }
 
 export default NativeUpdateCore as unknown as NativePatchCoreBindings;
