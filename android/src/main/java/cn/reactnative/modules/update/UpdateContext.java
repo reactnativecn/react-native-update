@@ -37,7 +37,7 @@ public class UpdateContext {
     private static final String KEY_FIRST_LOAD_MARKED = "firstLoadMarked";
     
     // Singleton instance
-    private static UpdateContext sInstance;
+    private static volatile UpdateContext sInstance;
     private static final Object sLock = new Object();
     private static ReactInstanceManager pendingReactInstanceManager;
 
@@ -55,7 +55,7 @@ public class UpdateContext {
         boolean flagB
     );
 
-    public UpdateContext(Context context) {
+    private UpdateContext(Context context) {
         this.context = context.getApplicationContext();
         this.executor = Executors.newSingleThreadExecutor();
 

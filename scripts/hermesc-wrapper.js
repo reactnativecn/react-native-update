@@ -4,7 +4,11 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const PROJECT_ROOT = path.resolve(__dirname, '../../..');
-const realHermescPath = path.join(PROJECT_ROOT, 'node_modules/react-native/sdks/hermesc/osx-bin/_hermesc');
+// Allow overriding the real hermesc path (e.g. for Pods/monorepo layouts where
+// react-native is not directly under PROJECT_ROOT/node_modules).
+const realHermescPath =
+  process.env.RNUPDATE_REAL_HERMESC ||
+  path.join(PROJECT_ROOT, 'node_modules/react-native/sdks/hermesc/osx-bin/_hermesc');
 const args = process.argv.slice(2);
 
 console.log(`[Hermesc Wrapper] Executing Hermes compilation...`);
@@ -28,17 +32,23 @@ hermesc.on('error', (error) => {
   process.exit(1);
 });
 
-hermesc.on('close', (code) => {
-  console.log(`[Hermesc Wrapper] Hermes compilation completed with code: ${code}`);
+hermesc.on('close', (code, signal) => {
+  console.log(`[Hermesc Wrapper] Hermes compilation completed with code: ${code}, signal: ${signal}`);
 
-  if (code === 0 && isCompileOperation && outputFile) {
+  // A null exit code means hermesc was terminated by a signal — treat that as a
+  // failure rather than success.
+  if (code !== 0 || signal) {
+    process.exit(code == null ? 1 : code);
+    return;
+  }
+
+  if (isCompileOperation && outputFile) {
     console.log(`[Hermesc Wrapper] 🔄 Post-processing HBC file: ${outputFile}`);
-
-    setTimeout(() => {
-      processHBCFile(outputFile);
-    }, 500);
+    // The output file is fully written by the time `close` fires, so process
+    // it synchronously instead of racing on a fixed timer.
+    processHBCFile(outputFile);
   } else {
-    process.exit(code);
+    process.exit(0);
   }
 });
 
@@ -88,6 +98,14 @@ function processHBCFile(hbcFilePath) {
 
     console.log(`[Hermesc Wrapper] ✅ Successfully injected metadata into: ${hbcFilePath}`);
     console.log(`[Hermesc Wrapper] 🧹 Cleaning up hash file...`);
+
+    // Actually remove the hash file so a stale contentHash is not reused by a
+    // subsequent build that fails to regenerate it.
+    try {
+      fs.unlinkSync(hashFilePath);
+    } catch (cleanupError) {
+      console.warn(`[Hermesc Wrapper] ⚠️  Failed to remove hash file:`, cleanupError);
+    }
 
     process.exit(0);
   } catch (error) {

@@ -4,56 +4,16 @@
 #include <vector>
 
 #include "archive_patch_core.h"
+#include "jni_util.h"
 #include "state_core.h"
+#include "state_ops.h"
 
 namespace {
 
-enum class StateOperation {
-  kSwitchVersion = 1,
-  kMarkSuccess = 2,
-  kRollback = 3,
-  kClearFirstTime = 4,
-  kClearRollbackMark = 5,
-  kResolveLaunch = 6,
-};
-
-std::string JStringToString(JNIEnv* env, jstring value) {
-  if (value == nullptr) {
-    return std::string();
-  }
-
-  const char* chars = env->GetStringUTFChars(value, nullptr);
-  if (chars == nullptr) {
-    return std::string();
-  }
-
-  std::string result(chars);
-  env->ReleaseStringUTFChars(value, chars);
-  return result;
-}
-
-std::vector<std::string> JArrayToVector(JNIEnv* env, jobjectArray values) {
-  std::vector<std::string> result;
-  if (values == nullptr) {
-    return result;
-  }
-
-  const jsize size = env->GetArrayLength(values);
-  result.reserve(static_cast<size_t>(size));
-  for (jsize index = 0; index < size; ++index) {
-    auto* item = static_cast<jstring>(env->GetObjectArrayElement(values, index));
-    result.push_back(JStringToString(env, item));
-    env->DeleteLocalRef(item);
-  }
-  return result;
-}
-
-void ThrowRuntimeException(JNIEnv* env, const std::string& message) {
-  jclass exception = env->FindClass("java/lang/RuntimeException");
-  if (exception != nullptr) {
-    env->ThrowNew(exception, message.c_str());
-  }
-}
+using pushy::jni_util::JArrayToVector;
+using pushy::jni_util::JStringToString;
+using pushy::jni_util::ThrowRuntimeException;
+using pushy::state_ops::StateOperation;
 
 void SetStringField(
     JNIEnv* env,
@@ -64,6 +24,9 @@ void SetStringField(
   jfieldID field =
       env->GetFieldID(target_class, field_name, "Ljava/lang/String;");
   if (field == nullptr) {
+    // Clear the pending NoSuchFieldError so subsequent JNI calls are not
+    // executed with an exception pending (undefined behavior / CheckJNI abort).
+    env->ExceptionClear();
     return;
   }
   if (value.empty()) {
@@ -83,9 +46,11 @@ void SetBooleanField(
     const char* field_name,
     bool value) {
   jfieldID field = env->GetFieldID(target_class, field_name, "Z");
-  if (field != nullptr) {
-    env->SetBooleanField(target, field, value ? JNI_TRUE : JNI_FALSE);
+  if (field == nullptr) {
+    env->ExceptionClear();
+    return;
   }
+  env->SetBooleanField(target, field, value ? JNI_TRUE : JNI_FALSE);
 }
 
 std::string GetStringField(
@@ -96,6 +61,7 @@ std::string GetStringField(
   jfieldID field =
       env->GetFieldID(target_class, field_name, "Ljava/lang/String;");
   if (field == nullptr) {
+    env->ExceptionClear();
     return std::string();
   }
   auto* value = static_cast<jstring>(env->GetObjectField(target, field));
@@ -112,7 +78,11 @@ bool GetBooleanField(
     jclass target_class,
     const char* field_name) {
   jfieldID field = env->GetFieldID(target_class, field_name, "Z");
-  return field != nullptr && env->GetBooleanField(target, field) == JNI_TRUE;
+  if (field == nullptr) {
+    env->ExceptionClear();
+    return false;
+  }
+  return env->GetBooleanField(target, field) == JNI_TRUE;
 }
 
 pushy::state::State ReadState(
@@ -241,13 +211,9 @@ jobject NewArchivePatchPlanResult(
 
 jobject NewCopyGroupResult(
     JNIEnv* env,
+    jclass result_class,
+    jclass string_class,
     const pushy::archive_patch::CopyGroup& group) {
-  jclass result_class =
-      env->FindClass("cn/reactnative/modules/update/CopyGroupResult");
-  if (result_class == nullptr) {
-    return nullptr;
-  }
-
   jmethodID constructor = env->GetMethodID(result_class, "<init>", "()V");
   if (constructor == nullptr) {
     return nullptr;
@@ -262,7 +228,6 @@ jobject NewCopyGroupResult(
   jfieldID to_paths_field =
       env->GetFieldID(result_class, "toPaths", "[Ljava/lang/String;");
   if (to_paths_field != nullptr) {
-    jclass string_class = env->FindClass("java/lang/String");
     jobjectArray to_paths = env->NewObjectArray(
         static_cast<jsize>(group.to_paths.size()), string_class, nullptr);
     if (to_paths != nullptr) {
@@ -275,22 +240,20 @@ jobject NewCopyGroupResult(
       env->SetObjectField(result, to_paths_field, to_paths);
       env->DeleteLocalRef(to_paths);
     }
+  } else {
+    env->ExceptionClear();
   }
 
   return result;
 }
 
-pushy::archive_patch::ArchivePatchType ToArchivePatchType(jint patch_type) {
-  switch (patch_type) {
-    case 1:
-      return pushy::archive_patch::ArchivePatchType::kFull;
-    case 2:
-      return pushy::archive_patch::ArchivePatchType::kPatchFromPackage;
-    case 3:
-      return pushy::archive_patch::ArchivePatchType::kPatchFromPpk;
-    default:
-      return pushy::archive_patch::ArchivePatchType::kFull;
-  }
+bool ToArchivePatchType(
+    jint patch_type,
+    pushy::archive_patch::ArchivePatchType* out) {
+  // Delegate to the shared parser so Android and HarmonyOS agree on which
+  // integer values are valid and neither silently falls back to kFull.
+  return pushy::archive_patch::TryParseArchivePatchType(
+      static_cast<int>(patch_type), out);
 }
 
 pushy::patch::PatchManifest BuildManifest(
@@ -411,9 +374,14 @@ Java_cn_reactnative_modules_update_DownloadTask_buildArchivePatchPlan(
 
   pushy::patch::PatchManifest manifest =
       BuildManifest(from_values, to_values, JArrayToVector(env, deletes));
+  pushy::archive_patch::ArchivePatchType archive_type;
+  if (!ToArchivePatchType(patch_type, &archive_type)) {
+    ThrowRuntimeException(env, "Unknown archive patch type");
+    return nullptr;
+  }
   pushy::archive_patch::ArchivePatchPlan plan;
   pushy::patch::Status status = pushy::archive_patch::BuildArchivePatchPlan(
-      ToArchivePatchType(patch_type),
+      archive_type,
       manifest,
       JArrayToVector(env, entry_names),
       &plan);
@@ -454,6 +422,11 @@ Java_cn_reactnative_modules_update_DownloadTask_buildCopyGroups(
     return nullptr;
   }
 
+  jclass string_class = env->FindClass("java/lang/String");
+  if (string_class == nullptr) {
+    return nullptr;
+  }
+
   jobjectArray result = env->NewObjectArray(
       static_cast<jsize>(groups.size()), result_class, nullptr);
   if (result == nullptr) {
@@ -461,9 +434,10 @@ Java_cn_reactnative_modules_update_DownloadTask_buildCopyGroups(
   }
 
   for (jsize index = 0; index < static_cast<jsize>(groups.size()); ++index) {
-    jobject group = NewCopyGroupResult(env, groups[index]);
+    jobject group = NewCopyGroupResult(env, result_class, string_class, groups[index]);
     env->SetObjectArrayElement(result, index, group);
     env->DeleteLocalRef(group);
   }
+  env->DeleteLocalRef(string_class);
   return result;
 }

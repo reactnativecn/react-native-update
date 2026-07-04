@@ -10,6 +10,8 @@ static NSString *const RCTPushyDownloaderErrorDomain = @"cn.reactnative.pushy";
 @property (copy) NSString *savePath;
 @property (nonatomic, strong) NSError *fileError;
 @property (nonatomic, assign) BOOL finished;
+@property (nonatomic, assign) int lastReportedPercentage;
+@property (nonatomic, assign) long long lastReportedBytes;
 @end
 
 @implementation RCTPushyDownloader
@@ -42,6 +44,10 @@ completionHandler:(void (^)(NSString *path, NSError *error))completionHandler
     }
 
     NSURLSessionConfiguration *sessionConfig = [NSURLSessionConfiguration defaultSessionConfiguration];
+    // Avoid hanging forever on a stalled connection (default resource timeout
+    // is 7 days). These are generous enough for large bundles on slow networks.
+    sessionConfig.timeoutIntervalForRequest = 30;
+    sessionConfig.timeoutIntervalForResource = 300;
     self.session = [NSURLSession sessionWithConfiguration:sessionConfig
                                                  delegate:self
                                             delegateQueue:nil];
@@ -77,14 +83,47 @@ completionHandler:(void (^)(NSString *path, NSError *error))completionHandler
  totalBytesWritten:(int64_t)totalBytesWritten
 totalBytesExpectedToWrite:(int64_t)totalBytesExpectedToWrite
 {
-    if (self.progressHandler) {
-        self.progressHandler(totalBytesWritten ,totalBytesExpectedToWrite);
+    if (!self.progressHandler) {
+        return;
     }
+    // Normalize an unknown total (NSURLSessionTransferSizeUnknown == -1) to 0 so
+    // the JS side does not compute a negative/NaN percentage.
+    long long total = totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : 0;
+    if (total > 0) {
+        int percentage = (int)((totalBytesWritten * 100.0 / total) + 0.5);
+        if (percentage <= self.lastReportedPercentage) {
+            return;
+        }
+        self.lastReportedPercentage = percentage;
+    } else {
+        // Total unknown: throttle by bytes to avoid flooding the bridge.
+        if (totalBytesWritten - self.lastReportedBytes < 256 * 1024) {
+            return;
+        }
+        self.lastReportedBytes = totalBytesWritten;
+    }
+    self.progressHandler(totalBytesWritten, total);
 }
 
 - (void)URLSession:(NSURLSession *)session downloadTask:(NSURLSessionDownloadTask *)downloadTask
 didFinishDownloadingToURL:(NSURL *)location
 {
+    // A completed transfer does not imply success: 404/500 pages, CDN error
+    // bodies and captive-portal HTML all arrive here. Reject non-2xx responses
+    // before touching savePath so an existing valid package is not destroyed.
+    NSURLResponse *response = downloadTask.response;
+    if ([response isKindOfClass:[NSHTTPURLResponse class]]) {
+        NSInteger statusCode = ((NSHTTPURLResponse *)response).statusCode;
+        if (statusCode < 200 || statusCode >= 300) {
+            self.fileError = [NSError errorWithDomain:RCTPushyDownloaderErrorDomain
+                                                 code:statusCode
+                                             userInfo:@{
+                NSLocalizedDescriptionKey: [NSString stringWithFormat:@"unexpected http status code %ld", (long)statusCode],
+            }];
+            return;
+        }
+    }
+
     NSFileManager *fileManager = [NSFileManager defaultManager];
     [fileManager removeItemAtPath:self.savePath error:nil];
 

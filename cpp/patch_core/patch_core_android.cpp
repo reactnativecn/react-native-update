@@ -3,47 +3,14 @@
 #include <string>
 #include <vector>
 
+#include "jni_util.h"
 #include "patch_core.h"
 
 namespace {
 
-std::string JStringToString(JNIEnv* env, jstring value) {
-  if (value == nullptr) {
-    return std::string();
-  }
-
-  const char* chars = env->GetStringUTFChars(value, nullptr);
-  if (chars == nullptr) {
-    return std::string();
-  }
-
-  std::string result(chars);
-  env->ReleaseStringUTFChars(value, chars);
-  return result;
-}
-
-std::vector<std::string> JArrayToVector(JNIEnv* env, jobjectArray values) {
-  std::vector<std::string> result;
-  if (values == nullptr) {
-    return result;
-  }
-
-  const jsize size = env->GetArrayLength(values);
-  result.reserve(static_cast<size_t>(size));
-  for (jsize i = 0; i < size; ++i) {
-    auto* item = static_cast<jstring>(env->GetObjectArrayElement(values, i));
-    result.push_back(JStringToString(env, item));
-    env->DeleteLocalRef(item);
-  }
-  return result;
-}
-
-void ThrowRuntimeException(JNIEnv* env, const std::string& message) {
-  jclass exception = env->FindClass("java/lang/RuntimeException");
-  if (exception != nullptr) {
-    env->ThrowNew(exception, message.c_str());
-  }
-}
+using pushy::jni_util::JArrayToVector;
+using pushy::jni_util::JStringToString;
+using pushy::jni_util::ThrowRuntimeException;
 
 }  // namespace
 

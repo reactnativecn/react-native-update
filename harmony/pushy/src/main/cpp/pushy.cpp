@@ -8,6 +8,7 @@
 #include "archive_patch_core.h"
 #include "patch_core.h"
 #include "state_core.h"
+#include "state_ops.h"
 
 extern "C" {
 #include "hpatch.h"
@@ -15,14 +16,7 @@ extern "C" {
 
 namespace {
 
-enum class StateOperation {
-  kSwitchVersion = 1,
-  kMarkSuccess = 2,
-  kRollback = 3,
-  kClearFirstTime = 4,
-  kClearRollbackMark = 5,
-  kResolveLaunch = 6,
-};
+using pushy::state_ops::StateOperation;
 
 constexpr const char* kDefaultBundlePatchEntryName = "index.bundlejs.patch";
 
@@ -670,9 +664,14 @@ napi_value BuildArchivePatchPlan(napi_env env, napi_callback_info info) {
 
   const pushy::patch::PatchManifest manifest =
       BuildManifest(copy_froms, copy_tos, deletes);
+  pushy::archive_patch::ArchivePatchType archive_type;
+  if (!pushy::archive_patch::TryParseArchivePatchType(patch_type, &archive_type)) {
+    ThrowError(env, "Unknown archive patch type");
+    return nullptr;
+  }
   pushy::archive_patch::ArchivePatchPlan plan;
   const pushy::patch::Status status = pushy::archive_patch::BuildArchivePatchPlan(
-      static_cast<pushy::archive_patch::ArchivePatchType>(patch_type),
+      archive_type,
       manifest,
       entry_names,
       &plan,

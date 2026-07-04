@@ -35,6 +35,11 @@ EntryAction ClassifyEntry(
     ArchivePatchType type,
     const std::string& entry_name);
 
+// Convert a platform-supplied integer to an ArchivePatchType. Returns false for
+// unknown values so callers can fail loudly instead of silently treating an
+// incremental patch as a full package (which would skip validation).
+bool TryParseArchivePatchType(int value, ArchivePatchType* out);
+
 patch::Status BuildArchivePatchPlan(
     ArchivePatchType type,
     const patch::PatchManifest& manifest,

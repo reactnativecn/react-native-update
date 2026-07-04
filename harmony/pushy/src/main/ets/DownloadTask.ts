@@ -308,6 +308,26 @@ export class DownloadTask {
     let received = 0;
     let writeError: Error | null = null;
     let writeQueue = Promise.resolve();
+    let lastReportedPercentage = -1;
+    let lastReportedBytes = 0;
+
+    // Emit at most one progress event per whole-percent change (or per 256KB
+    // when the total is unknown), and only from the dataReceive handler, so the
+    // two HarmonyOS callbacks don't each fire an event per chunk.
+    const reportProgress = () => {
+      if (contentLength > 0) {
+        const percentage = Math.round((received * 100) / contentLength);
+        if (percentage <= lastReportedPercentage) {
+          return;
+        }
+        lastReportedPercentage = percentage;
+      } else if (received - lastReportedBytes < 256 * 1024) {
+        return;
+      } else {
+        lastReportedBytes = received;
+      }
+      this.onProgressUpdate(received, contentLength);
+    };
 
     const closeWriter = async () => {
       if (writer) {
@@ -316,8 +336,37 @@ export class DownloadTask {
       }
     };
 
+    // Watchdog: reject the download if no data is received for a while, so a
+    // stalled transfer after requestInStream resolves cannot hang the download
+    // Promise (and the JS caller) forever.
+    const INACTIVITY_TIMEOUT_MS = 60000;
+    let watchdogTimer: number | null = null;
+    let inactivityReject: ((error: Error) => void) | null = null;
+    const clearWatchdog = () => {
+      if (watchdogTimer !== null) {
+        clearTimeout(watchdogTimer);
+        watchdogTimer = null;
+      }
+    };
+    const refreshWatchdog = () => {
+      clearWatchdog();
+      watchdogTimer = setTimeout(() => {
+        if (inactivityReject) {
+          inactivityReject(
+            Error(
+              `Download stalled: no data received for ${INACTIVITY_TIMEOUT_MS}ms`,
+            ),
+          );
+        }
+      }, INACTIVITY_TIMEOUT_MS);
+    };
+    const inactivityPromise = new Promise<void>((_, reject) => {
+      inactivityReject = reject;
+    });
+
     const dataEndPromise = new Promise<void>((resolve, reject) => {
       httpRequest.on('dataEnd', () => {
+        clearWatchdog();
         writeQueue
           .then(async () => {
             if (writeError) {
@@ -363,6 +412,7 @@ export class DownloadTask {
       });
 
       httpRequest.on('dataReceive', (data: ArrayBuffer) => {
+        refreshWatchdog();
         if (writeError) {
           return;
         }
@@ -377,22 +427,21 @@ export class DownloadTask {
             writeError = error as Error;
           }
         });
-        this.onProgressUpdate(received, contentLength);
+        reportProgress();
       });
 
       httpRequest.on(
         'dataReceiveProgress',
         (data: http.DataReceiveProgressInfo) => {
+          // Only refine the known total here; progress events are emitted from
+          // the dataReceive handler to avoid double-firing.
           if (data.totalSize > 0) {
             contentLength = data.totalSize;
           }
-          if (data.receiveSize > received) {
-            received = data.receiveSize;
-          }
-          this.onProgressUpdate(received, contentLength);
         },
       );
 
+      refreshWatchdog();
       const responseCode = await httpRequest.requestInStream(params.url, {
         method: http.RequestMethod.GET,
         readTimeout: 60000,
@@ -405,7 +454,7 @@ export class DownloadTask {
         throw Error(`Server error: ${responseCode}`);
       }
 
-      await dataEndPromise;
+      await Promise.race([dataEndPromise, inactivityPromise]);
       const stats = await fileIo.stat(params.targetFile);
       const fileSize = stats.size;
       if (contentLength > 0 && fileSize !== contentLength) {
@@ -417,6 +466,7 @@ export class DownloadTask {
       console.error('Download failed:', error);
       throw error;
     } finally {
+      clearWatchdog();
       try {
         await closeWriter();
       } catch (closeError) {

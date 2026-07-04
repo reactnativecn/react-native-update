@@ -93,23 +93,23 @@ export class PushyTurboModule extends UITurboModule {
       }
     } else {
       logger.debug(TAG, 'reloadBridge via restartAbility (release mode)');
-      let restarted = false;
+      // If the process truly restarts, this timer dies with it. It only fires
+      // when the app is still alive after 1.5s — i.e. restartApp resolved but
+      // was silently suppressed (HarmonyOS rate-limits restarts within a few
+      // seconds of cold start / of a previous call) — which is exactly when the
+      // soft reload must take over. So the timer is NOT cleared on the success
+      // path, only in the catch branch where the soft reload runs immediately.
       const fallbackTimer = setTimeout(() => {
-        if (!restarted) {
-          logger.warn(TAG, 'restartAbility did not restart the app within 1.5s, triggering soft reload fallback');
-          const devToolsController = (this.ctx as Record<string, any>).devToolsController;
-          if (devToolsController) {
-            devToolsController.eventEmitter.emit("RELOAD", { reason: 'HotReload2' });
-          }
+        logger.warn(TAG, 'restartAbility did not restart the app within 1.5s, triggering soft reload fallback');
+        const devToolsController = (this.ctx as Record<string, any>).devToolsController;
+        if (devToolsController) {
+          devToolsController.eventEmitter.emit("RELOAD", { reason: 'HotReload2' });
         }
       }, 1500);
 
       try {
         await this.restartAbility();
-        restarted = true;
-        clearTimeout(fallbackTimer);
       } catch (error) {
-        restarted = false;
         clearTimeout(fallbackTimer);
         logger.error(TAG, `restartAbility failed: ${getErrorMessage(error)}, triggering soft reload fallback`);
         const devToolsController = (this.ctx as Record<string, any>).devToolsController;

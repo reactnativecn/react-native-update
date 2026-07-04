@@ -25,6 +25,22 @@ EntryAction ClassifyEntry(
   return entry_name == kManifestEntryName ? EntryAction::kSkip : EntryAction::kExtract;
 }
 
+bool TryParseArchivePatchType(int value, ArchivePatchType* out) {
+  switch (value) {
+    case 1:
+      *out = ArchivePatchType::kFull;
+      return true;
+    case 2:
+      *out = ArchivePatchType::kPatchFromPackage;
+      return true;
+    case 3:
+      *out = ArchivePatchType::kPatchFromPpk;
+      return true;
+    default:
+      return false;
+  }
+}
+
 patch::Status BuildArchivePatchPlan(
     ArchivePatchType type,
     const patch::PatchManifest& manifest,

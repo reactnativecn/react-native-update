@@ -68,7 +68,7 @@ export class UpdateContext {
    */
   private trace(point: string): void {
     const snap = this.getStateSnapshot();
-    logger.info(
+    logger.debug(
       'UpdateContext',
       `trace id=${this.instanceId} ${point}` +
         ` pkg=${snap.packageVersion} bt=${snap.buildTime}` +
@@ -91,7 +91,12 @@ export class UpdateContext {
         name: 'update',
       });
     } catch (e) {
+      // Fail fast: a missing preferences store means no state can be persisted,
+      // which disables rollback protection. Rethrow so the failure surfaces at
+      // construction time instead of later as an unrelated TypeError on the
+      // undefined `preferences` handle.
       console.error('Failed to init preferences:', e);
+      throw e;
     }
   }
 
@@ -179,17 +184,23 @@ export class UpdateContext {
   }
 
   private flushPreferences(reason: string): void {
-    try {
-      const flushablePreferences = this.preferences as FlushablePreferences;
-      if (typeof flushablePreferences.flushSync === 'function') {
+    const flushablePreferences = this.preferences as FlushablePreferences;
+    if (typeof flushablePreferences.flushSync === 'function') {
+      try {
         flushablePreferences.flushSync();
         return;
+      } catch (error) {
+        console.error(`Failed to flushSync preferences for ${reason}:`, error);
+        // fall through to async flush rather than failing the whole operation
       }
-      throw Error('preferences.flushSync is not available');
-    } catch (error) {
-      console.error(`Failed to flush preferences for ${reason}:`, error);
-      throw error;
     }
+    // flushSync unavailable or failed: writes are already applied in memory via
+    // putSync/deleteSync; persist asynchronously as a best-effort so the state
+    // operation still succeeds instead of throwing (which is worse than a
+    // slightly delayed persist).
+    this.preferences.flush().catch((error: Object) => {
+      console.error(`Failed to flush preferences for ${reason}:`, error);
+    });
   }
 
   private putNullableString(key: string, value?: string): void {

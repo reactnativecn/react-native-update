@@ -30,7 +30,6 @@ import {
   assertWeb,
   computeProgress,
   DEFAULT_FETCH_TIMEOUT_MS,
-  emptyObj,
   fetchWithTimeout,
   info,
   joinUrls,
@@ -87,6 +86,7 @@ const defaultClientOptions: ClientOptions = {
 
 export const sharedState: {
   progressHandlers: Record<string, EmitterSubscription>;
+  downloadingTasks: Record<string, Promise<string | undefined>>;
   downloadedHash?: string;
   toHash?: string;
   apkStatus: 'downloading' | 'downloaded' | null;
@@ -94,6 +94,7 @@ export const sharedState: {
   applyingUpdate: boolean;
 } = {
   progressHandlers: {},
+  downloadingTasks: {},
   downloadedHash: undefined,
   apkStatus: null,
   marked: false,
@@ -102,6 +103,7 @@ export const sharedState: {
 
 const assertHash = (hash: string) => {
   if (!sharedState.downloadedHash) {
+    log(`no downloaded hash yet, ignore switch to ${hash}`);
     return;
   }
   if (hash !== sharedState.downloadedHash) {
@@ -113,7 +115,7 @@ const assertHash = (hash: string) => {
 
 // for China users
 export class Pushy {
-  options = defaultClientOptions;
+  options = { ...defaultClientOptions };
   clientType: 'Pushy' | 'Cresc' = 'Pushy';
   lastChecking?: number;
   lastRespJson?: Promise<CheckResult>;
@@ -134,7 +136,9 @@ export class Pushy {
     this.clientType = clientType || 'Pushy';
     this.options.server = cloneServerConfig(SERVER_PRESETS[this.clientType]);
 
-    i18n.setLocale(options.locale ?? this.clientType === 'Pushy' ? 'zh' : 'en');
+    i18n.setLocale(
+      options.locale ?? (this.clientType === 'Pushy' ? 'zh' : 'en'),
+    );
 
     if (Platform.OS === 'ios' || Platform.OS === 'android') {
       if (!options.appKey) {
@@ -348,7 +352,14 @@ export class Pushy {
         sharedState.applyingUpdate = false;
         throw e;
       }
-      return PushyModule.reloadUpdate({ hash });
+      try {
+        return await PushyModule.reloadUpdate({ hash });
+      } catch (e) {
+        // reloadUpdate can reject (e.g. bundle missing); reset the flag so a
+        // later retry is not permanently blocked by a stuck applyingUpdate.
+        sharedState.applyingUpdate = false;
+        throw e;
+      }
     }
   };
 
@@ -437,7 +448,10 @@ export class Pushy {
       });
       this.notifyAfterCheckUpdate({ status: 'error', error: e });
       this.throwIfEnabled(e);
-      return previousRespJson ? await previousRespJson : emptyObj;
+      // Fall back to the previous successful response if we have one; otherwise
+      // return undefined so callers can distinguish "check failed" from a real
+      // empty result and avoid overwriting the last good updateInfo.
+      return previousRespJson ? await previousRespJson : undefined;
     }
   };
   getBackupEndpoints = async () => {
@@ -455,16 +469,7 @@ export class Pushy {
     updateInfo: CheckResult,
     onDownloadProgress?: (data: ProgressData) => void,
   ) => {
-    const {
-      hash,
-      diff,
-      pdiff,
-      full,
-      paths = [],
-      name,
-      description = '',
-      metaInfo,
-    } = updateInfo;
+    const { hash } = updateInfo;
     if (
       this.options.beforeDownloadUpdate &&
       (await this.options.beforeDownloadUpdate(updateInfo)) === false
@@ -486,6 +491,39 @@ export class Pushy {
     if (sharedState.downloadedHash === hash) {
       log(`duplicated downloaded hash ${sharedState.downloadedHash}, ignored`);
       return sharedState.downloadedHash;
+    }
+    // Deduplicate concurrent downloads of the same hash regardless of whether a
+    // progress callback was passed: all callers await the single in-flight
+    // promise instead of triggering parallel native downloads.
+    const existingTask = sharedState.downloadingTasks[hash];
+    if (existingTask) {
+      log(`download for hash ${hash} already in progress, reusing it`);
+      return existingTask;
+    }
+    const task = this.performDownload(updateInfo, onDownloadProgress);
+    sharedState.downloadingTasks[hash] = task;
+    try {
+      return await task;
+    } finally {
+      delete sharedState.downloadingTasks[hash];
+    }
+  };
+  private performDownload = async (
+    updateInfo: CheckResult,
+    onDownloadProgress?: (data: ProgressData) => void,
+  ) => {
+    const {
+      hash,
+      diff,
+      pdiff,
+      full,
+      paths = [],
+      name,
+      description = '',
+      metaInfo,
+    } = updateInfo;
+    if (!hash) {
+      return;
     }
     if (sharedState.progressHandlers[hash]) {
       return;
@@ -525,6 +563,59 @@ export class Pushy {
     let lastError: any;
     const errorMessages: string[] = [];
 
+    // Ordered download strategies, tried in sequence until one succeeds. Each
+    // resolves its candidate URL lazily (testUrls) and runs the matching native
+    // download. diff/pdiff are incremental and skipped entirely in dev; full is
+    // attempted whenever a URL exists, and in dev with no URL it is treated as a
+    // no-op success so the flow can proceed.
+    type DownloadStrategy = {
+      name: string;
+      candidate: string | undefined;
+      errorKey: 'error_diff_failed' | 'error_pdiff_failed' | 'error_full_patch_failed';
+      skipInDev: boolean;
+      devNoopWhenNoUrl: boolean;
+      run: (url: string) => Promise<void>;
+    };
+    const strategies: DownloadStrategy[] = [
+      {
+        name: 'diff',
+        candidate: diff,
+        errorKey: 'error_diff_failed',
+        skipInDev: true,
+        devNoopWhenNoUrl: false,
+        run: url =>
+          PushyModule.downloadPatchFromPpk({
+            updateUrl: url,
+            hash,
+            originHash: currentVersion,
+          }),
+      },
+      {
+        name: 'pdiff',
+        candidate: pdiff,
+        errorKey: 'error_pdiff_failed',
+        skipInDev: true,
+        devNoopWhenNoUrl: false,
+        run: url =>
+          PushyModule.downloadPatchFromPackage({
+            updateUrl: url,
+            hash,
+          }),
+      },
+      {
+        name: 'full',
+        candidate: full,
+        errorKey: 'error_full_patch_failed',
+        skipInDev: false,
+        devNoopWhenNoUrl: true,
+        run: url =>
+          PushyModule.downloadFullUpdate({
+            updateUrl: url,
+            hash,
+          }),
+      },
+    ];
+
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       if (attempt > 0) {
         const backoffMs = Math.min(1000 * 2 ** (attempt - 1), 10000);
@@ -541,66 +632,27 @@ export class Pushy {
           attempt,
         },
       });
-      const diffUrl = await testUrls(joinUrls(paths, diff));
-      if (diffUrl && !__DEV__) {
-        log('downloading diff');
-        try {
-          await PushyModule.downloadPatchFromPpk({
-            updateUrl: diffUrl,
-            hash,
-            originHash: currentVersion,
-          });
-          succeeded = 'diff';
-        } catch (e: any) {
-          const errorMessage = this.t('error_diff_failed', {
-            message: e.message,
-          });
-          errorMessages.push(errorMessage);
-          lastError = Error(errorMessage);
-          log(errorMessage);
+      for (const strategy of strategies) {
+        if (succeeded) {
+          break;
         }
-      }
-      if (!succeeded) {
-        const pdiffUrl = await testUrls(joinUrls(paths, pdiff));
-        if (pdiffUrl && !__DEV__) {
-          log('downloading pdiff');
+        const url = await testUrls(joinUrls(paths, strategy.candidate));
+        if (url && !(strategy.skipInDev && __DEV__)) {
+          log(`downloading ${strategy.name}`);
           try {
-            await PushyModule.downloadPatchFromPackage({
-              updateUrl: pdiffUrl,
-              hash,
-            });
-            succeeded = 'pdiff';
+            await strategy.run(url);
+            succeeded = strategy.name;
           } catch (e: any) {
-            const errorMessage = this.t('error_pdiff_failed', {
+            const errorMessage = this.t(strategy.errorKey, {
               message: e.message,
             });
             errorMessages.push(errorMessage);
             lastError = Error(errorMessage);
             log(errorMessage);
           }
-        }
-      }
-      if (!succeeded) {
-        const fullUrl = await testUrls(joinUrls(paths, full));
-        if (fullUrl) {
-          log('downloading full patch');
-          try {
-            await PushyModule.downloadFullUpdate({
-              updateUrl: fullUrl,
-              hash,
-            });
-            succeeded = 'full';
-          } catch (e: any) {
-            const errorMessage = this.t('error_full_patch_failed', {
-              message: e.message,
-            });
-            errorMessages.push(errorMessage);
-            lastError = Error(errorMessage);
-            log(errorMessage);
-          }
-        } else if (__DEV__) {
+        } else if (!url && strategy.devNoopWhenNoUrl && __DEV__) {
           log(this.t('dev_incremental_update_disabled'));
-          succeeded = 'full';
+          succeeded = strategy.name;
         }
       }
       if (succeeded) {
@@ -697,19 +749,22 @@ export class Pushy {
           },
         );
     }
-    await PushyModule.downloadAndInstallApk({
-      url,
-      target: 'update.apk',
-      hash: progressKey,
-    }).catch(() => {
+    try {
+      await PushyModule.downloadAndInstallApk({
+        url,
+        target: 'update.apk',
+        hash: progressKey,
+      });
+      sharedState.apkStatus = 'downloaded';
+    } catch {
       sharedState.apkStatus = null;
       this.report({ type: 'errorDownloadAndInstallApk' });
       this.throwIfEnabled(Error('errorDownloadAndInstallApk'));
-    });
-    sharedState.apkStatus = 'downloaded';
-    if (sharedState.progressHandlers[progressKey]) {
-      sharedState.progressHandlers[progressKey].remove();
-      delete sharedState.progressHandlers[progressKey];
+    } finally {
+      if (sharedState.progressHandlers[progressKey]) {
+        sharedState.progressHandlers[progressKey].remove();
+        delete sharedState.progressHandlers[progressKey];
+      }
     }
   };
   restartApp = async () => {

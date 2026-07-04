@@ -50,6 +50,13 @@ yarn.lock
 bun.lock
 *.test.ts
 *.test.js
+src/__tests__/
+
+# Native build caches / intermediates (must not ship to consumers)
+android/.cxx/
+android/.gradle/
+**/*.o
+CODE_AUDIT.md
 
 domains.json
 endpoints.json

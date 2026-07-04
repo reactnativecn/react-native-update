@@ -75,7 +75,13 @@ final class ReactReloadManager {
                     currentReactHost,
                     createBundleLoader(application, updateBundlePath, true)
                 );
-            } catch (Throwable ignored) {
+            } catch (Throwable reloadError) {
+                Log.e(
+                    UpdateContext.TAG,
+                    "Failed to reload via ReactHost, falling back to Activity.recreate() "
+                        + "(this may load the previous bundle until next cold start)",
+                    reloadError
+                );
                 currentActivity.recreate();
             }
         }
@@ -172,6 +178,7 @@ final class ReactReloadManager {
                     }
                 }
             } catch (Throwable ignored) {
+                Log.w(UpdateContext.TAG, "getReactHost via ReactDelegate reflection failed", ignored);
             }
         }
 
@@ -179,6 +186,7 @@ final class ReactReloadManager {
             Method getReactHostMethod = application.getClass().getMethod("getReactHost");
             return getReactHostMethod.invoke(application);
         } catch (Throwable ignored) {
+            Log.w(UpdateContext.TAG, "getReactHost via Application.getReactHost() failed", ignored);
         }
 
         return null;

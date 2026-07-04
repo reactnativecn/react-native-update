@@ -92,6 +92,10 @@ final class BundledResourceCopier {
             SafeZipFile baseZipFile = zipFileMap.get(context.getPackageResourcePath());
             HashMap<String, ArrayList<File>> remainingFiles =
                 new HashMap<String, ArrayList<File>>(resToCopy);
+            // Track copies that were located but failed to write. These are real
+            // failures (disk full, corrupt archive) that must fail the update,
+            // not skips — otherwise the update activates with missing resources.
+            ArrayList<String> failedCopies = new ArrayList<String>();
 
             for (String fromPath : new ArrayList<String>(remainingFiles.keySet())) {
                 ArrayList<File> targets = remainingFiles.get(fromPath);
@@ -168,23 +172,31 @@ final class BundledResourceCopier {
                         }
                         lastTarget = target;
                     } catch (IOException e) {
-                        if (UpdateContext.DEBUG) {
-                            Log.w(
-                                UpdateContext.TAG,
-                                "Failed to copy resource "
-                                    + actualSourcePath
-                                    + " to "
-                                    + target
-                                    + ": "
-                                    + e.getMessage()
-                            );
-                        }
+                        // A located resource that fails to write is a hard
+                        // failure, not a skip: record it and fail the update
+                        // after the loop so a broken update is not activated.
+                        Log.e(
+                            UpdateContext.TAG,
+                            "Failed to copy resource "
+                                + actualSourcePath
+                                + " to "
+                                + target,
+                            e
+                        );
+                        failedCopies.add(actualSourcePath + " -> " + target);
                     }
                 }
                 remainingFiles.remove(fromPath);
             }
 
-            if (!remainingFiles.isEmpty() && UpdateContext.DEBUG) {
+            if (!failedCopies.isEmpty()) {
+                throw new IOException(
+                    "Failed to copy " + failedCopies.size()
+                        + " bundled resource(s): " + failedCopies
+                );
+            }
+
+            if (!remainingFiles.isEmpty()) {
                 Log.w(
                     UpdateContext.TAG,
                     "Skipped " + remainingFiles.size() + " missing bundled resources"

@@ -29,6 +29,10 @@ import org.json.JSONTokener;
 
 class DownloadTask implements Runnable {
     private static final int DOWNLOAD_CHUNK_SIZE = 4096;
+    // When the server does not report Content-Length we cannot key progress
+    // events on percentage change, so throttle by bytes to avoid flooding the
+    // bridge (e.g. a 20MB chunked download would otherwise emit ~5000 events).
+    private static final long PROGRESS_BYTES_THRESHOLD = 256 * 1024;
     private static final OkHttpClient HTTP_CLIENT = new OkHttpClient();
 
     static {
@@ -98,6 +102,7 @@ class DownloadTask implements Runnable {
             long bytesRead;
             long received = 0;
             int currentPercentage = 0;
+            long lastPostedBytes = 0;
 
             try (
                 BufferedSource source = body.source();
@@ -113,7 +118,8 @@ class DownloadTask implements Runnable {
                             currentPercentage = percentage;
                             postProgress(received, contentLength);
                         }
-                    } else {
+                    } else if (received - lastPostedBytes >= PROGRESS_BYTES_THRESHOLD) {
+                        lastPostedBytes = received;
                         postProgress(received, contentLength);
                     }
                 }
@@ -394,17 +400,26 @@ class DownloadTask implements Runnable {
                 default:
                     break;
             }
-
-            if (params.listener != null) {
-                params.listener.onDownloadCompleted(params);
-            }
         } catch (Throwable error) {
-            if (UpdateContext.DEBUG) {
-                Log.e(UpdateContext.TAG, "download task failed", error);
-            }
+            Log.e(UpdateContext.TAG, "download task failed", error);
             cleanUpAfterFailure(taskType);
 
             if (params.listener != null) {
+                params.listener.onDownloadFailed(error);
+            }
+            return;
+        }
+
+        // The task itself succeeded. Run the completion callback outside the
+        // try/catch above so an exception thrown by the callback (e.g. a
+        // FileProvider misconfiguration during installApk) is not mistaken for
+        // a download failure that deletes the successfully downloaded file and
+        // settles the promise a second time.
+        if (params.listener != null) {
+            try {
+                params.listener.onDownloadCompleted(params);
+            } catch (Throwable error) {
+                Log.e(UpdateContext.TAG, "download completion callback failed", error);
                 params.listener.onDownloadFailed(error);
             }
         }

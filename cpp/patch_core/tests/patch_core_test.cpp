@@ -426,6 +426,28 @@ void TestArchivePatchCoreRejectsMissingEntries() {
       "manifest entry should be skipped");
 }
 
+void TestTryParseArchivePatchType() {
+  pushy::archive_patch::ArchivePatchType type;
+  Expect(
+      pushy::archive_patch::TryParseArchivePatchType(1, &type) &&
+          type == pushy::archive_patch::ArchivePatchType::kFull,
+      "1 should parse to kFull");
+  Expect(
+      pushy::archive_patch::TryParseArchivePatchType(2, &type) &&
+          type == pushy::archive_patch::ArchivePatchType::kPatchFromPackage,
+      "2 should parse to kPatchFromPackage");
+  Expect(
+      pushy::archive_patch::TryParseArchivePatchType(3, &type) &&
+          type == pushy::archive_patch::ArchivePatchType::kPatchFromPpk,
+      "3 should parse to kPatchFromPpk");
+  Expect(
+      !pushy::archive_patch::TryParseArchivePatchType(0, &type),
+      "0 should be rejected");
+  Expect(
+      !pushy::archive_patch::TryParseArchivePatchType(4, &type),
+      "unknown type should be rejected, not silently coerced to kFull");
+}
+
 void TestArchivePatchCoreSupportsCustomBundlePatchEntry() {
   PatchManifest manifest;
   manifest.copies.push_back(CopyOperation{"assets/a.png", "assets/a.png"});
@@ -524,6 +546,7 @@ int main() {
       {"StateCoreCanClearMarkers", TestStateCoreCanClearMarkers},
       {"ArchivePatchCoreBuildPlanAndCopyGroups", TestArchivePatchCoreBuildPlanAndCopyGroups},
       {"ArchivePatchCoreRejectsMissingEntries", TestArchivePatchCoreRejectsMissingEntries},
+      {"TryParseArchivePatchType", TestTryParseArchivePatchType},
       {"ArchivePatchCoreSupportsCustomBundlePatchEntry", TestArchivePatchCoreSupportsCustomBundlePatchEntry},
       {"ArchivePatchCoreHarmonyBundlePatchFromPackage", TestArchivePatchCoreHarmonyBundlePatchFromPackage},
       {"StateCoreRollbackToEmptyVersion", TestStateCoreRollbackToEmptyVersion},

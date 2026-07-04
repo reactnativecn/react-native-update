@@ -84,7 +84,7 @@ export function joinUrls(paths: string[], fileName?: string) {
   }
 }
 
-export const testUrls = async (urls?: string[]) => {
+export const testUrls = async (urls?: string[]): Promise<string | null> => {
   if (!urls?.length) {
     return null;
   }
@@ -93,7 +93,7 @@ export const testUrls = async (urls?: string[]) => {
     const ret = await promiseAny(urls.map(ping));
     if (ret) {
       log('ping success, use url:', ret);
-      return ret;
+      return ret as string;
     }
   } catch {}
   log('all ping failed, use first url:', urls[0]);

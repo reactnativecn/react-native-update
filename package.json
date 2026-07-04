@@ -3,6 +3,7 @@
   "version": "10.38.3",
   "description": "react-native hot update",
   "main": "src/index",
+  "types": "src/index.ts",
   "scripts": {
     "prepublishOnly": "NODE_ENV=production bun scripts/prepublish.ts",
     "publish:local": "SKIP_NATIVE_BUILD=1 npm publish",

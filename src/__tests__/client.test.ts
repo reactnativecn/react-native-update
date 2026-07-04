@@ -634,6 +634,23 @@ describe('Cresc class', () => {
     expect(setLocale).toHaveBeenCalledWith('en');
   });
 
+  test('explicit locale option overrides clientType default', async () => {
+    setupClientMocks();
+    const setLocale = mock(() => {});
+    mock.module('../i18n', () => ({
+      default: {
+        t: (key: string) => key,
+        setLocale,
+      },
+    }));
+
+    const { Pushy } = await importFreshClient('pushy-locale-override');
+    // Pushy defaults to 'zh'; an explicit 'en' must win.
+    new Pushy({ appKey: 'demo-app', locale: 'en' });
+
+    expect(setLocale).toHaveBeenCalledWith('en');
+  });
+
   test('Cresc is instance of Pushy', async () => {
     setupClientMocks();
 

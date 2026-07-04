@@ -27,7 +27,7 @@ import {
 import { UpdateContext } from './context';
 import { URL } from 'react-native-url-polyfill';
 import { resolveCheckResult } from './resolveCheckResult';
-import { assertWeb, log } from './utils';
+import { assertWeb, log, noop } from './utils';
 
 export const UpdateProvider = ({
   client,
@@ -108,7 +108,6 @@ export const UpdateProvider = ({
         if (!hash) {
           return false;
         }
-        stateListener.current && stateListener.current.remove();
 
         if (
           options.afterDownloadUpdate &&
@@ -170,7 +169,7 @@ export const UpdateProvider = ({
       lastChecking.current = now;
       let rootInfo: CheckResult | undefined;
       try {
-        rootInfo = { ...(await client.checkUpdate(extra)) };
+        rootInfo = await client.checkUpdate(extra);
       } catch (e: any) {
         setLastError(e);
         alertError(client.t('error_update_check_failed'), e.message);
@@ -178,6 +177,8 @@ export const UpdateProvider = ({
         return;
       }
       if (!rootInfo) {
+        // Check was skipped or failed with no cached result; keep the last
+        // known updateInfo instead of overwriting it with an empty object.
         return;
       }
       const info = resolveCheckResult(rootInfo);
@@ -198,7 +199,7 @@ export const UpdateProvider = ({
         if (downloadUrl && sharedState.apkStatus === null) {
           if (options.updateStrategy === 'silentAndNow') {
             if (Platform.OS === 'android' && downloadUrl.endsWith('.apk')) {
-              downloadAndInstallApk(downloadUrl);
+              downloadAndInstallApk(downloadUrl).catch(noop);
             } else {
               Linking.openURL(downloadUrl);
             }
@@ -215,7 +216,7 @@ export const UpdateProvider = ({
                     Platform.OS === 'android' &&
                     downloadUrl.endsWith('.apk')
                   ) {
-                    downloadAndInstallApk(downloadUrl);
+                    downloadAndInstallApk(downloadUrl).catch(noop);
                   } else {
                     Linking.openURL(downloadUrl);
                   }
@@ -229,7 +230,7 @@ export const UpdateProvider = ({
           options.updateStrategy === 'silentAndNow' ||
           options.updateStrategy === 'silentAndLater'
         ) {
-          downloadUpdate(info);
+          downloadUpdate(info).catch(noop);
           return info;
         }
         alertUpdate(
@@ -244,7 +245,7 @@ export const UpdateProvider = ({
               text: client.t('alert_confirm'),
               style: 'default',
               onPress: () => {
-                downloadUpdate();
+                downloadUpdate().catch(noop);
               },
             },
           ],
@@ -272,7 +273,7 @@ export const UpdateProvider = ({
     if (!assertWeb()) {
       return;
     }
-    const { checkStrategy, dismissErrorAfter, autoMarkSuccess } = options;
+    const { checkStrategy, autoMarkSuccess } = options;
     if (autoMarkSuccess) {
       setTimeout(() => {
         markSuccess();
@@ -283,25 +284,34 @@ export const UpdateProvider = ({
         'change',
         nextAppState => {
           if (nextAppState === 'active') {
-            checkUpdate();
+            checkUpdate().catch(noop);
           }
         },
       );
     }
     if (checkStrategy === 'both' || checkStrategy === 'onAppStart') {
-      checkUpdate();
-    }
-    let dismissErrorTimer: ReturnType<typeof setTimeout>;
-    if (typeof dismissErrorAfter === 'number' && dismissErrorAfter > 0) {
-      dismissErrorTimer = setTimeout(() => {
-        dismissError();
-      }, dismissErrorAfter);
+      checkUpdate().catch(noop);
     }
     return () => {
       stateListener.current && stateListener.current.remove();
-      clearTimeout(dismissErrorTimer);
     };
   }, [checkUpdate, options, dismissError, markSuccess, client]);
+
+  useEffect(() => {
+    const { dismissErrorAfter } = options;
+    if (
+      lastError &&
+      typeof dismissErrorAfter === 'number' &&
+      dismissErrorAfter > 0
+    ) {
+      const dismissErrorTimer = setTimeout(() => {
+        dismissError();
+      }, dismissErrorAfter);
+      return () => {
+        clearTimeout(dismissErrorTimer);
+      };
+    }
+  }, [lastError, options, dismissError]);
 
   const parseTestPayload = useCallback(
     (payload: UpdateTestPayload) => {
@@ -314,15 +324,19 @@ export const UpdateProvider = ({
         if (payload.type === '__rnPushyVersionHash') {
           const toHash = payload.data;
           sharedState.toHash = toHash;
-          checkUpdate({ extra: { toHash } }).then(() => {
-            if (updateInfoRef.current && updateInfoRef.current.upToDate) {
-              Alert.alert(
-                client.t('alert_info'),
-                client.t('alert_no_update_wait'),
-              );
-            }
-            options.logger = logger;
-          });
+          checkUpdate({ extra: { toHash } })
+            .then(() => {
+              if (updateInfoRef.current && updateInfoRef.current.upToDate) {
+                Alert.alert(
+                  client.t('alert_info'),
+                  client.t('alert_no_update_wait'),
+                );
+              }
+            })
+            .catch(noop)
+            .finally(() => {
+              options.logger = logger;
+            });
         }
         return true;
       }
