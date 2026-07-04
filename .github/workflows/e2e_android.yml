@@ -45,12 +45,12 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout react-native-update
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           submodules: recursive
 
       - name: Checkout react-native-update-cli
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: reactnativecn/react-native-update-cli
           path: react-native-update-cli
@@ -150,12 +150,12 @@ jobs:
     timeout-minutes: 35
     steps:
       - name: Checkout react-native-update
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           submodules: recursive
 
       - name: Checkout react-native-update-cli
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: reactnativecn/react-native-update-cli
           path: react-native-update-cli
