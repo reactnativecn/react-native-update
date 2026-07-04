@@ -727,6 +727,19 @@ napi_value BuildCopyGroups(napi_env env, napi_callback_info info) {
 // back on the JS thread.
 // ---------------------------------------------------------------------------
 
+// Reject an already-created deferred with an Error(message). Used when async
+// work fails to be created/queued, so the Promise never hangs pending.
+void RejectDeferredWithMessage(
+    napi_env env,
+    napi_deferred deferred,
+    const char* message) {
+  napi_value error = nullptr;
+  napi_value message_value = nullptr;
+  napi_create_string_utf8(env, message, NAPI_AUTO_LENGTH, &message_value);
+  napi_create_error(env, nullptr, message_value, &error);
+  napi_reject_deferred(env, deferred, error);
+}
+
 struct ApplyPatchWork {
   napi_async_work work = nullptr;
   napi_deferred deferred = nullptr;
@@ -803,34 +816,48 @@ napi_value ApplyPatchFromFileSource(napi_env env, napi_callback_info info) {
   napi_value resource_name = nullptr;
   napi_create_string_utf8(
       env, "applyPatchFromFileSource", NAPI_AUTO_LENGTH, &resource_name);
-  napi_create_async_work(
-      env,
-      nullptr,
-      resource_name,
-      [](napi_env, void* data) {
-        auto* w = static_cast<ApplyPatchWork*>(data);
-        w->status = pushy::patch::ApplyPatchFromFileSource(w->options);
-      },
-      [](napi_env cb_env, napi_status, void* data) {
-        auto* w = static_cast<ApplyPatchWork*>(data);
-        if (w->status.ok) {
-          napi_value undefined_value = nullptr;
-          napi_get_undefined(cb_env, &undefined_value);
-          napi_resolve_deferred(cb_env, w->deferred, undefined_value);
-        } else {
-          napi_value error = nullptr;
-          napi_value message = nullptr;
-          napi_create_string_utf8(
-              cb_env, w->status.message.c_str(), NAPI_AUTO_LENGTH, &message);
-          napi_create_error(cb_env, nullptr, message, &error);
-          napi_reject_deferred(cb_env, w->deferred, error);
-        }
-        napi_delete_async_work(cb_env, w->work);
-        delete w;
-      },
-      work_data,
-      &work_data->work);
-  napi_queue_async_work(env, work_data->work);
+  if (napi_create_async_work(
+          env,
+          nullptr,
+          resource_name,
+          [](napi_env, void* data) {
+            auto* w = static_cast<ApplyPatchWork*>(data);
+            w->status = pushy::patch::ApplyPatchFromFileSource(w->options);
+          },
+          [](napi_env cb_env, napi_status, void* data) {
+            auto* w = static_cast<ApplyPatchWork*>(data);
+            if (w->status.ok) {
+              napi_value undefined_value = nullptr;
+              napi_get_undefined(cb_env, &undefined_value);
+              napi_resolve_deferred(cb_env, w->deferred, undefined_value);
+            } else {
+              napi_value error = nullptr;
+              napi_value message = nullptr;
+              napi_create_string_utf8(
+                  cb_env, w->status.message.c_str(), NAPI_AUTO_LENGTH, &message);
+              napi_create_error(cb_env, nullptr, message, &error);
+              napi_reject_deferred(cb_env, w->deferred, error);
+            }
+            napi_delete_async_work(cb_env, w->work);
+            delete w;
+          },
+          work_data,
+          &work_data->work) != napi_ok) {
+    // Work was never created: settle the promise and free the data so it does
+    // not leak / hang pending forever.
+    RejectDeferredWithMessage(
+        env, work_data->deferred, "Unable to create async work");
+    delete work_data;
+    return promise;
+  }
+  if (napi_queue_async_work(env, work_data->work) != napi_ok) {
+    // Queued failed: the complete callback will never run, so clean up here.
+    napi_delete_async_work(env, work_data->work);
+    RejectDeferredWithMessage(
+        env, work_data->deferred, "Unable to queue async work");
+    delete work_data;
+    return promise;
+  }
   return promise;
 }
 
@@ -876,35 +903,46 @@ napi_value CleanupOldEntries(napi_env env, napi_callback_info info) {
   napi_value resource_name = nullptr;
   napi_create_string_utf8(
       env, "cleanupOldEntries", NAPI_AUTO_LENGTH, &resource_name);
-  napi_create_async_work(
-      env,
-      nullptr,
-      resource_name,
-      [](napi_env, void* data) {
-        auto* w = static_cast<CleanupWork*>(data);
-        w->status = pushy::patch::CleanupOldEntries(
-            w->root_dir, w->keep_current, w->keep_previous, w->max_age_days);
-      },
-      [](napi_env cb_env, napi_status, void* data) {
-        auto* w = static_cast<CleanupWork*>(data);
-        if (w->status.ok) {
-          napi_value undefined_value = nullptr;
-          napi_get_undefined(cb_env, &undefined_value);
-          napi_resolve_deferred(cb_env, w->deferred, undefined_value);
-        } else {
-          napi_value error = nullptr;
-          napi_value message = nullptr;
-          napi_create_string_utf8(
-              cb_env, w->status.message.c_str(), NAPI_AUTO_LENGTH, &message);
-          napi_create_error(cb_env, nullptr, message, &error);
-          napi_reject_deferred(cb_env, w->deferred, error);
-        }
-        napi_delete_async_work(cb_env, w->work);
-        delete w;
-      },
-      work_data,
-      &work_data->work);
-  napi_queue_async_work(env, work_data->work);
+  if (napi_create_async_work(
+          env,
+          nullptr,
+          resource_name,
+          [](napi_env, void* data) {
+            auto* w = static_cast<CleanupWork*>(data);
+            w->status = pushy::patch::CleanupOldEntries(
+                w->root_dir, w->keep_current, w->keep_previous, w->max_age_days);
+          },
+          [](napi_env cb_env, napi_status, void* data) {
+            auto* w = static_cast<CleanupWork*>(data);
+            if (w->status.ok) {
+              napi_value undefined_value = nullptr;
+              napi_get_undefined(cb_env, &undefined_value);
+              napi_resolve_deferred(cb_env, w->deferred, undefined_value);
+            } else {
+              napi_value error = nullptr;
+              napi_value message = nullptr;
+              napi_create_string_utf8(
+                  cb_env, w->status.message.c_str(), NAPI_AUTO_LENGTH, &message);
+              napi_create_error(cb_env, nullptr, message, &error);
+              napi_reject_deferred(cb_env, w->deferred, error);
+            }
+            napi_delete_async_work(cb_env, w->work);
+            delete w;
+          },
+          work_data,
+          &work_data->work) != napi_ok) {
+    RejectDeferredWithMessage(
+        env, work_data->deferred, "Unable to create async work");
+    delete work_data;
+    return promise;
+  }
+  if (napi_queue_async_work(env, work_data->work) != napi_ok) {
+    napi_delete_async_work(env, work_data->work);
+    RejectDeferredWithMessage(
+        env, work_data->deferred, "Unable to queue async work");
+    delete work_data;
+    return promise;
+  }
   return promise;
 }
 
