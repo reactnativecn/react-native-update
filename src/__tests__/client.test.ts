@@ -2,6 +2,13 @@ import { afterEach, describe, expect, mock, test } from 'bun:test';
 
 const importFreshClient = (cacheKey: string) => import(`../client?${cacheKey}`);
 
+const originalDev = (globalThis as any).__DEV__;
+
+afterEach(() => {
+  mock.restore();
+  (globalThis as any).__DEV__ = originalDev;
+});
+
 const createJsonResponse = (payload: unknown) =>
   ({
     ok: true,
@@ -94,6 +101,63 @@ const setupClientMocks = ({
       t: (key: string) => key,
       setLocale: mock(() => {}),
     },
+  }));
+};
+
+const setupAndroidApkMocks = (
+  downloadAndInstallApk: ReturnType<typeof mock>,
+) => {
+  (globalThis as any).__DEV__ = false;
+
+  mock.module('react-native', () => ({
+    Platform: {
+      OS: 'android',
+      Version: 30,
+    },
+    DeviceEventEmitter: {
+      addListener: mock(() => ({ remove: mock(() => {}) })),
+    },
+    NativeEventEmitter: class {
+      addListener = mock(() => ({ remove: mock(() => {}) }));
+      removeAllListeners = mock(() => {});
+    },
+  }));
+
+  mock.module('../core', () => ({
+    PushyModule: {
+      markSuccess: mock(() => {}),
+      reloadUpdate: mock(() => Promise.resolve()),
+      setNeedUpdate: mock(() => Promise.resolve()),
+      downloadPatchFromPpk: mock(() => Promise.resolve()),
+      downloadPatchFromPackage: mock(() => Promise.resolve()),
+      downloadFullUpdate: mock(() => Promise.resolve()),
+      downloadAndInstallApk,
+      restartApp: mock(() => Promise.resolve()),
+    },
+    buildTime: '2023-01-01',
+    cInfo: { rnu: '10.0.0', rn: '0.73.0', os: 'android', uuid: 'uuid' },
+    currentVersion: 'hash',
+    currentVersionInfo: {},
+    isFirstTime: false,
+    isRolledBack: false,
+    packageVersion: '1.0.0',
+    pushyNativeEventEmitter: {
+      addListener: mock(() => ({ remove: mock(() => {}) })),
+    },
+    rolledBackVersion: '',
+    setLocalHashInfo: mock(() => {}),
+  }));
+
+  mock.module('../permissions', () => ({
+    PermissionsAndroid: {
+      request: mock(() => Promise.resolve('granted')),
+      PERMISSIONS: { WRITE_EXTERNAL_STORAGE: 'WRITE_EXTERNAL_STORAGE' },
+      RESULTS: { GRANTED: 'granted' },
+    },
+  }));
+
+  mock.module('../i18n', () => ({
+    default: { t: (key: string) => key, setLocale: mock(() => {}) },
   }));
 };
 
@@ -601,6 +665,45 @@ describe('downloadUpdate fallback chain', () => {
       'error_full_patch_failed',
     );
   });
+
+  test('deduplicates concurrent downloads of the same hash (JS-8)', async () => {
+    // A slow native download keeps the first call in-flight while the second
+    // starts, so the dedup must reuse the same promise instead of triggering a
+    // second native download.
+    let resolveDownload: (() => void) | undefined;
+    const downloadFullUpdate = mock(
+      () =>
+        new Promise<void>(resolve => {
+          resolveDownload = resolve;
+        }),
+    );
+    setupDownloadMocks({ downloadFullUpdate });
+    const { Pushy, sharedState } = await importFreshClient('dl-concurrent-dedup');
+    sharedState.downloadedHash = undefined;
+    // Only a full URL so the full strategy is the one exercised.
+    const fullOnlyInfo = {
+      update: true as const,
+      hash: 'new-hash',
+      full: 'full.ppk',
+      paths: ['https://cdn.example.com'],
+      name: 'v2.0',
+      description: 'test update',
+    };
+    // No onDownloadProgress passed — old code only deduped when a progress
+    // handler was registered, so this exercises the new promise-table dedup.
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    const first = client.downloadUpdate(fullOnlyInfo);
+    const second = client.downloadUpdate(fullOnlyInfo);
+    // Let both calls reach the (single) native download, then let it finish.
+    await new Promise(r => setTimeout(r, 10));
+    resolveDownload?.();
+    const [firstHash, secondHash] = await Promise.all([first, second]);
+
+    expect(firstHash).toBe('new-hash');
+    expect(secondHash).toBe('new-hash');
+    expect(downloadFullUpdate).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('Cresc class', () => {
@@ -679,5 +782,33 @@ describe('Cresc class', () => {
     expect(client.options.server?.queryUrls).toEqual([
       'https://q.example.com',
     ]);
+  });
+});
+
+describe('downloadAndInstallApk apkStatus (JS-3)', () => {
+  test('resets apkStatus after a failed download so retry is possible', async () => {
+    // First download fails, second succeeds. The old code unconditionally set
+    // apkStatus='downloaded' after a caught failure, permanently blocking retry.
+    let callCount = 0;
+    const downloadAndInstallApk = mock(() => {
+      callCount++;
+      if (callCount === 1) {
+        return Promise.reject(Error('download fail'));
+      }
+      return Promise.resolve();
+    });
+    setupAndroidApkMocks(downloadAndInstallApk);
+    const { Pushy, sharedState } = await importFreshClient('apk-retry');
+    sharedState.apkStatus = null;
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    await client.downloadAndInstallApk('https://example.com/app.apk');
+    // Failure must leave apkStatus reset (null), not stuck at 'downloaded'.
+    expect(sharedState.apkStatus).toBe(null);
+
+    // A retry should now proceed and reach the native module a second time.
+    await client.downloadAndInstallApk('https://example.com/app.apk');
+    expect(downloadAndInstallApk).toHaveBeenCalledTimes(2);
+    expect(sharedState.apkStatus).toBe('downloaded');
   });
 });

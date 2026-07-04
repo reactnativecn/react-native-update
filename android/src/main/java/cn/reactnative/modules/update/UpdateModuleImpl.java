@@ -149,7 +149,7 @@ public class UpdateModuleImpl {
         final Promise promise
     ) {
         final String hash = options.getString("hash");
-        UiThreadRunner.run(promise, "switchVersionLater", new UiThreadRunner.Operation() {
+        StateSerialRunner.run(promise, "switchVersionLater", new StateSerialRunner.Operation() {
             @Override
             public void run() {
                 setNeedUpdateInternal(updateContext, hash);
@@ -160,7 +160,7 @@ public class UpdateModuleImpl {
 
     public static void setNeedUpdate(final UpdateContext updateContext, final ReadableMap options) {
         final String hash = options.getString("hash");
-        UiThreadRunner.run(null, "switchVersionLater", new UiThreadRunner.Operation() {
+        StateSerialRunner.run(null, "switchVersionLater", new StateSerialRunner.Operation() {
             @Override
             public void run() {
                 setNeedUpdateInternal(updateContext, hash);
@@ -173,7 +173,7 @@ public class UpdateModuleImpl {
     }
 
     public static void markSuccess(final UpdateContext updateContext, final Promise promise) {
-        UiThreadRunner.run(promise, "markSuccess", new UiThreadRunner.Operation() {
+        StateSerialRunner.run(promise, "markSuccess", new StateSerialRunner.Operation() {
             @Override
             public void run() {
                 markSuccessInternal(updateContext);
@@ -183,7 +183,7 @@ public class UpdateModuleImpl {
     }
 
     public static void markSuccess(final UpdateContext updateContext) {
-        UiThreadRunner.run(null, "markSuccess", new UiThreadRunner.Operation() {
+        StateSerialRunner.run(null, "markSuccess", new StateSerialRunner.Operation() {
             @Override
             public void run() {
                 markSuccessInternal(updateContext);
@@ -200,7 +200,7 @@ public class UpdateModuleImpl {
         final String uuid,
         final Promise promise
     ) {
-        UiThreadRunner.run(promise, "setUuid", new UiThreadRunner.Operation() {
+        StateSerialRunner.run(promise, "setUuid", new StateSerialRunner.Operation() {
             @Override
             public void run() {
                 setUuidInternal(updateContext, uuid);
@@ -210,7 +210,7 @@ public class UpdateModuleImpl {
     }
 
     public static void setUuid(final UpdateContext updateContext, final String uuid) {
-        UiThreadRunner.run(null, "setUuid", new UiThreadRunner.Operation() {
+        StateSerialRunner.run(null, "setUuid", new StateSerialRunner.Operation() {
             @Override
             public void run() {
                 setUuidInternal(updateContext, uuid);
@@ -235,7 +235,7 @@ public class UpdateModuleImpl {
         final String info,
         final Promise promise
     ) {
-        UiThreadRunner.run(promise, "setLocalHashInfo", new UiThreadRunner.Operation() {
+        StateSerialRunner.run(promise, "setLocalHashInfo", new StateSerialRunner.Operation() {
             @Override
             public void run() {
                 setLocalHashInfoInternal(updateContext, hash, info);
@@ -249,7 +249,7 @@ public class UpdateModuleImpl {
         final String hash,
         final String info
     ) {
-        UiThreadRunner.run(null, "setLocalHashInfo", new UiThreadRunner.Operation() {
+        StateSerialRunner.run(null, "setLocalHashInfo", new StateSerialRunner.Operation() {
             @Override
             public void run() {
                 setLocalHashInfoInternal(updateContext, hash, info);
