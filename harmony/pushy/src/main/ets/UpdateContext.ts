@@ -520,12 +520,18 @@ export class UpdateContext {
 
   public cleanUp(): void {
     const state = this.getStateSnapshot();
+    // cleanupOldEntries now runs on a native worker thread (returns a Promise).
+    // Cleanup is best-effort background maintenance and no caller depends on its
+    // completion, so fire-and-forget it off the UI thread and just log failures
+    // instead of blocking the state operation (or cold start) on disk I/O.
     NativePatchCore.cleanupOldEntries(
       this.rootDir,
       state.currentVersion || '',
       state.lastVersion || '',
       3,
-    );
+    ).catch((error: Object) => {
+      console.error('cleanupOldEntries failed:', error);
+    });
   }
 
   public getIsUsingBundleUrl(): boolean {

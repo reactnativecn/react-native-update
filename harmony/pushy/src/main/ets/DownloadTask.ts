@@ -233,7 +233,7 @@ export class DownloadTask {
     const originBundlePath = `${workingDirectory}/${TEMP_ORIGIN_BUNDLE_ENTRY}`;
     try {
       await this.writeFileContent(originBundlePath, originContent);
-      NativePatchCore.applyPatchFromFileSource({
+      await NativePatchCore.applyPatchFromFileSource({
         copyFroms: [],
         copyTos: [],
         deletes: [],
@@ -568,7 +568,7 @@ export class DownloadTask {
       manifestArrays.deletes,
       HARMONY_BUNDLE_PATCH_ENTRY,
     );
-    NativePatchCore.applyPatchFromFileSource({
+    await NativePatchCore.applyPatchFromFileSource({
       copyFroms: manifestArrays.copyFroms,
       copyTos: manifestArrays.copyTos,
       deletes: manifestArrays.deletes,
@@ -664,7 +664,7 @@ export class DownloadTask {
 
   private async doCleanUp(params: DownloadTaskParams): Promise<void> {
     try {
-      NativePatchCore.cleanupOldEntries(
+      await NativePatchCore.cleanupOldEntries(
         params.unzipDirectory,
         params.hash || '',
         params.originHash || '',
