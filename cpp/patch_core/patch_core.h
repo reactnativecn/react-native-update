@@ -64,5 +64,11 @@ Status CleanupOldEntries(
 
 bool IsSafeRelativePath(const std::string& path);
 
+namespace internal {
+// Test-only escape hatch: forces file copies to take the byte-copy fallback
+// instead of hard-linking, so tests can cover both paths on one filesystem.
+extern bool g_disable_hard_links;
+}  // namespace internal
+
 }  // namespace patch
 }  // namespace pushy

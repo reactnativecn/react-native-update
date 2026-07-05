@@ -175,6 +175,81 @@ void TestApplyPatchFromFileSourceMergesAndCopies() {
   Expect(!Exists(JoinPath(target, "assets/delete.txt")), "deleted asset should not be copied");
 }
 
+void TestApplyPatchMergeHardLinksUnchangedFiles() {
+  TempDir temp;
+  const std::string source = JoinPath(temp.path, "origin");
+  const std::string target = JoinPath(temp.path, "target");
+  const std::string patch = JoinPath(temp.path, "bundle.patch");
+
+  WriteFile(JoinPath(source, "index.bundlejs"), "old bundle");
+  WriteFile(JoinPath(source, "assets/keep.txt"), "keep");
+  WriteFile(patch, "unused patch");
+
+  FakeBundlePatcher patcher("patched bundle");
+  FileSourcePatchOptions options;
+  options.source_root = source;
+  options.target_root = target;
+  options.origin_bundle_path = JoinPath(source, "index.bundlejs");
+  options.bundle_patch_path = patch;
+  options.bundle_output_path = JoinPath(target, "index.bundlejs");
+  options.manifest.copies.push_back(CopyOperation{"assets/keep.txt", "assets/copied.txt"});
+
+  Status status = ApplyPatchFromFileSource(options, patcher);
+  Expect(status.ok, status.message);
+
+  // Unchanged files must share the source inode (hard link) instead of being
+  // byte-copied: same filesystem, so the fast path has to kick in.
+  struct stat source_stat;
+  struct stat merged_stat;
+  struct stat copied_stat;
+  Expect(stat(JoinPath(source, "assets/keep.txt").c_str(), &source_stat) == 0, "stat source");
+  Expect(stat(JoinPath(target, "assets/keep.txt").c_str(), &merged_stat) == 0, "stat merged");
+  Expect(stat(JoinPath(target, "assets/copied.txt").c_str(), &copied_stat) == 0, "stat copied");
+  Expect(merged_stat.st_ino == source_stat.st_ino, "merged file should hard-link the source");
+  Expect(copied_stat.st_ino == source_stat.st_ino, "manifest copy should hard-link the source");
+  Expect(source_stat.st_nlink >= 3, "source should have three names");
+  ExpectEq(ReadFile(JoinPath(target, "assets/keep.txt")), "keep", "merged content mismatch");
+
+  // The patched bundle must be a fresh file, never a link into the source dir.
+  struct stat bundle_stat;
+  struct stat origin_stat;
+  Expect(stat(JoinPath(target, "index.bundlejs").c_str(), &bundle_stat) == 0, "stat bundle");
+  Expect(stat(JoinPath(source, "index.bundlejs").c_str(), &origin_stat) == 0, "stat origin bundle");
+  Expect(bundle_stat.st_ino != origin_stat.st_ino, "patched bundle must not link the origin");
+}
+
+void TestApplyPatchMergeFallsBackToByteCopy() {
+  TempDir temp;
+  const std::string source = JoinPath(temp.path, "origin");
+  const std::string target = JoinPath(temp.path, "target");
+  const std::string patch = JoinPath(temp.path, "bundle.patch");
+
+  WriteFile(JoinPath(source, "index.bundlejs"), "old bundle");
+  WriteFile(JoinPath(source, "assets/keep.txt"), "keep");
+  WriteFile(patch, "unused patch");
+
+  FakeBundlePatcher patcher("patched bundle");
+  FileSourcePatchOptions options;
+  options.source_root = source;
+  options.target_root = target;
+  options.origin_bundle_path = JoinPath(source, "index.bundlejs");
+  options.bundle_patch_path = patch;
+  options.bundle_output_path = JoinPath(target, "index.bundlejs");
+
+  pushy::patch::internal::g_disable_hard_links = true;
+  Status status = ApplyPatchFromFileSource(options, patcher);
+  pushy::patch::internal::g_disable_hard_links = false;
+  Expect(status.ok, status.message);
+
+  struct stat source_stat;
+  struct stat merged_stat;
+  Expect(stat(JoinPath(source, "assets/keep.txt").c_str(), &source_stat) == 0, "stat source");
+  Expect(stat(JoinPath(target, "assets/keep.txt").c_str(), &merged_stat) == 0, "stat merged");
+  Expect(merged_stat.st_ino != source_stat.st_ino, "fallback should produce an independent copy");
+  Expect(merged_stat.st_nlink == 1, "fallback copy should have a single name");
+  ExpectEq(ReadFile(JoinPath(target, "assets/keep.txt")), "keep", "fallback content mismatch");
+}
+
 void TestApplyPatchFromFileSourceCanLimitMergeSubdir() {
   TempDir temp;
   const std::string source = JoinPath(temp.path, "origin");
@@ -537,6 +612,8 @@ void TestStateCoreSwitchToSameVersion() {
 int main() {
   const std::vector<std::pair<std::string, void (*)()>> tests = {
       {"ApplyPatchFromFileSourceMergesAndCopies", TestApplyPatchFromFileSourceMergesAndCopies},
+      {"ApplyPatchMergeHardLinksUnchangedFiles", TestApplyPatchMergeHardLinksUnchangedFiles},
+      {"ApplyPatchMergeFallsBackToByteCopy", TestApplyPatchMergeFallsBackToByteCopy},
       {"ApplyPatchFromFileSourceCanLimitMergeSubdir", TestApplyPatchFromFileSourceCanLimitMergeSubdir},
       {"ApplyPatchFromFileSourceRejectsUnsafePaths", TestApplyPatchFromFileSourceRejectsUnsafePaths},
       {"CleanupOldEntriesRemovesOnlyExpiredPaths", TestCleanupOldEntriesRemovesOnlyExpiredPaths},

@@ -8,7 +8,6 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include <set>
 #include <vector>
 
 extern "C" {
@@ -17,6 +16,11 @@ extern "C" {
 
 namespace pushy {
 namespace patch {
+
+namespace internal {
+bool g_disable_hard_links = false;
+}  // namespace internal
+
 namespace {
 
 constexpr size_t kCopyBufferSize = 16 * 1024;
@@ -200,6 +204,17 @@ Status CopyFile(const std::string& from, const std::string& to, bool overwrite) 
     if (!remove_status) {
       return remove_status;
     }
+  }
+
+  // Prefer a hard link over copying bytes: unchanged files between versions
+  // are identical, so linking is O(1) per file, writes nothing to flash, and
+  // shares disk blocks. Version directories are immutable once created (patch
+  // outputs are always written as new files), so sharing the inode with the
+  // source is safe. Fall back to a byte copy whenever linking is not possible
+  // (cross-device source such as the installed app bundle, EPERM, EMLINK, or
+  // filesystems without hard-link support).
+  if (!internal::g_disable_hard_links && link(from.c_str(), to.c_str()) == 0) {
+    return Status::Ok();
   }
 
   FILE* source = std::fopen(from.c_str(), "rb");
