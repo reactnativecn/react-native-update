@@ -45,7 +45,6 @@ export const UpdateProvider = ({
   const updateInfoRef = useRef(updateInfo);
   const [progress, setProgress] = useState<ProgressData>();
   const [lastError, setLastError] = useState<Error>();
-  const lastChecking = useRef(0);
 
   const throwErrorIfEnabled = useCallback(
     (e: Error) => {
@@ -162,12 +161,9 @@ export const UpdateProvider = ({
 
   const checkUpdate = useCallback(
     async ({ extra }: { extra?: Partial<{ toHash: string }> } = {}) => {
-      const now = Date.now();
-      if (lastChecking.current && now - lastChecking.current < 1000) {
-        client.notifyAfterCheckUpdate({ status: 'skipped' });
-        return;
-      }
-      lastChecking.current = now;
+      // No throttle here: the client already dedupes checks via its 5s
+      // response cache, and a second throttle layer silently returned
+      // undefined, indistinguishable from a failed check.
       let rootInfo: CheckResult | undefined;
       try {
         rootInfo = await client.checkUpdate(extra);
@@ -275,8 +271,9 @@ export const UpdateProvider = ({
       return;
     }
     const { checkStrategy, autoMarkSuccess } = options;
+    let markSuccessTimer: ReturnType<typeof setTimeout> | undefined;
     if (autoMarkSuccess) {
-      setTimeout(() => {
+      markSuccessTimer = setTimeout(() => {
         markSuccess();
       }, 1000);
     }
@@ -294,6 +291,9 @@ export const UpdateProvider = ({
       checkUpdate().catch(noop);
     }
     return () => {
+      if (markSuccessTimer) {
+        clearTimeout(markSuccessTimer);
+      }
       stateListener.current && stateListener.current.remove();
     };
   }, [checkUpdate, options, dismissError, markSuccess, client]);

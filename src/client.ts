@@ -191,23 +191,39 @@ export class Pushy {
     data?: Record<string, string | number>;
   }) => {
     log(`${type} ${message}`);
-    await this.loggerPromise.promise;
+    if (this.options.logger === noop) {
+      // Wait briefly for a logger to arrive via setOptions (e.g. the rollback
+      // report fires in the constructor before the user configures one), but
+      // give up after a bound instead of retaining the closure forever when
+      // no logger is ever provided.
+      await Promise.race([
+        this.loggerPromise.promise,
+        new Promise(resolve => setTimeout(resolve, 10 * 1000)),
+      ]);
+    }
     const { logger = noop, appKey } = this.options;
     const overridePackageVersion = this.options.overridePackageVersion;
-    logger({
-      type,
-      data: {
-        appKey,
-        currentVersion,
-        cInfo,
-        packageVersion,
-        overridePackageVersion,
-        buildTime,
-        message,
-        ...currentVersionInfo,
-        ...data,
-      },
-    });
+    try {
+      logger({
+        type,
+        data: {
+          appKey,
+          currentVersion,
+          cInfo,
+          packageVersion,
+          overridePackageVersion,
+          buildTime,
+          message,
+          ...currentVersionInfo,
+          ...data,
+        },
+      });
+    } catch (e: any) {
+      // A user-provided logger must never break the update flow, and report()
+      // calls are fire-and-forget so a throw here would be an unhandled
+      // rejection.
+      log('logger error:', e?.message || e);
+    }
   };
   throwIfEnabled = (e: Error) => {
     if (this.options.throwError) {
@@ -453,17 +469,6 @@ export class Pushy {
       // empty result and avoid overwriting the last good updateInfo.
       return previousRespJson ? await previousRespJson : undefined;
     }
-  };
-  getBackupEndpoints = async () => {
-    const { server } = this.options;
-    if (!server) {
-      return [];
-    }
-    const remoteEndpoints = await this.getRemoteEndpoints();
-    return excludeConfiguredEndpoints(
-      dedupeEndpoints(remoteEndpoints),
-      this.getConfiguredCheckEndpoints(),
-    );
   };
   downloadUpdate = async (
     updateInfo: CheckResult,

@@ -82,7 +82,11 @@ export const pushyNativeEventEmitter = new NativeEventEmitter(PushyModule);
 
 if (!uuid) {
 	uuid = require('nanoid/non-secure').nanoid();
-	PushyModule.setUuid(uuid);
+	// If persisting fails the uuid drifts on every launch, which skews gray
+	// release bucketing and inflates stats — log it instead of failing silently.
+	Promise.resolve(PushyModule.setUuid(uuid)).catch((e: any) => {
+		log('setUuid error:', e?.message || e);
+	});
 }
 
 export const cInfo = {

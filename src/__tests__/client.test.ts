@@ -193,10 +193,6 @@ describe('Pushy server config', () => {
       'https://edge-a.example.com',
       'https://edge-b.example.com',
     ]);
-    expect(await client.getBackupEndpoints()).toEqual([
-      'https://edge-a.example.com',
-      'https://edge-b.example.com',
-    ]);
   });
 
   test('clones custom server config when setOptions overrides server', async () => {
@@ -218,6 +214,24 @@ describe('Pushy server config', () => {
       'https://b.example.com',
     ]);
     expect(client.options.server?.queryUrls).toEqual(['https://q.example.com']);
+  });
+
+  test('report delivers to a logger provided later via setOptions (JS-20)', async () => {
+    setupClientMocks();
+    const logger = mock(() => {});
+
+    const { Pushy } = await importFreshClient('report-late-logger');
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    const reportPromise = (client as any).report({ type: 'markSuccess' });
+    expect(logger).not.toHaveBeenCalled();
+
+    client.setOptions({ logger });
+    await reportPromise;
+
+    expect(logger).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'markSuccess' }),
+    );
   });
 
   test('calls afterCheckUpdate with skipped when beforeCheckUpdate returns false', async () => {

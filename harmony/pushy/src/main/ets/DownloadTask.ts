@@ -607,9 +607,11 @@ export class DownloadTask {
         }
 
         if (currentFrom.startsWith('resources/base/media/')) {
+          // Strip only the final extension: 'icon.round.png' -> 'icon.round',
+          // not 'icon' (getMediaByName expects the full resource name).
           const mediaName = currentFrom
             .replace('resources/base/media/', '')
-            .split('.')[0];
+            .replace(/\.[^.]+$/, '');
           const mediaBuffer = await resourceManager.getMediaByName(mediaName);
           const parentDirs = [
             ...new Set(
