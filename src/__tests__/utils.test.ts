@@ -1,4 +1,4 @@
-import { describe, expect, test, mock } from 'bun:test';
+import { describe, expect, test, mock, afterEach } from 'bun:test';
 
 mock.module('react-native', () => {
   return {
@@ -16,7 +16,19 @@ mock.module('../i18n', () => {
   };
 });
 
-import { joinUrls, computeProgress } from '../utils';
+import {
+  joinUrls,
+  computeProgress,
+  fetchWithTimeout,
+  enhancedFetch,
+  promiseAny,
+} from '../utils';
+
+const originalFetch = globalThis.fetch;
+
+afterEach(() => {
+  (globalThis as any).fetch = originalFetch;
+});
 
 describe('joinUrls', () => {
   test('returns undefined when fileName is not provided', () => {
@@ -104,5 +116,97 @@ describe('computeProgress', () => {
 
   test('handles large numbers', () => {
     expect(computeProgress(50_000_000, 100_000_000)).toBe(50);
+  });
+});
+
+describe('fetchWithTimeout', () => {
+  test('aborts the underlying request on timeout (JS-11 regression)', async () => {
+    let capturedSignal: AbortSignal | undefined;
+    (globalThis as any).fetch = mock((_url: string, params: any) => {
+      capturedSignal = params?.signal;
+      // Never settles on its own; only the abort signal can end it.
+      return new Promise((_, reject) => {
+        params?.signal?.addEventListener('abort', () =>
+          reject(new Error('Aborted')),
+        );
+      });
+    });
+
+    await expect(
+      fetchWithTimeout('https://example.com/slow', {}, 20),
+    ).rejects.toThrow('error_ping_timeout');
+    expect(capturedSignal?.aborted).toBe(true);
+  });
+
+  test('resolves normally before the timeout', async () => {
+    const response = { ok: true } as Response;
+    (globalThis as any).fetch = mock(async () => response);
+
+    expect(await fetchWithTimeout('https://example.com/fast', {}, 1000)).toBe(
+      response,
+    );
+  });
+});
+
+describe('enhancedFetch http fallback', () => {
+  test('retries idempotent requests over http with the scheme anchored', async () => {
+    const calls: string[] = [];
+    const response = { ok: true } as Response;
+    (globalThis as any).fetch = mock(async (url: string) => {
+      calls.push(url);
+      if (calls.length === 1) {
+        throw new Error('tls blocked');
+      }
+      return response;
+    });
+
+    // Path contains the substring "https" on purpose: a non-anchored replace
+    // would corrupt the path instead of the scheme.
+    expect(
+      await enhancedFetch('https://example.com/dl/https-bundle.ppk', {}),
+    ).toBe(response);
+    expect(calls).toEqual([
+      'https://example.com/dl/https-bundle.ppk',
+      'http://example.com/dl/https-bundle.ppk',
+    ]);
+  });
+
+  test('does not replay POST requests over http (JS-11 regression)', async () => {
+    const fetchMock = mock(async () => {
+      throw new Error('tls blocked');
+    });
+    (globalThis as any).fetch = fetchMock;
+
+    await expect(
+      enhancedFetch('https://example.com/api', { method: 'POST', body: '{}' }),
+    ).rejects.toThrow('tls blocked');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test('does not downgrade urls that are not https', async () => {
+    const fetchMock = mock(async () => {
+      throw new Error('offline');
+    });
+    (globalThis as any).fetch = fetchMock;
+
+    await expect(enhancedFetch('http://example.com/api', {})).rejects.toThrow(
+      'offline',
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('promiseAny', () => {
+  test('rejects immediately on an empty array instead of hanging (JS-18)', async () => {
+    await expect(promiseAny([])).rejects.toThrow('error_all_promises_rejected');
+  });
+
+  test('resolves with the first fulfilled promise', async () => {
+    expect(
+      await promiseAny([
+        Promise.reject(new Error('a')),
+        Promise.resolve('winner'),
+      ]),
+    ).toBe('winner');
   });
 });

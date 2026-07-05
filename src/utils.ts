@@ -22,6 +22,10 @@ export const DEFAULT_FETCH_TIMEOUT_MS = 5000;
 
 export function promiseAny<T>(promises: Promise<T>[]) {
   return new Promise<T>((resolve, reject) => {
+    if (!promises.length) {
+      reject(Error(i18n.t('error_all_promises_rejected')));
+      return;
+    }
     let count = 0;
 
     promises.forEach(promise => {
@@ -118,21 +122,30 @@ export const fetchWithTimeout = (
   params: Parameters<typeof fetch>[1],
   timeoutMs = DEFAULT_FETCH_TIMEOUT_MS,
 ): Promise<Response> => {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  // Abort the underlying request on timeout instead of racing a timer: with
+  // Promise.race the losing fetch kept running (and kept the connection busy)
+  // long after the caller had already moved on.
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    log('fetch timeout', url);
+    controller.abort();
+  }, timeoutMs);
 
-  return Promise.race([
-    enhancedFetch(url, params),
-    new Promise<Response>((_, reject) => {
-      timeoutId = setTimeout(() => {
-        log('fetch timeout', url);
-        reject(Error(i18n.t('error_ping_timeout')));
-      }, timeoutMs);
-    }),
-  ]).finally(() => {
-    if (timeoutId) {
+  return enhancedFetch(url, { ...params, signal: controller.signal })
+    .catch((e: any) => {
+      if (controller.signal.aborted) {
+        throw Error(i18n.t('error_ping_timeout'));
+      }
+      throw e;
+    })
+    .finally(() => {
       clearTimeout(timeoutId);
-    }
-  });
+    });
+};
+
+const isIdempotentRequest = (params: Parameters<typeof fetch>[1]) => {
+  const method = params?.method?.toUpperCase() ?? 'GET';
+  return method === 'GET' || method === 'HEAD';
 };
 
 export const enhancedFetch = async (
@@ -143,10 +156,17 @@ export const enhancedFetch = async (
   return fetch(url, params)
     .catch(e => {
       log('fetch error', url, e);
-      if (isRetry) {
+      if (
+        isRetry ||
+        (params as any)?.signal?.aborted ||
+        !url.startsWith('https:') ||
+        // Never replay non-idempotent requests (e.g. the checkUpdate POST)
+        // over plaintext http: the server may have processed the original.
+        !isIdempotentRequest(params)
+      ) {
         throw e;
       }
       log('trying fallback to http');
-      return enhancedFetch(url.replace('https', 'http'), params, true);
+      return enhancedFetch(url.replace(/^https:/, 'http:'), params, true);
     });
 };
