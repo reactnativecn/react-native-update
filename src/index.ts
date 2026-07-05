@@ -1,4 +1,10 @@
 export { Pushy, Cresc } from './client';
-export { UpdateContext, usePushy, useUpdate } from './context';
+export {
+  ProgressContext,
+  UpdateContext,
+  usePushy,
+  useUpdate,
+  useUpdateProgress,
+} from './context';
 export { PushyProvider, UpdateProvider } from './provider';
 export { PushyModule, UpdateModule } from './core';

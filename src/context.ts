@@ -1,4 +1,4 @@
-import { createContext, useContext } from 'react';
+import { createContext, useContext, useMemo } from 'react';
 import { CheckResult, ProgressData } from './type';
 import { Pushy, Cresc } from './client';
 import i18n from './i18n';
@@ -46,21 +46,35 @@ export const UpdateContext = createContext<{
   currentHash: string;
   packageVersion: string;
   client?: Pushy | Cresc;
-  progress?: ProgressData;
   updateInfo?: CheckResult;
   lastError?: Error;
 }>(defaultContext);
 
-export const useUpdate = __DEV__ ? () => {
-  const context = useContext(UpdateContext);
+// Download progress ticks at high frequency, so it lives in its own context;
+// otherwise every tick would re-render all useUpdate() consumers even when
+// they never read progress.
+export const ProgressContext = createContext<ProgressData | undefined>(
+  undefined,
+);
 
-  // 检查是否在 UpdateProvider 内部使用
-  if (!context.client) {
+/**
+ * Subscribe to download progress only. Components that render a progress bar
+ * should prefer this over useUpdate() so the rest of the tree is not
+ * re-rendered on every progress event.
+ */
+export const useUpdateProgress = () => useContext(ProgressContext);
+
+export const useUpdate = () => {
+  const context = useContext(UpdateContext);
+  const progress = useContext(ProgressContext);
+
+  if (__DEV__ && !context.client) {
+    // 检查是否在 UpdateProvider 内部使用
     throw new Error(i18n.t('error_use_update_outside_provider'));
   }
 
-  return context;
-} : () => useContext(UpdateContext);
+  return useMemo(() => ({ ...context, progress }), [context, progress]);
+};
 
 /** @deprecated Please use `useUpdate` instead */
 export const usePushy = useUpdate;

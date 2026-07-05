@@ -2,6 +2,7 @@ import React, {
   ReactNode,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
@@ -24,7 +25,7 @@ import {
   ProgressData,
   UpdateTestPayload,
 } from './type';
-import { UpdateContext } from './context';
+import { ProgressContext, UpdateContext } from './context';
 import { URL } from 'react-native-url-polyfill';
 import { resolveCheckResult } from './resolveCheckResult';
 import { assertWeb, log, noop } from './utils';
@@ -391,28 +392,48 @@ export const UpdateProvider = ({
     };
   }, [parseTestPayload]);
 
+  // progress lives in its own context (see context.ts), so this value only
+  // changes when the update state itself changes, not on every progress tick.
+  const contextValue = useMemo(
+    () => ({
+      checkUpdate,
+      switchVersion,
+      switchVersionLater,
+      dismissError,
+      updateInfo,
+      lastError,
+      markSuccess,
+      client,
+      downloadUpdate,
+      packageVersion,
+      currentHash: currentVersion,
+      downloadAndInstallApk,
+      getCurrentVersionInfo,
+      currentVersionInfo,
+      parseTestQrCode,
+      restartApp,
+    }),
+    [
+      checkUpdate,
+      switchVersion,
+      switchVersionLater,
+      dismissError,
+      updateInfo,
+      lastError,
+      markSuccess,
+      client,
+      downloadUpdate,
+      downloadAndInstallApk,
+      parseTestQrCode,
+      restartApp,
+    ],
+  );
+
   return (
-    <UpdateContext.Provider
-      value={{
-        checkUpdate,
-        switchVersion,
-        switchVersionLater,
-        dismissError,
-        updateInfo,
-        lastError,
-        markSuccess,
-        client,
-        downloadUpdate,
-        packageVersion,
-        currentHash: currentVersion,
-        progress,
-        downloadAndInstallApk,
-        getCurrentVersionInfo,
-        currentVersionInfo,
-        parseTestQrCode,
-        restartApp,
-      }}>
-      {children}
+    <UpdateContext.Provider value={contextValue}>
+      <ProgressContext.Provider value={progress}>
+        {children}
+      </ProgressContext.Provider>
     </UpdateContext.Provider>
   );
 };
