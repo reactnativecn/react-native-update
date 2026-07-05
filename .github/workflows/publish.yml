@@ -40,8 +40,28 @@ jobs:
             echo "changed=false" >> $GITHUB_OUTPUT
           fi
 
+  # Rebuild the Android native libraries from source so the published package
+  # can never ship a stale librnupdate.so after a cpp/patch_core change (the
+  # committed binaries are for local dev / git installs only).
+  build_android_so:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - name: Install pinned NDK
+        run: echo "y" | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;28.2.13676358"
+      - name: Build and verify native libraries
+        run: bash scripts/build-android-so.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-so
+          path: android/lib/
+          if-no-files-found: error
+
   publish_with_harmony:
-    needs: check_changes
+    needs: [check_changes, build_android_so]
     if: needs.check_changes.outputs.harmony_changed == 'true'
     runs-on: ubuntu-latest
     container: ghcr.io/sanchuanhehe/harmony-next-pipeline-docker/harmonyos-ci-image:latest
@@ -61,6 +81,11 @@ jobs:
           node-version: 24
           registry-url: 'https://registry.npmjs.org'
       - run: bun install --frozen-lockfile
+      - name: Use CI-built Android native libraries
+        uses: actions/download-artifact@v4
+        with:
+          name: android-so
+          path: android/lib
       - name: Verify Android native libraries
         run: node scripts/verify-android-so.js
       - name: Build Harmony HAR
@@ -77,7 +102,7 @@ jobs:
           fi
 
   publish_without_harmony:
-    needs: check_changes
+    needs: [check_changes, build_android_so]
     if: needs.check_changes.outputs.harmony_changed == 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -96,6 +121,11 @@ jobs:
           node-version: 24
           registry-url: 'https://registry.npmjs.org'
       - run: bun install --frozen-lockfile
+      - name: Use CI-built Android native libraries
+        uses: actions/download-artifact@v4
+        with:
+          name: android-so
+          path: android/lib
       - name: Verify Android native libraries
         run: node scripts/verify-android-so.js
       - name: Fetch previous Harmony HAR
