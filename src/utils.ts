@@ -122,6 +122,26 @@ export const fetchWithTimeout = (
   params: Parameters<typeof fetch>[1],
   timeoutMs = DEFAULT_FETCH_TIMEOUT_MS,
 ): Promise<Response> => {
+  // AbortController landed in the RN fetch polyfill around 0.60; we support
+  // older peers, so fall back to a plain timer race when it is unavailable
+  // (the losing fetch keeps running there — old runtimes can't do better).
+  if (typeof AbortController === 'undefined') {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    return Promise.race([
+      enhancedFetch(url, params),
+      new Promise<Response>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          log('fetch timeout', url);
+          reject(Error(i18n.t('error_ping_timeout')));
+        }, timeoutMs);
+      }),
+    ]).finally(() => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    });
+  }
+
   // Abort the underlying request on timeout instead of racing a timer: with
   // Promise.race the losing fetch kept running (and kept the connection busy)
   // long after the caller had already moved on.

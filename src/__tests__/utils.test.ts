@@ -146,6 +146,38 @@ describe('fetchWithTimeout', () => {
       response,
     );
   });
+
+  test('falls back to a timer race when AbortController is unavailable (RN < 0.60)', async () => {
+    const originalAbortController = (globalThis as any).AbortController;
+    delete (globalThis as any).AbortController;
+    const fetchMock = mock(() => new Promise<Response>(() => {}));
+    (globalThis as any).fetch = fetchMock;
+
+    try {
+      await expect(
+        fetchWithTimeout('https://example.com/slow', {}, 20),
+      ).rejects.toThrow('error_ping_timeout');
+      // Legacy path must not pass a signal the runtime does not understand.
+      expect((fetchMock.mock.calls[0] as any[])[1]?.signal).toBeUndefined();
+    } finally {
+      (globalThis as any).AbortController = originalAbortController;
+    }
+  });
+
+  test('still resolves successful responses on the fallback path', async () => {
+    const originalAbortController = (globalThis as any).AbortController;
+    delete (globalThis as any).AbortController;
+    const response = { ok: true } as Response;
+    (globalThis as any).fetch = mock(async () => response);
+
+    try {
+      expect(
+        await fetchWithTimeout('https://example.com/fast', {}, 1000),
+      ).toBe(response);
+    } finally {
+      (globalThis as any).AbortController = originalAbortController;
+    }
+  });
 });
 
 describe('enhancedFetch http fallback', () => {
