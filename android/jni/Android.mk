@@ -20,7 +20,6 @@ Hdp_Files := \
     lzma/C/Lzma2Dec.c
 
 LOCAL_SRC_FILES := \
-	DownloadTask.c \
 	../../cpp/patch_core/archive_patch_core.cpp \
 	../../cpp/patch_core/patch_core.cpp \
 	../../cpp/patch_core/patch_core_android.cpp \

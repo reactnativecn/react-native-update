@@ -50,10 +50,6 @@ export interface FileSourcePatchRequest {
 }
 
 interface NativePatchCoreBindings {
-  hdiffPatch(
-    origin: Uint8Array,
-    patch: Uint8Array,
-  ): ArrayBuffer | Uint8Array;
   syncStateWithBinaryVersion(
     packageVersion: string,
     buildTime: string,

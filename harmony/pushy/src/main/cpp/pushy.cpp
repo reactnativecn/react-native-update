@@ -11,7 +11,6 @@
 #include "state_ops.h"
 
 extern "C" {
-#include "hpatch.h"
 }
 
 namespace {
@@ -405,96 +404,6 @@ pushy::patch::PatchManifest BuildManifest(
   }
   manifest.deletes = deletes;
   return manifest;
-}
-
-napi_value HdiffPatch(napi_env env, napi_callback_info info) {
-  napi_value args[2] = {nullptr, nullptr};
-  size_t argc = 2;
-  if (!GetArgCount(env, info, &argc, args) || argc < 2) {
-    ThrowError(env, "Wrong number of arguments");
-    return nullptr;
-  }
-
-  bool is_typed_array = false;
-  if (napi_is_typedarray(env, args[0], &is_typed_array) != napi_ok || !is_typed_array) {
-    ThrowError(env, "First argument must be a TypedArray");
-    return nullptr;
-  }
-
-  uint8_t* origin_ptr = nullptr;
-  size_t origin_length = 0;
-  if (napi_get_typedarray_info(
-          env,
-          args[0],
-          nullptr,
-          &origin_length,
-          reinterpret_cast<void**>(&origin_ptr),
-          nullptr,
-          nullptr) != napi_ok) {
-    ThrowError(env, "Failed to get origin buffer");
-    return nullptr;
-  }
-
-  if (napi_is_typedarray(env, args[1], &is_typed_array) != napi_ok || !is_typed_array) {
-    ThrowError(env, "Second argument must be a TypedArray");
-    return nullptr;
-  }
-
-  uint8_t* patch_ptr = nullptr;
-  size_t patch_length = 0;
-  if (napi_get_typedarray_info(
-          env,
-          args[1],
-          nullptr,
-          &patch_length,
-          reinterpret_cast<void**>(&patch_ptr),
-          nullptr,
-          nullptr) != napi_ok) {
-    ThrowError(env, "Failed to get patch buffer");
-    return nullptr;
-  }
-
-  hpatch_singleCompressedDiffInfo patch_info;
-  if (!((origin_length == 0) || origin_ptr) || !patch_ptr || patch_length == 0) {
-    ThrowError(env, "Corrupt patch");
-    return nullptr;
-  }
-  if (kHPatch_ok != hpatch_getInfo_by_mem(&patch_info, patch_ptr, patch_length)) {
-    ThrowError(env, "Error info in hpatch");
-    return nullptr;
-  }
-  if (origin_length != patch_info.oldDataSize) {
-    ThrowError(env, "Error oldDataSize in hpatch");
-    return nullptr;
-  }
-
-  size_t new_size = static_cast<size_t>(patch_info.newDataSize);
-  if (sizeof(size_t) != sizeof(hpatch_StreamPos_t) &&
-      new_size != patch_info.newDataSize) {
-    ThrowError(env, "Error newDataSize in hpatch");
-    return nullptr;
-  }
-
-  void* output_data = nullptr;
-  napi_value result = nullptr;
-  if (napi_create_arraybuffer(env, new_size, &output_data, &result) != napi_ok) {
-    ThrowError(env, "Failed to create result buffer");
-    return nullptr;
-  }
-
-  if (kHPatch_ok != hpatch_by_mem(
-                       origin_ptr,
-                       origin_length,
-                       static_cast<uint8_t*>(output_data),
-                       new_size,
-                       patch_ptr,
-                       patch_length,
-                       &patch_info)) {
-    ThrowError(env, "hpatch");
-    return nullptr;
-  }
-
-  return result;
 }
 
 napi_value SyncStateWithBinaryVersion(napi_env env, napi_callback_info info) {
@@ -968,8 +877,7 @@ bool ExportFunction(
 }  // namespace
 
 napi_value Init(napi_env env, napi_value exports) {
-  if (!ExportFunction(env, exports, "hdiffPatch", HdiffPatch) ||
-      !ExportFunction(env, exports, "syncStateWithBinaryVersion", SyncStateWithBinaryVersion) ||
+  if (!ExportFunction(env, exports, "syncStateWithBinaryVersion", SyncStateWithBinaryVersion) ||
       !ExportFunction(env, exports, "runStateCore", RunStateCore) ||
       !ExportFunction(env, exports, "buildArchivePatchPlan", BuildArchivePatchPlan) ||
       !ExportFunction(env, exports, "buildCopyGroups", BuildCopyGroups) ||
