@@ -24,12 +24,24 @@ final class UpdateEventEmitter {
 
     static void sendEvent(String eventName, WritableMap params) {
         ReactApplicationContext reactContext = getReactContext();
-        if (reactContext == null || !reactContext.hasActiveCatalystInstance()) {
+        if (reactContext == null || !hasActiveInstance(reactContext)) {
             return;
         }
 
         reactContext
             .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
             .emit(eventName, params);
+    }
+
+    @SuppressWarnings("deprecation")
+    private static boolean hasActiveInstance(ReactApplicationContext reactContext) {
+        try {
+            // hasActiveCatalystInstance() is always false in bridgeless mode, which
+            // silently drops every progress event on the new architecture.
+            return reactContext.hasActiveReactInstance();
+        } catch (NoSuchMethodError e) {
+            // RN < 0.68 has no hasActiveReactInstance(); fall back for old peers.
+            return reactContext.hasActiveCatalystInstance();
+        }
     }
 }
