@@ -1,0 +1,104 @@
+# HarmonyOS e2e —— 目前仅手动触发（workflow_dispatch），尚未启用自动运行。
+#
+# 需要一台自托管 runner（labels: self-hosted, macOS, harmony），机器上需一次性准备：
+#   - DevEco Studio + SDK（hdc 在 PATH，默认 DEVECO_HOME=/Applications/DevEco-Studio.app/Contents）
+#   - 已部署的模拟器镜像（默认 hvd 名 api20；DevEco 内登录华为账号下载）或常连真机
+#   - ~/.ohos/config 下 bundleName 对应的自动签名材料（调试证书约一年续签一次）
+#   - node 22+ / bun / rsync
+# GitHub 托管 runner 跑不了：Linux 无鸿蒙模拟器；macOS/Windows runner 无嵌套虚拟化，
+# 且模拟器镜像需华为账号在 DevEco 内下载，无法在临时环境自动供给。
+name: e2e-harmony
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e-harmony:
+    runs-on: [self-hosted, macOS, harmony]
+    timeout-minutes: 40
+    env:
+      RNU_CLI_ROOT: ${{ github.workspace }}/react-native-update-cli
+      RNU_HARMONY_BUNDLE_NAME: com.charmlot.testpushy
+      HVD_NAME: api20
+    steps:
+      - name: Checkout react-native-update
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Checkout react-native-update-cli
+        uses: actions/checkout@v7
+        with:
+          repository: reactnativecn/react-native-update-cli
+          path: react-native-update-cli
+
+      - name: Install e2etest dependencies
+        run: cd Example/e2etest && bun install --frozen-lockfile
+
+      - name: Install harmony_use_pushy dependencies
+        run: cd Example/harmony_use_pushy && bun install --frozen-lockfile
+
+      - name: Install react-native-update-cli dependencies
+        run: cd react-native-update-cli && bun install --frozen-lockfile && bun run build
+
+      - name: Start emulator if no device connected
+        run: |
+          set -euo pipefail
+          if hdc list targets | grep -qv '^\[Empty\]$'; then
+            echo "device already connected"; exit 0
+          fi
+          DEVECO_HOME="${DEVECO_HOME:-/Applications/DevEco-Studio.app/Contents}"
+          # 实例 config.ini 的 sdkPath 可能失效，必须显式传 -imageRoot；
+          # nohup 脱离 job 进程组，避免 step 结束时模拟器被收尾杀掉。
+          nohup "$DEVECO_HOME/tools/emulator/Emulator" \
+            -hvd "$HVD_NAME" \
+            -path "$HOME/.Huawei/Emulator/deployed" \
+            -imageRoot "$HOME/Library/Huawei/Sdk" \
+            > emulator.log 2>&1 &
+          for i in $(seq 1 60); do
+            if hdc list targets | grep -qv '^\[Empty\]$'; then
+              echo "emulator online"; exit 0
+            fi
+            sleep 5
+          done
+          echo "emulator did not come online in 300s" >&2
+          tail -50 emulator.log >&2 || true
+          exit 1
+
+      - name: Build and install e2e base hap
+        run: bash Example/e2etest/scripts/build-harmony-e2e.sh
+
+      - name: Run harmony e2e
+        env:
+          RNU_E2E_SKIP_PREPARE: 'true'
+        run: cd Example/e2etest && npx jest --config e2e/harmony.jest.config.js
+
+      - name: Collect failure diagnostics
+        if: failure()
+        run: |
+          set +e
+          mkdir -p harmony-diagnostics
+          hdc shell snapshot_display -f /data/local/tmp/e2e-fail.jpeg
+          hdc file recv /data/local/tmp/e2e-fail.jpeg harmony-diagnostics/screen.jpeg
+          hdc shell uitest dumpLayout -p /data/local/tmp/e2e-fail-layout.json
+          hdc file recv /data/local/tmp/e2e-fail-layout.json harmony-diagnostics/layout.json
+          hdc shell hilog -x | tail -2000 > harmony-diagnostics/hilog.txt
+          cp emulator.log harmony-diagnostics/ 2>/dev/null
+          true
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: harmony-e2e-diagnostics
+          path: harmony-diagnostics/
+          if-no-files-found: ignore
+
+      - name: Cleanup local e2e server
+        if: always()
+        run: |
+          kill "$(cat Example/e2etest/.e2e-artifacts/.server.harmony.pid 2>/dev/null)" 2>/dev/null || true

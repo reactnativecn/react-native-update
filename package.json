@@ -15,6 +15,7 @@
     "test": "bun test src/__tests__",
     "test:patch-core": "./scripts/test-patch-core.sh",
     "build:harmony-har": "node scripts/build-harmony-har.js",
+    "build:harmony-e2e": "bash Example/e2etest/scripts/build-harmony-e2e.sh",
     "build:so": "bun submodule && bash scripts/build-android-so.sh",
     "build:ios-debug": "cd Example/e2etest && bun && detox build --configuration ios.sim.debug",
     "build:ios-release": "cd Example/e2etest && bun && detox build --configuration ios.sim.release",

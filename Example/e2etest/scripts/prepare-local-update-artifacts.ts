@@ -72,9 +72,15 @@ if (!binRelative) {
 }
 const cliEntry = path.join(cliRoot, binRelative);
 
-if (!['ios', 'android'].includes(platform)) {
+if (!['ios', 'android', 'harmony'].includes(platform)) {
   throw new Error(`Unsupported E2E_PLATFORM: ${platform}`);
 }
+
+// The harmony e2e app lives in the RN 0.72 example project (RNOH does not
+// support this project's RN version), so its bundles are built from there.
+const harmonyProjectRoot = path.resolve(projectRoot, '../harmony_use_pushy');
+const bundleProjectRoot =
+  platform === 'harmony' ? harmonyProjectRoot : projectRoot;
 
 if (!fs.existsSync(cliEntry)) {
   throw new Error(`react-native-update-cli entry not found: ${cliEntry}`);
@@ -196,12 +202,13 @@ function bundleTo(entryFile: string, outputFile: string) {
       entryFile,
       '--dev',
       'false',
-      '--rncli',
+      // The harmony bundler path in the CLI drives Metro itself.
+      ...(platform === 'harmony' ? [] : ['--rncli']),
       '--output',
       outputFile,
       '--no-interactive',
     ],
-    projectRoot,
+    bundleProjectRoot,
   );
   verifyGeneratedFile(`bundle ${entryFile}`, outputFile);
 }
@@ -305,7 +312,9 @@ async function main() {
 
   bundleTo('e2e/entry.v1.ts', v1);
   bundleTo('e2e/entry.v2.ts', v2);
-  bundleTo('e2e/entry.v3.ts', v3);
+  if (platform !== 'harmony') {
+    bundleTo('e2e/entry.v3.ts', v3);
+  }
 
   if (platform === 'android') {
     const apkPath = path.join(

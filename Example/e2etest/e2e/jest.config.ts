@@ -5,6 +5,8 @@ const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const config = {
   rootDir: '..',
   testMatch: ['<rootDir>/e2e/**/*.test.ts'],
+  // Harmony tests use their own runner (harmony.jest.config.js), not Detox.
+  testPathIgnorePatterns: ['/e2e/harmony/'],
   testTimeout: 300000,
   maxWorkers: 1,
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node'],
