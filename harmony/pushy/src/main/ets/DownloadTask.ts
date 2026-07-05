@@ -69,7 +69,7 @@ const FILE_COPY_BUFFER_SIZE = 64 * 1024;
 
 export class DownloadTask {
   private context: common.Context;
-  private hash: string;
+  private hash = '';
   private eventHub: EventHub;
 
   constructor(context: common.Context) {
@@ -244,7 +244,7 @@ export class DownloadTask {
         bundleOutputPath: outputFile,
         enableMerge: false,
       });
-    } catch (error) {
+    } catch (error: any) {
       error.message = `Failed to process bundle patch: ${error.message}`;
       throw error;
     } finally {
@@ -395,17 +395,18 @@ export class DownloadTask {
         fileIo.OpenMode.CREATE | fileIo.OpenMode.READ_WRITE,
       );
 
-      httpRequest.on('headersReceive', (header: Record<string, string>) => {
+      httpRequest.on('headersReceive', (header: Object) => {
         if (!header) {
           return;
         }
-        const lengthKey = Object.keys(header).find(
+        const headers = header as Record<string, string>;
+        const lengthKey = Object.keys(headers).find(
           key => key.toLowerCase() === 'content-length',
         );
         if (!lengthKey) {
           return;
         }
-        const length = parseInt(header[lengthKey], 10);
+        const length = parseInt(headers[lengthKey], 10);
         if (!Number.isNaN(length)) {
           contentLength = length;
         }
@@ -649,7 +650,7 @@ export class DownloadTask {
           }
         }
       }
-    } catch (error) {
+    } catch (error: any) {
       error.message =
         'Copy from resource failed:' +
         currentFrom +
@@ -670,7 +671,7 @@ export class DownloadTask {
         params.originHash || '',
         3,
       );
-    } catch (error) {
+    } catch (error: any) {
       error.message = 'Cleanup failed:' + error.message;
       console.error(error);
       throw error;
@@ -698,7 +699,7 @@ export class DownloadTask {
         default:
           throw Error(`Unknown task type: ${params.type}`);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Task execution failed:', error.message);
       if (params.type !== DownloadTaskParams.TASK_TYPE_CLEANUP) {
         try {
@@ -707,7 +708,7 @@ export class DownloadTask {
           } else {
             await this.removeDirectory(params.unzipDirectory);
           }
-        } catch (cleanupError) {
+        } catch (cleanupError: any) {
           console.error('Cleanup after error failed:', cleanupError.message);
         }
       }
