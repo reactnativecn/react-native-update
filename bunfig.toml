@@ -1,2 +1,5 @@
 [test]
 preload = ["./src/__tests__/setup.ts"]
+# Confine test discovery to our own tests: a bare `bun test` must not pick up
+# Detox e2e specs or *_test.js fixtures inside harmony oh_modules.
+root = "src/__tests__"
