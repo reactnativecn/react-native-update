@@ -1,6 +1,20 @@
 {
   app: {
-    signingConfigs: [],
+    signingConfigs: [
+      {
+        "name": "default",
+        "type": "HarmonyOS",
+        "material": {
+          "certpath": "/Users/sunny/.ohos/config/default_harmony_pVK6E4GA9SBLpnqwp2OtcIJ9bUSKLX56g4tJ8Zho2Yc=.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "0000001A9B25E0384046CB407B7967139107FC8A64897F5A0B2D825372D582E114BFFF5E029BC5B13380",
+          "profile": "/Users/sunny/.ohos/config/default_harmony_pVK6E4GA9SBLpnqwp2OtcIJ9bUSKLX56g4tJ8Zho2Yc=.p7b",
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "/Users/sunny/.ohos/config/default_harmony_pVK6E4GA9SBLpnqwp2OtcIJ9bUSKLX56g4tJ8Zho2Yc=.p12",
+          "storePassword": "0000001AF7DE513B91515B4BAD3301B6C2E5853C42DEF89AE8E42921FBA8D68F27B5554866DCC2C85D76"
+        }
+      }
+    ],
     products: [
       {
         name: 'default',
@@ -32,7 +46,9 @@
       targets: [
         {
           name: 'default',
-          applyToProducts: ['default'],
+          applyToProducts: [
+            'default'
+          ],
         },
       ],
     },
