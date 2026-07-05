@@ -214,7 +214,7 @@ public class UpdateContext {
 
     public void switchVersion(String hash) {
         if (!new File(rootDir, hash+"/index.bundlejs").exists()) {
-            throw new Error("Bundle version " + hash + " not found.");
+            throw new IllegalStateException("Bundle version " + hash + " not found.");
         }
         StateCoreResult currentState = getStateSnapshot();
         StateCoreResult nextState = runStateCore(
@@ -385,7 +385,11 @@ public class UpdateContext {
             return defaultAssetsUrl;
         }
 
-        while (currentVersion != null) {
+        // Guard the rollback chain against cycles: a corrupted state returning
+        // an already-visited version would otherwise spin this loop forever on
+        // the main thread.
+        java.util.HashSet<String> visitedVersions = new java.util.HashSet<>();
+        while (currentVersion != null && visitedVersions.add(currentVersion)) {
             File bundleFile = new File(rootDir, currentVersion+"/index.bundlejs");
             if (!bundleFile.exists()) {
                 Log.e(TAG, "Bundle version " + currentVersion + " not found.");

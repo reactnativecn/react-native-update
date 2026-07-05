@@ -33,7 +33,16 @@ class DownloadTask implements Runnable {
     // events on percentage change, so throttle by bytes to avoid flooding the
     // bridge (e.g. a 20MB chunked download would otherwise emit ~5000 events).
     private static final long PROGRESS_BYTES_THRESHOLD = 256 * 1024;
-    private static final OkHttpClient HTTP_CLIENT = new OkHttpClient();
+    // Explicit timeouts: the default client has no call timeout, so a
+    // slow-dripping connection could occupy the single-threaded download
+    // executor indefinitely and starve queued tasks. The call timeout is a
+    // generous upper bound sized for large full-package downloads.
+    private static final OkHttpClient HTTP_CLIENT = new OkHttpClient.Builder()
+            .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+            .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+            .callTimeout(10, java.util.concurrent.TimeUnit.MINUTES)
+            .build();
 
     static {
         NativeUpdateCore.ensureLoaded();
