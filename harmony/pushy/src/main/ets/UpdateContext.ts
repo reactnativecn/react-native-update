@@ -468,13 +468,22 @@ export class UpdateContext {
   public getBundleUrl() {
     UpdateContext.isUsingBundleUrl = true;
     this.trace('getBundleUrl:enter');
+    const stateBeforeLaunch = this.getStateSnapshot();
     const launchState = NativePatchCore.runStateCore(
       STATE_OP_RESOLVE_LAUNCH,
-      this.getStateSnapshot(),
+      stateBeforeLaunch,
       '',
       UpdateContext.ignoreRollback,
       true,
     );
+    if (launchState.didRollback) {
+      // The crash-protection rollback: the new version never called
+      // markSuccess. Keep this visible in release logs.
+      console.error(
+        `Version ${stateBeforeLaunch.currentVersion} was not marked as successful,` +
+          ` rolled back to ${launchState.currentVersion}`,
+      );
+    }
     if (launchState.didRollback || launchState.consumedFirstTime) {
       this.persistState(launchState, {
         markFirstLoadMarker: launchState.consumedFirstTime,
@@ -490,7 +499,12 @@ export class UpdateContext {
     );
 
     let version = launchState.loadVersion || '';
-    while (version) {
+    // Guard the rollback chain against cycles: a corrupted state returning an
+    // already-visited version would otherwise spin this loop forever during
+    // startup (Android has the same guard).
+    const visitedVersions = new Set<string>();
+    while (version && !visitedVersions.has(version)) {
+      visitedVersions.add(version);
       const bundleFile = this.getBundlePath(version);
       try {
         if (!fileIo.accessSync(bundleFile)) {
@@ -514,7 +528,11 @@ export class UpdateContext {
   }
 
   private rollBack(): string {
+    const stateBefore = this.getStateSnapshot();
     const nextState = this.runStateOperation(STATE_OP_ROLLBACK);
+    console.error(
+      `Rolling back version ${stateBefore.currentVersion} to ${nextState.currentVersion}`,
+    );
     return nextState.currentVersion || '';
   }
 

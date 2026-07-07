@@ -207,8 +207,10 @@ public class UpdateContext {
     }
 
     private void persistEditor(SharedPreferences.Editor editor, String reason) {
-        if (!editor.commit() && DEBUG) {
-            Log.w(TAG, "Failed to persist update state for " + reason);
+        // A lost state write can mean a missed rollback or a version switch
+        // that silently never happens, so this must be visible in release too.
+        if (!editor.commit()) {
+            Log.e(TAG, "Failed to persist update state for " + reason);
         }
     }
 
@@ -367,6 +369,13 @@ public class UpdateContext {
             ignoreRollback,
             true
         );
+        if (launchState.didRollback) {
+            // The crash-protection rollback: the new version never called
+            // markSuccess. Keep this visible in release logs.
+            Log.e(TAG, "Version " + currentState.currentVersion
+                + " was not marked as successful, rolling back to "
+                + launchState.currentVersion);
+        }
         if (launchState.didRollback || launchState.consumedFirstTime) {
             SharedPreferences.Editor editor = sp.edit();
             applyState(editor, launchState);
@@ -411,6 +420,8 @@ public class UpdateContext {
             false,
             false
         );
+        Log.e(TAG, "Rolling back version " + currentState.currentVersion
+            + " to " + nextState.currentVersion);
         SharedPreferences.Editor editor = sp.edit();
         applyState(editor, nextState);
         persistEditor(editor, "rollback");

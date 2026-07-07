@@ -113,7 +113,8 @@ didFinishDownloadingToURL:(NSURL *)location
     // before touching savePath so an existing valid package is not destroyed.
     NSURLResponse *response = downloadTask.response;
     if ([response isKindOfClass:[NSHTTPURLResponse class]]) {
-        NSInteger statusCode = ((NSHTTPURLResponse *)response).statusCode;
+        NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse *)response;
+        NSInteger statusCode = httpResponse.statusCode;
         if (statusCode < 200 || statusCode >= 300) {
             self.fileError = [NSError errorWithDomain:RCTPushyDownloaderErrorDomain
                                                  code:statusCode
@@ -121,6 +122,26 @@ didFinishDownloadingToURL:(NSURL *)location
                 NSLocalizedDescriptionKey: [NSString stringWithFormat:@"unexpected http status code %ld", (long)statusCode],
             }];
             return;
+        }
+
+        // Reject truncated transfers like Android/Harmony do. Skip the check
+        // for encoded responses (e.g. gzip): NSURLSession decompresses them
+        // transparently, so the on-disk size legitimately differs from the
+        // Content-Length of the encoded body.
+        NSString *contentEncoding = [httpResponse.allHeaderFields[@"Content-Encoding"] lowercaseString];
+        BOOL isEncodedBody = contentEncoding.length > 0 && ![contentEncoding isEqualToString:@"identity"];
+        long long expectedLength = httpResponse.expectedContentLength;
+        if (!isEncodedBody && expectedLength > 0) {
+            NSNumber *fileSize = [[NSFileManager defaultManager] attributesOfItemAtPath:location.path
+                                                                                  error:nil][NSFileSize];
+            if (fileSize != nil && fileSize.longLongValue != expectedLength) {
+                self.fileError = [NSError errorWithDomain:RCTPushyDownloaderErrorDomain
+                                                     code:-1
+                                                 userInfo:@{
+                    NSLocalizedDescriptionKey: [NSString stringWithFormat:@"download incomplete: expected %lld bytes, got %lld", expectedLength, fileSize.longLongValue],
+                }];
+                return;
+            }
         }
     }
 

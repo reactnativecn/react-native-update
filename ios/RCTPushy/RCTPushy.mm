@@ -2,6 +2,7 @@
 #import "RCTPushyDownloader.h"
 #import "ZipArchive.h"
 #include "../../cpp/patch_core/archive_patch_core.h"
+#include "../../cpp/patch_core/error_codes.h"
 #include "../../cpp/patch_core/patch_core.h"
 #include "../../cpp/patch_core/state_core.h"
 
@@ -37,9 +38,15 @@ static NSString * const BUNDLE_FILE_NAME = @"index.bundlejs";
 static NSString * const SOURCE_PATCH_NAME = @"__diff.json";
 static NSString * const BUNDLE_PATCH_NAME = @"index.bundlejs.patch";
 
-// error def
+// error def — messages are human-readable; the stable cross-platform codes
+// live in cpp/patch_core/error_codes.h and travel in PushyErrorCodeKey.
 static NSString * const ERROR_OPTIONS = @"options error";
 static NSString * const ERROR_FILE_OPERATION = @"file operation error";
+static NSString * const PushyErrorCodeKey = @"PushyErrorCode";
+
+static NSString *PushyCode(const char *code) {
+    return [NSString stringWithUTF8String:code];
+}
 
 // event def
 static NSString * const EVENT_PROGRESS_DOWNLOAD = @"RCTPushyDownloadProgress";
@@ -80,7 +87,10 @@ static std::string PushyToStdString(NSString *value) {
 static NSError *PushyNSErrorFromStatus(const pushy::patch::Status &status) {
     return [NSError errorWithDomain:PushyErrorDomain
                                code:-1
-                           userInfo:@{ NSLocalizedDescriptionKey: [NSString stringWithUTF8String:status.message.c_str()] }];
+                           userInfo:@{
+                               NSLocalizedDescriptionKey: [NSString stringWithUTF8String:status.message.c_str()],
+                               PushyErrorCodeKey: PushyCode(pushy::error_codes::kPatchFailed),
+                           }];
 }
 
 static NSUserDefaults *PushyDefaults(void) {
@@ -118,19 +128,22 @@ static BOOL PushyStringIsBlank(NSString *value) {
 }
 
 static void PushyRejectError(RCTPromiseRejectBlock reject, NSError *error) {
-    reject([NSString stringWithFormat:@"%ld", (long)error.code], error.localizedDescription, error);
+    // Prefer the stable cross-platform code (error_codes.h); fall back to the
+    // numeric NSError code for system errors that were not classified.
+    NSString *code = error.userInfo[PushyErrorCodeKey];
+    if (code == nil) {
+        code = [NSString stringWithFormat:@"%ld", (long)error.code];
+    }
+    reject(code, error.localizedDescription, error);
 }
 
-static NSError *PushyErrorWithMessage(NSString *message) {
+static NSError *PushyErrorWithCode(const char *code, NSString *message) {
     return [NSError errorWithDomain:PushyErrorDomain
                                code:-1
                            userInfo:@{
                                NSLocalizedDescriptionKey: message ?: @"unknown error",
+                               PushyErrorCodeKey: PushyCode(code),
                            }];
-}
-
-static void PushyRejectMessage(RCTPromiseRejectBlock reject, NSString *message) {
-    PushyRejectError(reject, PushyErrorWithMessage(message));
 }
 
 static pushy::patch::PatchManifest PushyPatchManifestFromJson(NSDictionary *json) {
@@ -257,6 +270,7 @@ RCT_EXPORT_MODULE(RCTPushy);
         }
 
         if (!state.current_version.empty()) {
+            std::string const versionBeforeLaunch = state.current_version;
             pushy::state::LaunchDecision decision = pushy::state::ResolveLaunchState(
                 state,
                 ignoreRollback.load(),
@@ -264,6 +278,13 @@ RCT_EXPORT_MODULE(RCTPushy);
             );
             state = decision.state;
 
+            if (decision.did_rollback) {
+                // The crash-protection rollback: the new version never called
+                // markSuccess. Keep this visible in release logs.
+                RCTLogWarn(@"RCTPushy -- version %@ was not marked as successful, rolled back to %@",
+                    PushyFromStdString(versionBeforeLaunch),
+                    PushyFromStdString(state.current_version));
+            }
             if (decision.did_rollback || decision.consumed_first_time) {
                 PushyApplyStateToDefaults(defaults, state);
             }
@@ -275,13 +296,18 @@ RCT_EXPORT_MODULE(RCTPushy);
 
             NSString *loadVersion = PushyFromStdString(decision.load_version);
             NSString *downloadDir = [RCTPushy downloadDir];
-            while (loadVersion.length) {
+            // Guard the rollback chain against cycles: a corrupted state
+            // returning an already-visited version would otherwise spin this
+            // loop forever during startup (Android has the same guard).
+            NSMutableSet<NSString *> *visitedVersions = [NSMutableSet set];
+            while (loadVersion.length && ![visitedVersions containsObject:loadVersion]) {
+                [visitedVersions addObject:loadVersion];
                 NSString *bundlePath = [[downloadDir stringByAppendingPathComponent:loadVersion] stringByAppendingPathComponent:BUNDLE_FILE_NAME];
                 if ([[NSFileManager defaultManager] fileExistsAtPath:bundlePath isDirectory:NULL]) {
                     resolvedURL = [NSURL fileURLWithPath:bundlePath];
                     return;
                 } else {
-                    RCTLogError(@"RCTPushy -- bundle version %@ not found", loadVersion);
+                    RCTLogError(@"RCTPushy -- bundle version %@ not found, rolling back", loadVersion);
                     state = pushy::state::Rollback(state);
                     PushyApplyStateToDefaults(defaults, state);
                     loadVersion = PushyFromStdString(state.current_version);
@@ -359,7 +385,7 @@ RCT_EXPORT_METHOD(setUuid:(NSString *)uuid  resolver:(RCTPromiseResolveBlock)res
                   rejecter:(RCTPromiseRejectBlock)reject)
 {
     if (PushyStringIsBlank(uuid)) {
-        PushyRejectError(reject, PushyErrorWithMessage(ERROR_OPTIONS));
+        PushyRejectError(reject, PushyErrorWithCode(pushy::error_codes::kInvalidOptions, ERROR_OPTIONS));
         return;
     }
 
@@ -373,7 +399,7 @@ RCT_EXPORT_METHOD(setLocalHashInfo:(NSString *)hash
                   rejecter:(RCTPromiseRejectBlock)reject)
 {
     if (PushyStringIsBlank(hash) || PushyStringIsBlank(value)) {
-        PushyRejectMessage(reject, ERROR_OPTIONS);
+        PushyRejectError(reject, PushyErrorWithCode(pushy::error_codes::kInvalidOptions, ERROR_OPTIONS));
         return;
     }
 
@@ -386,7 +412,9 @@ RCT_EXPORT_METHOD(setLocalHashInfo:(NSString *)hash
         
         resolve(@true);
     } else {
-        PushyRejectError(reject, error ?: PushyErrorWithMessage(@"json格式校验报错"));
+        PushyRejectError(reject, PushyErrorWithCode(
+            pushy::error_codes::kInvalidHashInfo,
+            error != nil ? error.localizedDescription : @"invalid json string"));
     }
 }
 
@@ -419,6 +447,15 @@ RCT_EXPORT_METHOD(downloadPatchFromPpk:(NSDictionary *)options
                   rejecter:(RCTPromiseRejectBlock)reject)
 {
     [self downloadUpdate:PushyTypePatchFromPpk options:options resolver:resolve rejecter:reject];
+}
+
+RCT_EXPORT_METHOD(downloadAndInstallApk:(NSDictionary *)options
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+{
+    PushyRejectError(reject, PushyErrorWithCode(
+        pushy::error_codes::kUnsupportedPlatform,
+        @"downloadAndInstallApk is only supported on Android"));
 }
 
 RCT_EXPORT_METHOD(setNeedUpdate:(NSDictionary *)options
@@ -502,6 +539,12 @@ RCT_EXPORT_METHOD(markSuccess:(RCTPromiseResolveBlock)resolve
 {
     [self performUpdate:type options:options callback:^(NSError *error) {
         if (error != nil) {
+            if (error.userInfo[PushyErrorCodeKey] == nil) {
+                // Unclassified (system/network) errors from the download
+                // pipeline; keep the original message.
+                error = PushyErrorWithCode(pushy::error_codes::kDownloadFailed,
+                                           error.localizedDescription);
+            }
             PushyRejectError(reject, error);
             return;
         }
@@ -527,23 +570,37 @@ RCT_EXPORT_METHOD(markSuccess:(RCTPromiseResolveBlock)resolve
     NSString *hash = PushyOptionString(options, @"hash");
 
     if (PushyStringIsBlank(updateUrl) || PushyStringIsBlank(hash)) {
-        callback(PushyErrorWithMessage(ERROR_OPTIONS));
+        callback(PushyErrorWithCode(pushy::error_codes::kInvalidOptions, ERROR_OPTIONS));
         return;
     }
     NSString *originHash = PushyOptionString(options, @"originHash");
     if (type == PushyTypePatchFromPpk && PushyStringIsBlank(originHash)) {
-        callback(PushyErrorWithMessage(ERROR_OPTIONS));
+        callback(PushyErrorWithCode(pushy::error_codes::kInvalidOptions, ERROR_OPTIONS));
         return;
     }
     
     NSString *dir = [RCTPushy downloadDir];
     BOOL success = [self ensureDirectoryExistsAtPath:dir];
     if (!success) {
-        callback(PushyErrorWithMessage(ERROR_FILE_OPERATION));
+        callback(PushyErrorWithCode(pushy::error_codes::kFileOperationFailed, ERROR_FILE_OPERATION));
         return;
     }
 
     NSString *zipFilePath = [dir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@%@",hash, [self zipExtension:type]]];
+
+    // On failure, remove the partial version directory like Android/Harmony
+    // do: a half-unzipped/half-patched dir leaks disk and could later be
+    // mistaken for a complete version. hash is validated non-blank above, so
+    // this can never resolve to the download root itself.
+    NSString *unzipDir = [dir stringByAppendingPathComponent:hash];
+    void (^completion)(NSError *) = ^(NSError *error) {
+        if (error != nil) {
+            dispatch_async(self->_fileQueue, ^{
+                [[NSFileManager defaultManager] removeItemAtPath:unzipDir error:nil];
+            });
+        }
+        callback(error);
+    };
 
     RCTLogInfo(@"RCTPushy -- download file %@", updateUrl);
     [RCTPushyDownloader download:updateUrl savePath:zipFilePath progressHandler:^(long long receivedBytes, long long totalBytes) {
@@ -556,14 +613,14 @@ RCT_EXPORT_METHOD(markSuccess:(RCTPromiseResolveBlock)resolve
         }
     } completionHandler:^(NSString *path, NSError *error) {
         if (error != nil) {
-            callback(error);
+            completion(error);
             return;
         }
         [self unzipDownloadedPackage:zipFilePath
                                 hash:hash
                                 type:type
                           originHash:originHash
-                            callback:callback];
+                            callback:completion];
     }];
 }
 
@@ -629,7 +686,7 @@ RCT_EXPORT_METHOD(markSuccess:(RCTPromiseResolveBlock)resolve
     NSString *destination = [unzipDir stringByAppendingPathComponent:BUNDLE_FILE_NAME];
     NSData *data = [NSData dataWithContentsOfFile:sourcePatch];
     if (data == nil) {
-        callback(PushyErrorWithMessage(@"missing patch manifest"));
+        callback(PushyErrorWithCode(pushy::error_codes::kPatchFailed, @"missing patch manifest"));
         return;
     }
 
@@ -640,7 +697,7 @@ RCT_EXPORT_METHOD(markSuccess:(RCTPromiseResolveBlock)resolve
         return;
     }
     if (![jsonObject isKindOfClass:[NSDictionary class]]) {
-        callback(PushyErrorWithMessage(@"invalid patch manifest"));
+        callback(PushyErrorWithCode(pushy::error_codes::kPatchFailed, @"invalid patch manifest"));
         return;
     }
     NSDictionary *json = (NSDictionary *)jsonObject;
@@ -695,7 +752,7 @@ RCT_EXPORT_METHOD(markSuccess:(RCTPromiseResolveBlock)resolve
 {
     if (PushyStringIsBlank(hash)) {
         if (error != NULL) {
-            *error = PushyErrorWithMessage(ERROR_OPTIONS);
+            *error = PushyErrorWithCode(pushy::error_codes::kInvalidOptions, ERROR_OPTIONS);
         }
         return NO;
     }
@@ -758,7 +815,7 @@ RCT_EXPORT_METHOD(markSuccess:(RCTPromiseResolveBlock)resolve
 
             NSError *unzipError = error;
             if (!succeeded && unzipError == nil) {
-                unzipError = PushyErrorWithMessage(@"unzip failed");
+                unzipError = PushyErrorWithCode(pushy::error_codes::kPatchFailed, @"unzip failed");
             }
             completionHandler(unzipError);
         }];

@@ -43,6 +43,7 @@ final class StateSerialRunner {
 
     static void run(
         @Nullable final Promise promise,
+        final String errorCode,
         final String operationName,
         final Operation operation
     ) {
@@ -53,7 +54,7 @@ final class StateSerialRunner {
                     operation.run();
                 } catch (Throwable error) {
                     if (promise != null) {
-                        promise.reject(operationName + " failed", error);
+                        promise.reject(errorCode, operationName + " failed", error);
                     } else {
                         Log.e(UpdateContext.TAG, operationName + " failed", error);
                     }
