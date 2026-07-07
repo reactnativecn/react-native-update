@@ -445,6 +445,151 @@ describe('Pushy server config', () => {
   });
 });
 
+describe('error pipeline (onError + stable codes, EH-1/EH-2/EH-3)', () => {
+  test('check failure emits a coded error to onError listeners without throwing (throwError:false)', async () => {
+    setupClientMocks();
+    const logger = mock(() => {});
+    (globalThis as any).fetch = mock(async () => {
+      throw new Error('offline');
+    });
+
+    const { Pushy } = await importFreshClient('pipeline-check-failed');
+    const client = new Pushy({ appKey: 'demo-app', logger });
+    const seen: any[] = [];
+    client.onError((e: any, eventType: string) => {
+      seen.push({ e, eventType });
+    });
+
+    // Default throwError:false — resolves undefined instead of throwing.
+    expect(await client.checkUpdate()).toBeUndefined();
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0].eventType).toBe('errorChecking');
+    expect(seen[0].e.code).toBe('CHECK_FAILED');
+    expect(seen[0].e.message).toBe('offline');
+    expect(logger).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'errorChecking',
+        data: expect.objectContaining({ code: 'CHECK_FAILED' }),
+      }),
+    );
+  });
+
+  test('onError unsubscribe stops delivery', async () => {
+    setupClientMocks();
+    (globalThis as any).fetch = mock(async () => {
+      throw new Error('offline');
+    });
+
+    const { Pushy } = await importFreshClient('pipeline-unsubscribe');
+    const client = new Pushy({ appKey: 'demo-app' });
+    const listener = mock(() => {});
+    const unsubscribe = client.onError(listener);
+    unsubscribe();
+
+    await client.checkUpdate();
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  test('switchVersion failure is reported as errorSwitchVersion and rethrown (EH-3)', async () => {
+    const reloadUpdate = mock(() => Promise.reject(Error('bundle missing')));
+    const logger = mock(() => {});
+    setupClientMocks({ reloadUpdate });
+
+    const { Pushy, sharedState } = await importFreshClient(
+      'pipeline-switch-version-failed',
+    );
+    sharedState.downloadedHash = 'next-hash';
+    sharedState.applyingUpdate = false;
+    const client = new Pushy({ appKey: 'demo-app', logger });
+    const seen: any[] = [];
+    client.onError((e: any, eventType: string) => {
+      seen.push({ e, eventType });
+    });
+
+    await expect(client.switchVersion('next-hash')).rejects.toThrow(
+      'bundle missing',
+    );
+
+    expect(sharedState.applyingUpdate).toBe(false);
+    expect(seen).toHaveLength(1);
+    expect(seen[0].eventType).toBe('errorSwitchVersion');
+    expect(seen[0].e.code).toBe('SWITCH_VERSION_FAILED');
+    expect(logger).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'errorSwitchVersion',
+        data: expect.objectContaining({
+          code: 'SWITCH_VERSION_FAILED',
+          newVersion: 'next-hash',
+        }),
+      }),
+    );
+  });
+
+  test('a native-provided rejection code is preserved, not overwritten by the JS fallback (EH-5)', async () => {
+    // Native modules reject with stable codes from cpp/patch_core/error_codes.h
+    // (e.g. INVALID_OPTIONS); toUpdateError must keep them instead of stamping
+    // the JS-layer fallback code on top.
+    const nativeError: any = Error('empty hash');
+    nativeError.code = 'INVALID_OPTIONS';
+    const reloadUpdate = mock(() => Promise.reject(nativeError));
+    setupClientMocks({ reloadUpdate });
+
+    const { Pushy, sharedState } = await importFreshClient(
+      'pipeline-native-code-preserved',
+    );
+    sharedState.downloadedHash = 'next-hash';
+    sharedState.applyingUpdate = false;
+    const client = new Pushy({ appKey: 'demo-app' });
+    const seen: any[] = [];
+    client.onError((e: any, eventType: string) => {
+      seen.push({ e, eventType });
+    });
+
+    await expect(client.switchVersion('next-hash')).rejects.toThrow(
+      'empty hash',
+    );
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0].e.code).toBe('INVALID_OPTIONS');
+  });
+
+  test('apk download failure keeps the native error and reports its message (EH-4)', async () => {
+    const downloadAndInstallApk = mock(() =>
+      Promise.reject(Error('disk full')),
+    );
+    const logger = mock(() => {});
+    setupAndroidApkMocks(downloadAndInstallApk);
+
+    const { Pushy, sharedState } = await importFreshClient(
+      'pipeline-apk-cause',
+    );
+    sharedState.apkStatus = null;
+    const client = new Pushy({ appKey: 'demo-app', logger });
+    const seen: any[] = [];
+    client.onError((e: any, eventType: string) => {
+      seen.push({ e, eventType });
+    });
+
+    await client.downloadAndInstallApk('https://example.com/app.apk');
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0].eventType).toBe('errorDownloadAndInstallApk');
+    expect(seen[0].e.code).toBe('APK_DOWNLOAD_FAILED');
+    // The original native error must not be discarded anymore.
+    expect(seen[0].e.message).toBe('disk full');
+    expect(logger).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'errorDownloadAndInstallApk',
+        data: expect.objectContaining({
+          code: 'APK_DOWNLOAD_FAILED',
+          message: 'disk full',
+        }),
+      }),
+    );
+  });
+});
+
 describe('downloadUpdate fallback chain', () => {
   const realSetTimeout = globalThis.setTimeout;
 
@@ -678,6 +823,30 @@ describe('downloadUpdate fallback chain', () => {
     await expect(client.downloadUpdate(updateInfo)).rejects.toThrow(
       'error_full_patch_failed',
     );
+  });
+
+  test('all-strategies failure carries the DOWNLOAD_FAILED code (EH-1)', async () => {
+    setupDownloadMocks({
+      downloadPatchFromPpk: mock(() => Promise.reject(Error('diff fail'))),
+      downloadPatchFromPackage: mock(() => Promise.reject(Error('pdiff fail'))),
+      downloadFullUpdate: mock(() => Promise.reject(Error('full fail'))),
+    });
+    const { Pushy, sharedState } = await importFreshClient('dl-failed-code');
+    sharedState.downloadedHash = undefined;
+    const client = new Pushy({ appKey: 'demo-app', maxRetries: 0 });
+    const seen: any[] = [];
+    client.onError((e: any, eventType: string) => {
+      seen.push({ e, eventType });
+    });
+
+    const err: any = await client
+      .downloadUpdate(updateInfo)
+      .catch((e: any) => e);
+
+    expect(err.code).toBe('DOWNLOAD_FAILED');
+    expect(seen).toHaveLength(1);
+    expect(seen[0].eventType).toBe('errorUpdate');
+    expect(seen[0].e).toBe(err);
   });
 
   test('deduplicates concurrent downloads of the same hash (JS-8)', async () => {

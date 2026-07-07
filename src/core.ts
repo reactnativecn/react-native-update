@@ -1,5 +1,6 @@
 import { NativeEventEmitter, NativeModules, Platform } from 'react-native';
 import i18n from './i18n';
+import { UpdateError } from './error';
 import { emptyModule, error, log } from './utils';
 
 /* eslint-disable @react-native/no-deep-imports */
@@ -21,8 +22,9 @@ export const PushyModule =
 export const UpdateModule = PushyModule;
 
 if (!PushyModule) {
-	throw Error(
+	throw new UpdateError(
 		'Failed to load react-native-update native module, please try to recompile',
+		'MODULE_NOT_LOADED',
 	);
 }
 

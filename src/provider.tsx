@@ -46,15 +46,6 @@ export const UpdateProvider = ({
   const [progress, setProgress] = useState<ProgressData>();
   const [lastError, setLastError] = useState<Error>();
 
-  const throwErrorIfEnabled = useCallback(
-    (e: Error) => {
-      if (options.throwError) {
-        throw e;
-      }
-    },
-    [options.throwError],
-  );
-
   const dismissError = useCallback(() => {
     setLastError(undefined);
   }, []);
@@ -78,6 +69,25 @@ export const UpdateProvider = ({
       }
     },
     [options.updateStrategy],
+  );
+
+  // All client errors flow through this single subscription (regardless of
+  // throwError), so the catches below only handle flow control and never
+  // duplicate the lastError/Alert surfacing.
+  useEffect(
+    () =>
+      client.onError((e, eventType) => {
+        setLastError(e);
+        alertError(
+          client.t(
+            eventType === 'errorChecking'
+              ? 'error_update_check_failed'
+              : 'update_failed',
+          ),
+          e.message,
+        );
+      }),
+    [client, alertError],
   );
 
   const switchVersion = useCallback(
@@ -117,10 +127,11 @@ export const UpdateProvider = ({
           return false;
         }
         if (options.updateStrategy === 'silentAndNow') {
-          client.switchVersion(hash);
+          // Failures are surfaced via the onError subscription above.
+          client.switchVersion(hash).catch(noop);
           return true;
         } else if (options.updateStrategy === 'silentAndLater') {
-          client.switchVersionLater(hash);
+          client.switchVersionLater(hash).catch(noop);
           return true;
         }
         alertUpdate(client.t('alert_title'), client.t('alert_update_ready'), [
@@ -128,26 +139,33 @@ export const UpdateProvider = ({
             text: client.t('alert_next_time'),
             style: 'cancel',
             onPress: () => {
-              client.switchVersionLater(hash);
+              client.switchVersionLater(hash).catch(noop);
             },
           },
           {
             text: client.t('alert_update_now'),
             style: 'default',
             onPress: () => {
-              client.switchVersion(hash);
+              client.switchVersion(hash).catch(noop);
             },
           },
         ]);
         return true;
       } catch (e: any) {
-        setLastError(e);
-        alertError(client.t('update_failed'), e.message);
-        throwErrorIfEnabled(e);
+        // Client pipeline errors carry a code and were already surfaced via
+        // the onError subscription; errors thrown by user hooks
+        // (afterDownloadUpdate) bypass the pipeline and are surfaced here.
+        if (!e?.code) {
+          setLastError(e);
+          alertError(client.t('update_failed'), e.message);
+        }
+        if (options.throwError) {
+          throw e;
+        }
         return false;
       }
     },
-    [client, options, alertUpdate, alertError, throwErrorIfEnabled],
+    [client, options, alertUpdate, alertError],
   );
 
   const downloadAndInstallApk = useCallback(
@@ -168,9 +186,16 @@ export const UpdateProvider = ({
       try {
         rootInfo = await client.checkUpdate(extra);
       } catch (e: any) {
-        setLastError(e);
-        alertError(client.t('error_update_check_failed'), e.message);
-        throwErrorIfEnabled(e);
+        // Client pipeline errors carry a code and were already surfaced via
+        // the onError subscription; errors thrown by user hooks
+        // (beforeCheckUpdate) bypass the pipeline and are surfaced here.
+        if (!e?.code) {
+          setLastError(e);
+          alertError(client.t('error_update_check_failed'), e.message);
+        }
+        if (options.throwError) {
+          throw e;
+        }
         return;
       }
       if (!rootInfo) {
@@ -252,10 +277,9 @@ export const UpdateProvider = ({
     },
     [
       client,
-      alertError,
-      throwErrorIfEnabled,
       options,
       alertUpdate,
+      alertError,
       downloadAndInstallApk,
       downloadUpdate,
     ],
@@ -274,7 +298,8 @@ export const UpdateProvider = ({
     let markSuccessTimer: ReturnType<typeof setTimeout> | undefined;
     if (autoMarkSuccess) {
       markSuccessTimer = setTimeout(() => {
-        markSuccess();
+        // Failures are reported and surfaced via the onError subscription.
+        Promise.resolve(markSuccess()).catch(noop);
       }, 1000);
     }
     if (checkStrategy === 'both' || checkStrategy === 'onAppResume') {
@@ -351,7 +376,8 @@ export const UpdateProvider = ({
       try {
         const payload = typeof code === 'string' ? JSON.parse(code) : code;
         return parseTestPayload(payload);
-      } catch {
+      } catch (e: any) {
+        log('parseTestQrCode: invalid payload', e?.message || e);
         return false;
       }
     },

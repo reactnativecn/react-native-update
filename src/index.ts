@@ -1,4 +1,7 @@
 export { Pushy, Cresc } from './client';
+export type { UpdateErrorListener } from './client';
+export { UpdateError } from './error';
+export type { UpdateErrorCode } from './error';
 export {
   ProgressContext,
   UpdateContext,

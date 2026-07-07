@@ -52,6 +52,8 @@ export type EventType =
   | 'downloadSuccess'
   | 'errorUpdate'
   | 'markSuccess'
+  | 'errorMarkSuccess'
+  | 'errorSwitchVersion'
   | 'downloadingApk'
   | 'rejectStoragePermission'
   | 'errorStoragePermission'
@@ -59,6 +61,8 @@ export type EventType =
   | 'errorInstallApk';
 
 export interface EventData {
+  /** Stable machine-readable error code (see UpdateErrorCode); present on error events */
+  code?: string;
   currentVersion: string;
   cInfo: {
     rnu: string;

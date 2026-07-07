@@ -1,3 +1,5 @@
+import { UpdateError } from './error';
+
 export interface EndpointAttemptSuccess<T> {
   endpoint: string;
   value: T;
@@ -47,7 +49,7 @@ export const pickRandomEndpoint = (
   random: () => number = Math.random,
 ) => {
   if (!endpoints.length) {
-    throw new Error('No endpoints configured');
+    throw new UpdateError('No endpoints configured', 'NO_ENDPOINTS');
   }
   return endpoints[Math.floor(random() * endpoints.length)];
 };
@@ -120,7 +122,7 @@ export async function executeEndpointFallback<T>({
   let candidates = dedupeEndpoints(configuredEndpoints);
 
   if (!candidates.length) {
-    throw new Error('No endpoints configured');
+    throw new UpdateError('No endpoints configured', 'NO_ENDPOINTS');
   }
 
   const firstEndpoint = pickRandomEndpoint(candidates, random);

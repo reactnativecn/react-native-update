@@ -39,7 +39,18 @@ import {
   testUrls,
 } from './utils';
 import i18n from './i18n';
+import { toUpdateError, UpdateError, UpdateErrorCode } from './error';
 import { dedupeEndpoints, executeEndpointFallback } from './endpoint';
+
+/**
+ * Receives every error the client reports, alongside the report event type.
+ * The UpdateProvider subscribes to surface errors as lastError/Alert; user
+ * code can subscribe too. Listeners run before any throwError rethrow.
+ */
+export type UpdateErrorListener = (
+  error: UpdateError,
+  eventType: EventType,
+) => void;
 
 const SERVER_PRESETS = {
   // cn
@@ -142,7 +153,10 @@ export class Pushy {
 
     if (Platform.OS === 'ios' || Platform.OS === 'android') {
       if (!options.appKey) {
-        throw Error(i18n.t('error_appkey_required'));
+        throw new UpdateError(
+          i18n.t('error_appkey_required'),
+          'APPKEY_REQUIRED',
+        );
       }
     }
 
@@ -184,13 +198,15 @@ export class Pushy {
   report = async ({
     type,
     message = '',
+    code,
     data = {},
   }: {
     type: EventType;
     message?: string;
+    code?: UpdateErrorCode;
     data?: Record<string, string | number>;
   }) => {
-    log(`${type} ${message}`);
+    log(`${type} ${code ? `[${code}] ` : ''}${message}`);
     if (this.options.logger === noop) {
       // Wait briefly for a logger to arrive via setOptions (e.g. the rollback
       // report fires in the constructor before the user configures one), but
@@ -214,6 +230,7 @@ export class Pushy {
           overridePackageVersion,
           buildTime,
           message,
+          code,
           ...currentVersionInfo,
           ...data,
         },
@@ -228,6 +245,39 @@ export class Pushy {
   throwIfEnabled = (e: Error) => {
     if (this.options.throwError) {
       throw e;
+    }
+  };
+  private errorListeners = new Set<UpdateErrorListener>();
+  /**
+   * Subscribe to every error the client reports (regardless of throwError).
+   * Returns an unsubscribe function.
+   */
+  onError = (listener: UpdateErrorListener) => {
+    this.errorListeners.add(listener);
+    return () => {
+      this.errorListeners.delete(listener);
+    };
+  };
+  /**
+   * Single exit point for errors: reports to the logger (with the stable
+   * code) and notifies onError listeners. Whether to also throw stays with
+   * the caller (throwIfEnabled or an unconditional rethrow).
+   */
+  private emitError = (
+    error: UpdateError,
+    type: EventType,
+    {
+      message = error.message,
+      data,
+    }: { message?: string; data?: Record<string, string | number> } = {},
+  ) => {
+    this.report({ type, message, code: error.code, data });
+    for (const listener of this.errorListeners) {
+      try {
+        listener(error, type);
+      } catch (e: any) {
+        log('onError listener error:', e?.message || e);
+      }
     }
   };
   notifyAfterCheckUpdate = (state: UpdateCheckState) => {
@@ -302,11 +352,13 @@ export class Pushy {
 
     if (!resp.ok) {
       const respText = await resp.text();
-      throw Error(
+      throw new UpdateError(
         this.t('error_http_status', {
           status: resp.status,
           statusText: respText,
         }),
+        'HTTP_STATUS',
+        { extra: { status: resp.status } },
       );
     }
 
@@ -348,7 +400,13 @@ export class Pushy {
     if (sharedState.marked || __DEV__ || !isFirstTime) {
       return;
     }
-    await Promise.resolve(PushyModule.markSuccess());
+    try {
+      await Promise.resolve(PushyModule.markSuccess());
+    } catch (e) {
+      const err = toUpdateError(e, 'MARK_SUCCESS_FAILED');
+      this.emitError(err, 'errorMarkSuccess');
+      throw err;
+    }
     sharedState.marked = true;
     this.report({ type: 'markSuccess' });
   };
@@ -366,7 +424,11 @@ export class Pushy {
         }
       } catch (e) {
         sharedState.applyingUpdate = false;
-        throw e;
+        const err = toUpdateError(e, 'SWITCH_VERSION_FAILED');
+        this.emitError(err, 'errorSwitchVersion', {
+          data: { newVersion: hash },
+        });
+        throw err;
       }
       try {
         return await PushyModule.reloadUpdate({ hash });
@@ -374,7 +436,11 @@ export class Pushy {
         // reloadUpdate can reject (e.g. bundle missing); reset the flag so a
         // later retry is not permanently blocked by a stuck applyingUpdate.
         sharedState.applyingUpdate = false;
-        throw e;
+        const err = toUpdateError(e, 'SWITCH_VERSION_FAILED');
+        this.emitError(err, 'errorSwitchVersion', {
+          data: { newVersion: hash },
+        });
+        throw err;
       }
     }
   };
@@ -385,7 +451,15 @@ export class Pushy {
     }
     if (assertHash(hash)) {
       log(`switchVersionLater: ${hash}`);
-      return PushyModule.setNeedUpdate({ hash });
+      try {
+        return await PushyModule.setNeedUpdate({ hash });
+      } catch (e) {
+        const err = toUpdateError(e, 'SWITCH_VERSION_FAILED');
+        this.emitError(err, 'errorSwitchVersion', {
+          data: { newVersion: hash },
+        });
+        throw err;
+      }
     }
   };
   checkUpdate = async (extra?: Record<string, any>) => {
@@ -456,14 +530,12 @@ export class Pushy {
       return result;
     } catch (e: any) {
       this.lastRespJson = previousRespJson;
-      const errorMessage =
-        e?.message || this.t('error_cannot_connect_server');
-      this.report({
-        type: 'errorChecking',
-        message: errorMessage,
+      const err = toUpdateError(e, 'CHECK_FAILED');
+      this.emitError(err, 'errorChecking', {
+        message: err.message || this.t('error_cannot_connect_server'),
       });
-      this.notifyAfterCheckUpdate({ status: 'error', error: e });
-      this.throwIfEnabled(e);
+      this.notifyAfterCheckUpdate({ status: 'error', error: err });
+      this.throwIfEnabled(err);
       // Fall back to the previous successful response if we have one; otherwise
       // return undefined so callers can distinguish "check failed" from a real
       // empty result and avoid overwriting the last good updateInfo.
@@ -669,14 +741,22 @@ export class Pushy {
       delete sharedState.progressHandlers[hash];
     }
     if (!succeeded) {
+      const message = errorMessages.join(';');
+      if (lastError) {
+        const err = toUpdateError(lastError, 'DOWNLOAD_FAILED');
+        this.emitError(err, 'errorUpdate', {
+          message,
+          data: { newVersion: hash },
+        });
+        throw err;
+      }
+      // No download URL was even attempted (e.g. dev without a full URL):
+      // report for diagnostics but there is no error object to surface.
       this.report({
         type: 'errorUpdate',
         data: { newVersion: hash },
-        message: errorMessages.join(';'),
+        message,
       });
-      if (lastError) {
-        throw lastError;
-      }
       return;
     } else {
       const duration = Date.now() - patchStartTime;
@@ -717,8 +797,12 @@ export class Pushy {
       return;
     }
     if (sharedState.apkStatus === 'downloaded') {
-      this.report({ type: 'errorInstallApk' });
-      this.throwIfEnabled(Error('errorInstallApk'));
+      const err = new UpdateError(
+        this.t('error_apk_pending_install'),
+        'APK_INSTALL_PENDING',
+      );
+      this.emitError(err, 'errorInstallApk');
+      this.throwIfEnabled(err);
       return;
     }
     if (Platform.Version <= 23) {
@@ -727,13 +811,18 @@ export class Pushy {
           PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
         );
         if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
-          this.report({ type: 'rejectStoragePermission' });
-          this.throwIfEnabled(Error('rejectStoragePermission'));
+          const err = new UpdateError(
+            this.t('error_storage_permission_rejected'),
+            'STORAGE_PERMISSION_REJECTED',
+          );
+          this.emitError(err, 'rejectStoragePermission');
+          this.throwIfEnabled(err);
           return;
         }
       } catch (e: any) {
-        this.report({ type: 'errorStoragePermission' });
-        this.throwIfEnabled(e);
+        const err = toUpdateError(e, 'STORAGE_PERMISSION_ERROR');
+        this.emitError(err, 'errorStoragePermission');
+        this.throwIfEnabled(err);
         return;
       }
     }
@@ -761,10 +850,14 @@ export class Pushy {
         hash: progressKey,
       });
       sharedState.apkStatus = 'downloaded';
-    } catch {
+    } catch (e) {
       sharedState.apkStatus = null;
-      this.report({ type: 'errorDownloadAndInstallApk' });
-      this.throwIfEnabled(Error('errorDownloadAndInstallApk'));
+      // Keep the native error (message/stack) instead of discarding it.
+      const err = toUpdateError(e, 'APK_DOWNLOAD_FAILED');
+      this.emitError(err, 'errorDownloadAndInstallApk', {
+        message: err.message || this.t('error_apk_download_failed'),
+      });
+      this.throwIfEnabled(err);
     } finally {
       if (sharedState.progressHandlers[progressKey]) {
         sharedState.progressHandlers[progressKey].remove();
