@@ -1,3 +1,5 @@
+import type { UpdateErrorCode } from './error';
+
 export interface VersionInfo {
   name: string;
   hash: string;
@@ -52,6 +54,8 @@ export type EventType =
   | 'downloadSuccess'
   | 'errorUpdate'
   | 'markSuccess'
+  | 'errorMarkSuccess'
+  | 'errorSwitchVersion'
   | 'downloadingApk'
   | 'rejectStoragePermission'
   | 'errorStoragePermission'
@@ -59,6 +63,8 @@ export type EventType =
   | 'errorInstallApk';
 
 export interface EventData {
+  /** Stable machine-readable error code; present on error events */
+  code?: UpdateErrorCode;
   currentVersion: string;
   cInfo: {
     rnu: string;

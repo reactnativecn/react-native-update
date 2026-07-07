@@ -41,7 +41,7 @@ public class UpdateModuleImpl {
 
             @Override
             public void onDownloadFailed(Throwable error) {
-                promise.reject(error);
+                promise.reject(ErrorCodes.DOWNLOAD_FAILED, error);
             }
         });
     }
@@ -64,7 +64,7 @@ public class UpdateModuleImpl {
 
             @Override
             public void onDownloadFailed(Throwable error) {
-                promise.reject(error);
+                promise.reject(ErrorCodes.DOWNLOAD_FAILED, error);
             }
         });
     }
@@ -84,7 +84,7 @@ public class UpdateModuleImpl {
 
             @Override
             public void onDownloadFailed(Throwable error) {
-                promise.reject(error);
+                promise.reject(ErrorCodes.DOWNLOAD_FAILED, error);
             }
         });
     }
@@ -107,11 +107,11 @@ public class UpdateModuleImpl {
 
                 @Override
                 public void onDownloadFailed(Throwable error) {
-                    promise.reject(error);
+                    promise.reject(ErrorCodes.DOWNLOAD_FAILED, error);
                 }
             });
         } catch (Exception e) {
-            promise.reject("downloadPatchFromPpk failed: " + e.getMessage());
+            promise.reject(ErrorCodes.INVALID_OPTIONS, "downloadPatchFromPpk failed: " + e.getMessage(), e);
         }
     }
 
@@ -130,7 +130,7 @@ public class UpdateModuleImpl {
         @Nullable final String hash,
         final Promise promise
     ) {
-        UiThreadRunner.run(promise, "restartApp", new UiThreadRunner.Operation() {
+        UiThreadRunner.run(promise, ErrorCodes.RESTART_FAILED, "restartApp", new UiThreadRunner.Operation() {
             @Override
             public void run() throws Throwable {
                 ReactReloadManager.restartApp(updateContext, reactContext, hash);
@@ -149,7 +149,7 @@ public class UpdateModuleImpl {
         final Promise promise
     ) {
         final String hash = options.getString("hash");
-        StateSerialRunner.run(promise, "switchVersionLater", new StateSerialRunner.Operation() {
+        StateSerialRunner.run(promise, ErrorCodes.SWITCH_VERSION_FAILED, "switchVersionLater", new StateSerialRunner.Operation() {
             @Override
             public void run() {
                 setNeedUpdateInternal(updateContext, hash);
@@ -160,7 +160,7 @@ public class UpdateModuleImpl {
 
     public static void setNeedUpdate(final UpdateContext updateContext, final ReadableMap options) {
         final String hash = options.getString("hash");
-        StateSerialRunner.run(null, "switchVersionLater", new StateSerialRunner.Operation() {
+        StateSerialRunner.run(null, ErrorCodes.SWITCH_VERSION_FAILED, "switchVersionLater", new StateSerialRunner.Operation() {
             @Override
             public void run() {
                 setNeedUpdateInternal(updateContext, hash);
@@ -173,7 +173,7 @@ public class UpdateModuleImpl {
     }
 
     public static void markSuccess(final UpdateContext updateContext, final Promise promise) {
-        StateSerialRunner.run(promise, "markSuccess", new StateSerialRunner.Operation() {
+        StateSerialRunner.run(promise, ErrorCodes.MARK_SUCCESS_FAILED, "markSuccess", new StateSerialRunner.Operation() {
             @Override
             public void run() {
                 markSuccessInternal(updateContext);
@@ -183,7 +183,7 @@ public class UpdateModuleImpl {
     }
 
     public static void markSuccess(final UpdateContext updateContext) {
-        StateSerialRunner.run(null, "markSuccess", new StateSerialRunner.Operation() {
+        StateSerialRunner.run(null, ErrorCodes.MARK_SUCCESS_FAILED, "markSuccess", new StateSerialRunner.Operation() {
             @Override
             public void run() {
                 markSuccessInternal(updateContext);
@@ -200,7 +200,7 @@ public class UpdateModuleImpl {
         final String uuid,
         final Promise promise
     ) {
-        StateSerialRunner.run(promise, "setUuid", new StateSerialRunner.Operation() {
+        StateSerialRunner.run(promise, ErrorCodes.FILE_OPERATION_FAILED, "setUuid", new StateSerialRunner.Operation() {
             @Override
             public void run() {
                 setUuidInternal(updateContext, uuid);
@@ -210,7 +210,7 @@ public class UpdateModuleImpl {
     }
 
     public static void setUuid(final UpdateContext updateContext, final String uuid) {
-        StateSerialRunner.run(null, "setUuid", new StateSerialRunner.Operation() {
+        StateSerialRunner.run(null, ErrorCodes.FILE_OPERATION_FAILED, "setUuid", new StateSerialRunner.Operation() {
             @Override
             public void run() {
                 setUuidInternal(updateContext, uuid);
@@ -235,7 +235,7 @@ public class UpdateModuleImpl {
         final String info,
         final Promise promise
     ) {
-        StateSerialRunner.run(promise, "setLocalHashInfo", new StateSerialRunner.Operation() {
+        StateSerialRunner.run(promise, ErrorCodes.INVALID_HASH_INFO, "setLocalHashInfo", new StateSerialRunner.Operation() {
             @Override
             public void run() {
                 setLocalHashInfoInternal(updateContext, hash, info);
@@ -249,7 +249,7 @@ public class UpdateModuleImpl {
         final String hash,
         final String info
     ) {
-        StateSerialRunner.run(null, "setLocalHashInfo", new StateSerialRunner.Operation() {
+        StateSerialRunner.run(null, ErrorCodes.INVALID_HASH_INFO, "setLocalHashInfo", new StateSerialRunner.Operation() {
             @Override
             public void run() {
                 setLocalHashInfoInternal(updateContext, hash, info);
@@ -264,7 +264,7 @@ public class UpdateModuleImpl {
     ) {
         String value = updateContext.getKv("hash_" + hash);
         if (!isValidHashInfo(value)) {
-            promise.reject("getLocalHashInfo failed: invalid json string");
+            promise.reject(ErrorCodes.INVALID_HASH_INFO, "getLocalHashInfo failed: invalid json string");
             return;
         }
 

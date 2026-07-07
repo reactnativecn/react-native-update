@@ -19,7 +19,6 @@ export default {
   time_remaining: 'Time remaining: {{time}}',
 
   // Error messages
-  error_code: 'Error code: {{code}}',
   error_message: 'Error message: {{message}}',
   retry_count: 'Retry attempt: {{count}}/{{max}}',
 
@@ -57,6 +56,11 @@ export default {
   error_ping_failed: 'Ping failed',
   error_ping_timeout: 'Ping timeout',
   error_http_status: '{{status}} {{statusText}}',
+  error_apk_pending_install:
+    'The APK has been downloaded, please complete the installation in the system installer',
+  error_storage_permission_rejected:
+    'Storage permission denied, unable to download the APK',
+  error_apk_download_failed: 'Failed to download or install the APK',
 
   // Development messages
   dev_debug_disabled:

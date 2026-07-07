@@ -19,7 +19,6 @@ export default {
   time_remaining: '剩余时间: {{time}}',
 
   // Error messages
-  error_code: '错误代码: {{code}}',
   error_message: '错误信息: {{message}}',
   retry_count: '重试次数: {{count}}/{{max}}',
 
@@ -54,6 +53,9 @@ export default {
   error_ping_failed: 'Ping 失败',
   error_ping_timeout: 'Ping 超时',
   error_http_status: '{{status}} {{statusText}}',
+  error_apk_pending_install: '安装包已下载完成，请在系统安装界面完成安装',
+  error_storage_permission_rejected: '存储权限被拒绝，无法下载安装包',
+  error_apk_download_failed: '安装包下载或安装失败',
 
   // Development messages
   dev_debug_disabled:

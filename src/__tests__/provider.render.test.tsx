@@ -24,6 +24,7 @@ const updateResult: CheckResult = {
 
 const createClient = (options: Record<string, any> = {}) => {
   let progressCallback: ((data: ProgressData) => void) | undefined;
+  const errorListeners = new Set<(e: Error, eventType?: string) => void>();
   const client = {
     options: {
       updateStrategy: 'alwaysAlert',
@@ -32,7 +33,9 @@ const createClient = (options: Record<string, any> = {}) => {
       ...options,
     },
     assertDebug: () => true,
-    checkUpdate: mock(async () => ({ ...updateResult })),
+    checkUpdate: mock(
+      async (): Promise<CheckResult | undefined> => ({ ...updateResult }),
+    ),
     notifyAfterCheckUpdate: mock(() => {}),
     markSuccess: mock(() => {}),
     switchVersion: mock(async () => {}),
@@ -46,6 +49,17 @@ const createClient = (options: Record<string, any> = {}) => {
     downloadAndInstallApk: mock(async () => {}),
     restartApp: mock(async () => {}),
     t: (key: string) => key,
+    onError: mock((listener: (e: Error, eventType?: string) => void) => {
+      errorListeners.add(listener);
+      return () => {
+        errorListeners.delete(listener);
+      };
+    }),
+    // Simulates the real client contract: errors are emitted to onError
+    // listeners (report + lastError/Alert path) regardless of throwError.
+    emitError: (e: Error, eventType = 'errorChecking') => {
+      errorListeners.forEach(listener => listener(e, eventType));
+    },
     emitProgress: (data: ProgressData) => progressCallback?.(data),
   };
   return client;
@@ -127,8 +141,11 @@ describe('UpdateProvider rendering', () => {
   test('check failure sets lastError and alerts under alwaysAlert', async () => {
     const client = createClient({ updateStrategy: 'alwaysAlert' });
     const checkError = new Error('offline');
+    // Real client contract under the default throwError:false — the error is
+    // emitted to onError listeners and checkUpdate resolves undefined.
     client.checkUpdate.mockImplementation(async () => {
-      throw checkError;
+      client.emitError(checkError, 'errorChecking');
+      return undefined;
     });
 
     const captured: { current?: any } = {};
@@ -149,7 +166,8 @@ describe('UpdateProvider rendering', () => {
     const client = createClient({ updateStrategy: 'alertUpdateAndIgnoreError' });
     const checkError = new Error('offline');
     client.checkUpdate.mockImplementation(async () => {
-      throw checkError;
+      client.emitError(checkError, 'errorChecking');
+      return undefined;
     });
 
     const captured: { current?: any } = {};
@@ -169,7 +187,8 @@ describe('UpdateProvider rendering', () => {
       dismissErrorAfter: 20,
     });
     client.checkUpdate.mockImplementation(async () => {
-      throw new Error('offline');
+      client.emitError(new Error('offline'), 'errorChecking');
+      return undefined;
     });
 
     const captured: { current?: any } = {};
