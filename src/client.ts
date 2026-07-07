@@ -41,6 +41,11 @@ import {
 import i18n from './i18n';
 import { toUpdateError, UpdateError, UpdateErrorCode } from './error';
 import { dedupeEndpoints, executeEndpointFallback } from './endpoint';
+import {
+  resolveServerEventHash,
+  resolveServerEventType,
+  truncateDetail,
+} from './telemetry';
 
 /**
  * Receives every error the client reports, alongside the report event type.
@@ -130,6 +135,9 @@ export class Pushy {
   clientType: 'Pushy' | 'Cresc' = 'Pushy';
   lastChecking?: number;
   lastRespJson?: Promise<CheckResult>;
+  // Endpoint that most recently served a successful checkUpdate; telemetry
+  // reuses it instead of re-running the fallback race.
+  private lastWorkingEndpoint?: string;
 
   version = cInfo.rnu;
   loggerPromise = (() => {
@@ -207,6 +215,8 @@ export class Pushy {
     data?: Record<string, string | number>;
   }) => {
     log(`${type} ${code ? `[${code}] ` : ''}${message}`);
+    // Fire-and-forget server telemetry; must not wait for the logger below.
+    this.reportToServer({ type, message, code, data });
     if (this.options.logger === noop) {
       // Wait briefly for a logger to arrive via setOptions (e.g. the rollback
       // report fires in the constructor before the user configures one), but
@@ -240,6 +250,72 @@ export class Pushy {
       // calls are fire-and-forget so a throw here would be an unhandled
       // rejection.
       log('logger error:', e?.message || e);
+    }
+  };
+  /**
+   * Best-effort lifecycle event reporting to the update server (aggregate
+   * counts + sampled failure details power the version health view and the
+   * rollback safety net server-side). Single POST to the last known working
+   * endpoint, no retry, no fallback race; any failure is swallowed — telemetry
+   * must never affect the update flow. Opt out with disableTelemetry.
+   */
+  private reportToServer = ({
+    type,
+    message = '',
+    code,
+    data = {},
+  }: {
+    type: EventType;
+    message?: string;
+    code?: UpdateErrorCode;
+    data?: Record<string, string | number>;
+  }) => {
+    try {
+      if (__DEV__ || this.options.disableTelemetry) {
+        return;
+      }
+      const serverType = resolveServerEventType(type, code);
+      if (!serverType) {
+        return;
+      }
+      const { appKey } = this.options;
+      const endpoint =
+        this.lastWorkingEndpoint || this.options.server?.main?.[0];
+      if (!appKey || !endpoint) {
+        return;
+      }
+      const hash = resolveServerEventHash({ serverType, data, currentVersion });
+      if (!hash) {
+        return;
+      }
+      const send = (payloadType: typeof serverType, detail?: string) =>
+        fetchWithTimeout(
+          `${endpoint}/report/${appKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              type: payloadType,
+              hash,
+              packageVersion:
+                this.options.overridePackageVersion || packageVersion,
+              cInfo,
+              detail: truncateDetail(detail),
+            }),
+          },
+          DEFAULT_FETCH_TIMEOUT_MS,
+        ).catch((e: any) => {
+          log('telemetry report failed:', e?.message || e);
+        });
+      send(serverType, message || undefined);
+      // A download that only succeeded after an incremental patch failed is
+      // still a patch_fail signal server-side (diff quality), carried in
+      // data.error alongside the downloadSuccess event.
+      if (serverType === 'download_success' && data.error) {
+        send('patch_fail', String(data.error));
+      }
+    } catch (e: any) {
+      log('telemetry error:', e?.message || e);
     }
   };
   throwIfEnabled = (e: Error) => {
@@ -387,6 +463,7 @@ export class Pushy {
     });
 
     log('check endpoint success', endpoint);
+    this.lastWorkingEndpoint = endpoint;
     return value;
   };
   assertDebug = (matter: string) => {

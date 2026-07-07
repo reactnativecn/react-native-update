@@ -129,6 +129,12 @@ export interface ClientOptions {
   overridePackageVersion?: string;
   /** Maximum number of retry attempts for failed downloads (default: 3) */
   maxRetries?: number;
+  /**
+   * Disable reporting update lifecycle events (download/patch failures,
+   * rollback, mark success) to the update server. These aggregate stats power
+   * the version health view in the console. Default: false (enabled).
+   */
+  disableTelemetry?: boolean;
 }
 
 export interface UpdateTestPayload {
