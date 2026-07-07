@@ -693,7 +693,10 @@ RCT_EXPORT_METHOD(markSuccess:(RCTPromiseResolveBlock)resolve
     NSError *error = nil;
     id jsonObject = [NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingAllowFragments error:&error];
     if (error != nil) {
-        callback(error);
+        // Classify as a patch failure like the sibling manifest branches;
+        // unclassified errors would otherwise be tagged DOWNLOAD_FAILED by the
+        // downloadUpdate fallback even though the download itself succeeded.
+        callback(PushyErrorWithCode(pushy::error_codes::kPatchFailed, error.localizedDescription));
         return;
     }
     if (![jsonObject isKindOfClass:[NSDictionary class]]) {
