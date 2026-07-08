@@ -66,6 +66,7 @@ function safeResolve(urlPath: string) {
 function buildUpdateResponse(
   platform: string,
   currentHash: string,
+  diffV: number,
   origin: string,
 ) {
   const assetBasePath = `${origin}/artifacts/${platform}`;
@@ -109,6 +110,46 @@ function buildUpdateResponse(
     };
   }
 
+  const v2TrackDiffPath = path.join(
+    artifactsRoot,
+    platform,
+    LOCAL_UPDATE_FILES.v2TrackDiff,
+  );
+  const v2TrackPrevHash =
+    platform === 'android'
+      ? LOCAL_UPDATE_HASHES.packagePatch
+      : LOCAL_UPDATE_HASHES.ppkPatch;
+  if (currentHash === v2TrackPrevHash && diffV >= 2) {
+    if (fullFallback) {
+      return {
+        update: true,
+        name: 'local-v2track-v4',
+        hash: LOCAL_UPDATE_HASHES.v2Track,
+        description:
+          'Serve a full v2-track package from local e2e server fallback artifacts.',
+        metaInfo: JSON.stringify({ stage: 'v2track', platform }),
+        paths: [assetBasePath],
+        full: LOCAL_UPDATE_FILES.v2TrackFull,
+      };
+    }
+
+    if (
+      fs.existsSync(v2TrackDiffPath) &&
+      fs.statSync(v2TrackDiffPath).isFile()
+    ) {
+      return {
+        update: true,
+        name: 'local-v2track-v4',
+        hash: LOCAL_UPDATE_HASHES.v2Track,
+        description:
+          'Serve a v2-track HDIFF13 + hbcTransform ppk diff from local e2e server.',
+        metaInfo: JSON.stringify({ stage: 'v2track', platform }),
+        paths: [assetBasePath],
+        diff: LOCAL_UPDATE_FILES.v2TrackDiff,
+      };
+    }
+  }
+
   return {
     upToDate: true,
   };
@@ -140,12 +181,16 @@ const server = Bun.serve({
         return json({ message: 'unknown appKey' }, 404);
       }
 
-      const payload = (await request
-        .json()
-        .catch(() => ({}))) as { hash?: unknown };
+      const payload = (await request.json().catch(() => ({}))) as {
+        hash?: unknown;
+        diffV?: unknown;
+      };
       const currentHash = typeof payload.hash === 'string' ? payload.hash : '';
+      const diffV = typeof payload.diffV === 'number' ? payload.diffV : 0;
 
-      return json(buildUpdateResponse(platform, currentHash, url.origin));
+      return json(
+        buildUpdateResponse(platform, currentHash, diffV, url.origin),
+      );
     }
 
     if (url.pathname.startsWith('/artifacts/')) {

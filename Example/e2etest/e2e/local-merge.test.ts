@@ -1,5 +1,6 @@
 import { by, device, element, waitFor } from 'detox';
 import {
+  LOCAL_UPDATE_FINAL_STATE,
   LOCAL_UPDATE_HASHES,
   LOCAL_UPDATE_LABELS,
   LOCAL_UPDATE_PORT,
@@ -133,6 +134,37 @@ async function selectStrategy(
   await element(by.id(testId)).tap();
 }
 
+function getFinalState() {
+  const platform = device.getPlatform();
+  return platform in LOCAL_UPDATE_FINAL_STATE
+    ? LOCAL_UPDATE_FINAL_STATE[
+        platform as keyof typeof LOCAL_UPDATE_FINAL_STATE
+      ]
+    : LOCAL_UPDATE_FINAL_STATE.default;
+}
+
+async function runDeferredUpdate(
+  updateHash: string,
+  previousLabel: string,
+  previousHash: string,
+  nextLabel: string,
+  nextHash: string,
+) {
+  await selectStrategy('strategy-silent-later');
+  await waitForStrategy('silentAndLater');
+  await tapCheckUpdate();
+  await waitForCheckState('completed', `update:${updateHash}`);
+  await waitForDownloadSuccess(updateHash);
+  await waitForBundleLabel(previousLabel);
+  await waitForHash(previousHash);
+
+  await relaunchAppPreservingData();
+  await waitForReady();
+  await waitForBundleLabel(nextLabel);
+  await waitForHash(nextHash);
+  await waitForMarkSuccess();
+}
+
 describe('Local Update Merge E2E', () => {
   beforeEach(async () => {
     await device.launchApp({
@@ -146,7 +178,7 @@ describe('Local Update Merge E2E', () => {
     await device.setURLBlacklist([`.*:${LOCAL_UPDATE_PORT}.*`]);
   });
 
-  it('covers local full update, diff merge, and package diff through checkUpdate + silentAndNow', async () => {
+  it('covers local full update, diff merge, package diff, and v2-track diff through checkUpdate + silentAndNow', async () => {
     await waitForReady();
     await waitForStrategy('silentAndNow');
     await waitForBundleLabel(LOCAL_UPDATE_LABELS.base);
@@ -167,27 +199,26 @@ describe('Local Update Merge E2E', () => {
       await waitForMarkSuccess();
     }
 
-    const finalLabel =
-      device.getPlatform() === 'android'
-        ? LOCAL_UPDATE_LABELS.packagePatch
-        : LOCAL_UPDATE_LABELS.ppkPatch;
-    const finalHash =
-      device.getPlatform() === 'android'
-        ? LOCAL_UPDATE_HASHES.packagePatch
-        : LOCAL_UPDATE_HASHES.ppkPatch;
+    if (device.getPlatform() === 'android' || device.getPlatform() === 'ios') {
+      await tapCheckUpdateAndWaitForBundleLabel(LOCAL_UPDATE_LABELS.v2Track);
+      await waitForHash(LOCAL_UPDATE_HASHES.v2Track);
+      await waitForMarkSuccess();
+    }
+
+    const finalState = getFinalState();
 
     await relaunchAppPreservingData();
     await waitForReady();
-    await waitForBundleLabel(finalLabel);
-    await waitForHash(finalHash);
+    await waitForBundleLabel(finalState.label);
+    await waitForHash(finalState.hash);
 
     await tapCheckUpdate();
     await waitForCheckState('completed', 'upToDate');
-    await waitForBundleLabel(finalLabel);
-    await waitForHash(finalHash);
+    await waitForBundleLabel(finalState.label);
+    await waitForHash(finalState.hash);
   });
 
-  it('covers local full update, deferred install, and follow-up deferred patches through silentAndLater', async () => {
+  it('covers local full update, deferred install, and follow-up deferred patches including v2-track through silentAndLater', async () => {
     await waitForReady();
     await waitForBundleLabel(LOCAL_UPDATE_LABELS.base);
 
@@ -206,59 +237,54 @@ describe('Local Update Merge E2E', () => {
     await waitForHash(LOCAL_UPDATE_HASHES.full);
     await waitForMarkSuccess();
 
-    await selectStrategy('strategy-silent-later');
-    await waitForStrategy('silentAndLater');
-    await tapCheckUpdate();
-    await waitForCheckState(
-      'completed',
-      `update:${LOCAL_UPDATE_HASHES.ppkPatch}`,
+    await runDeferredUpdate(
+      LOCAL_UPDATE_HASHES.ppkPatch,
+      LOCAL_UPDATE_LABELS.full,
+      LOCAL_UPDATE_HASHES.full,
+      LOCAL_UPDATE_LABELS.ppkPatch,
+      LOCAL_UPDATE_HASHES.ppkPatch,
     );
-    await waitForDownloadSuccess(LOCAL_UPDATE_HASHES.ppkPatch);
-    await waitForBundleLabel(LOCAL_UPDATE_LABELS.full);
-    await waitForHash(LOCAL_UPDATE_HASHES.full);
-
-    await relaunchAppPreservingData();
-    await waitForReady();
-    await waitForBundleLabel(LOCAL_UPDATE_LABELS.ppkPatch);
-    await waitForHash(LOCAL_UPDATE_HASHES.ppkPatch);
-    await waitForMarkSuccess();
 
     if (device.getPlatform() === 'android') {
-      await selectStrategy('strategy-silent-later');
-      await waitForStrategy('silentAndLater');
-      await tapCheckUpdate();
-      await waitForCheckState(
-        'completed',
-        `update:${LOCAL_UPDATE_HASHES.packagePatch}`,
+      await runDeferredUpdate(
+        LOCAL_UPDATE_HASHES.packagePatch,
+        LOCAL_UPDATE_LABELS.ppkPatch,
+        LOCAL_UPDATE_HASHES.ppkPatch,
+        LOCAL_UPDATE_LABELS.packagePatch,
+        LOCAL_UPDATE_HASHES.packagePatch,
       );
-      await waitForDownloadSuccess(LOCAL_UPDATE_HASHES.packagePatch);
-      await waitForBundleLabel(LOCAL_UPDATE_LABELS.ppkPatch);
-      await waitForHash(LOCAL_UPDATE_HASHES.ppkPatch);
-
-      await relaunchAppPreservingData();
-      await waitForReady();
-      await waitForBundleLabel(LOCAL_UPDATE_LABELS.packagePatch);
-      await waitForHash(LOCAL_UPDATE_HASHES.packagePatch);
-      await waitForMarkSuccess();
     }
 
-    const finalLabel =
-      device.getPlatform() === 'android'
-        ? LOCAL_UPDATE_LABELS.packagePatch
-        : LOCAL_UPDATE_LABELS.ppkPatch;
-    const finalHash =
-      device.getPlatform() === 'android'
-        ? LOCAL_UPDATE_HASHES.packagePatch
-        : LOCAL_UPDATE_HASHES.ppkPatch;
+    if (device.getPlatform() === 'android' || device.getPlatform() === 'ios') {
+      const previousState =
+        device.getPlatform() === 'android'
+          ? {
+              label: LOCAL_UPDATE_LABELS.packagePatch,
+              hash: LOCAL_UPDATE_HASHES.packagePatch,
+            }
+          : {
+              label: LOCAL_UPDATE_LABELS.ppkPatch,
+              hash: LOCAL_UPDATE_HASHES.ppkPatch,
+            };
+      await runDeferredUpdate(
+        LOCAL_UPDATE_HASHES.v2Track,
+        previousState.label,
+        previousState.hash,
+        LOCAL_UPDATE_LABELS.v2Track,
+        LOCAL_UPDATE_HASHES.v2Track,
+      );
+    }
+
+    const finalState = getFinalState();
 
     await relaunchAppPreservingData();
     await waitForReady();
-    await waitForBundleLabel(finalLabel);
-    await waitForHash(finalHash);
+    await waitForBundleLabel(finalState.label);
+    await waitForHash(finalState.hash);
 
     await tapCheckUpdate();
     await waitForCheckState('completed', 'upToDate');
-    await waitForBundleLabel(finalLabel);
-    await waitForHash(finalHash);
+    await waitForBundleLabel(finalState.label);
+    await waitForHash(finalState.hash);
   });
 });

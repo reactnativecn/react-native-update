@@ -1,6 +1,7 @@
 /**
  * Harmony update-flow e2e, mirroring the Detox local-merge suite:
- * binary base -> full package (v1) -> ppk diff (v2) -> persistence.
+ * binary base -> full package (v1) -> ppk diff (v2) -> v2-track diff (v4)
+ * -> persistence.
  *
  * Prerequisites:
  * - Emulator/device in `hdc list targets`
@@ -16,6 +17,7 @@ const LABELS = {
   base: 'BINARY_BASE',
   full: 'E2E_FULL_V1',
   ppkPatch: 'E2E_PPK_PATCH_V2',
+  v2Track: 'E2E_V2TRACK_V4',
 } as const;
 const LOCAL_UPDATE_PORT = 31337;
 
@@ -87,9 +89,13 @@ describe('harmony local update flow', () => {
     await tapCheckUpdateAndWaitForBundleLabel(LABELS.ppkPatch);
   });
 
+  it('applies the v2-track diff update (v4)', async () => {
+    await tapCheckUpdateAndWaitForBundleLabel(LABELS.v2Track);
+  });
+
   it('keeps the applied update across a relaunch', async () => {
     await driver.relaunch();
-    await waitForBundleLabel(LABELS.ppkPatch, READY_TIMEOUT);
+    await waitForBundleLabel(LABELS.v2Track, READY_TIMEOUT);
   });
 
   it('reports up to date without switching bundles', async () => {
@@ -97,6 +103,6 @@ describe('harmony local update flow', () => {
     // Give a would-be update time to download and restart, then confirm the
     // label is unchanged.
     await new Promise(resolve => setTimeout(resolve, 8000));
-    await waitForBundleLabel(LABELS.ppkPatch, READY_TIMEOUT);
+    await waitForBundleLabel(LABELS.v2Track, READY_TIMEOUT);
   });
 });

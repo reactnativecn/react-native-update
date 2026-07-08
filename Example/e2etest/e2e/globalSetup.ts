@@ -225,6 +225,8 @@ async function warmServer(platform: 'ios' | 'android') {
     ...(platform === 'android' && fullFallback
       ? [LOCAL_UPDATE_FILES.packageFull]
       : []),
+    LOCAL_UPDATE_FILES.v2TrackFull,
+    ...(!fullFallback ? [LOCAL_UPDATE_FILES.v2TrackDiff] : []),
   ];
 
   for (const fileName of artifactFiles) {

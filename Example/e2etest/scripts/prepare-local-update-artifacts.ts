@@ -14,7 +14,13 @@ type DiffCommandRunner = {
     args: [string, string];
     options: {
       output: string;
-      customDiff: (oldSource?: Buffer, newSource?: Buffer) => Buffer;
+      customDiff?: (oldSource?: Buffer, newSource?: Buffer) => Buffer;
+      customHdiffModule?: Pick<
+        HdiffModule,
+        'diff' | 'patch' | 'diffStream' | 'patchStream'
+      >;
+      hbcTransform?: true;
+      bundleStreamThreshold?: number;
       'no-interactive': true;
     };
   }) => Promise<void>;
@@ -28,6 +34,27 @@ type DiffCommandRunner = {
   }) => Promise<void>;
 };
 
+type HdiffModule = {
+  diff?: (oldSource?: Buffer, newSource?: Buffer) => Buffer;
+  patch?: (oldSource?: Buffer, patchSource?: Buffer) => Buffer;
+  diffStream?: (
+    oldFile: string,
+    newFile: string,
+    patchFile: string,
+  ) => Promise<void>;
+  patchStream?: (
+    oldFile: string,
+    patchFile: string,
+    newFile: string,
+  ) => Promise<void>;
+} & ((oldSource?: Buffer, newSource?: Buffer) => Buffer);
+
+type HdiffModuleInfo = {
+  modulePath: string;
+  hdiffModule: HdiffModule;
+  customDiff: (oldSource?: Buffer, newSource?: Buffer) => Buffer;
+};
+
 const projectRoot = process.cwd();
 const platform = process.env.E2E_PLATFORM || 'ios';
 const artifactsRoot = path.join(projectRoot, '.e2e-artifacts');
@@ -35,9 +62,10 @@ const artifactsDir = path.join(artifactsRoot, platform);
 const diffTimeoutMs = 5 * 60_000;
 const localRegistry =
   process.env.PUSHY_REGISTRY || process.env.RNU_API || 'http://127.0.0.1:65535';
-const useFullFallbackArtifacts =
-  process.env.RNU_E2E_FULL_FALLBACK === 'true' ||
-  (platform === 'android' && process.platform === 'linux');
+// Linux 上不再硬编码回退:node-hdiffpatch 已带 linux 预编译产物,先尝试
+// 真 diff(让 Android CI 也覆盖 hpatch 路径),装载失败才回退 full 包。
+// 这个盲区曾让"标 lzma2 存原文"的兼容回归只在 iOS 上暴露。
+let useFullFallbackArtifacts = process.env.RNU_E2E_FULL_FALLBACK === 'true';
 
 function resolveCliRoot() {
   const candidates = [
@@ -161,7 +189,7 @@ function installHdiffModule() {
   }
 }
 
-function ensureHdiffModule() {
+function ensureHdiffModule(): HdiffModuleInfo {
   const modulePath = path.join(cliRoot, 'node_modules/node-hdiffpatch');
   if (!fs.existsSync(modulePath)) {
     console.log('node-hdiffpatch not found, installing...');
@@ -170,9 +198,7 @@ function ensureHdiffModule() {
   if (!fs.existsSync(modulePath)) {
     throw new Error(`Failed to install node-hdiffpatch under: ${cliRoot}`);
   }
-  const hdiffModule = require(modulePath) as {
-    diff?: (oldSource?: Buffer, newSource?: Buffer) => Buffer;
-  } & ((oldSource?: Buffer, newSource?: Buffer) => Buffer);
+  const hdiffModule = require(modulePath) as HdiffModule;
   const customDiff = hdiffModule.diff || hdiffModule;
   if (typeof customDiff !== 'function') {
     throw new Error(
@@ -183,7 +209,7 @@ function ensureHdiffModule() {
     Buffer.from('rnu-hdiff-smoke-old'),
     Buffer.from('rnu-hdiff-smoke-new'),
   );
-  return customDiff;
+  return { modulePath, hdiffModule, customDiff };
 }
 
 function prepareDir() {
@@ -263,7 +289,9 @@ async function generatePpkDiff(
   customDiff: (oldSource?: Buffer, newSource?: Buffer) => Buffer,
 ) {
   console.log(
-    `Running hdiff ppk: ${origin} -> ${next} (${fs.statSync(origin).size} -> ${fs.statSync(next).size} bytes)`,
+    `Running hdiff ppk: ${origin} -> ${next} (${fs.statSync(origin).size} -> ${
+      fs.statSync(next).size
+    } bytes)`,
   );
   await keepProcessAlive(
     'ppk diff',
@@ -279,6 +307,52 @@ async function generatePpkDiff(
   verifyGeneratedFile('ppk diff', output);
 }
 
+async function generateV2TrackPpkDiff(
+  origin: string,
+  next: string,
+  output: string,
+  hdiff: HdiffModuleInfo,
+) {
+  const pkg = JSON.parse(
+    fs.readFileSync(path.join(hdiff.modulePath, 'package.json'), 'utf8'),
+  ) as { version?: string };
+  const patch = hdiff.hdiffModule.patch;
+  const diffStream = hdiff.hdiffModule.diffStream;
+  const patchStream = hdiff.hdiffModule.patchStream;
+  if (!patch || !diffStream || !patchStream) {
+    throw new Error(
+      'node-hdiffpatch must expose patch, diffStream, and patchStream for v2-track diff',
+    );
+  }
+
+  console.log(
+    `Running v2-track hdiff ppk with node-hdiffpatch ${
+      pkg.version ?? 'unknown'
+    }: ${origin} -> ${next} (${fs.statSync(origin).size} -> ${
+      fs.statSync(next).size
+    } bytes)`,
+  );
+  await keepProcessAlive(
+    'v2-track ppk diff',
+    diffCommands.hdiff({
+      args: [origin, next],
+      options: {
+        output,
+        'no-interactive': true,
+        hbcTransform: true,
+        bundleStreamThreshold: 1,
+        customHdiffModule: {
+          diff: hdiff.customDiff,
+          patch,
+          diffStream,
+          patchStream,
+        },
+      },
+    }),
+  );
+  verifyGeneratedFile('v2-track ppk diff', output);
+}
+
 async function generateAndroidPackageDiff(
   apkPath: string,
   next: string,
@@ -286,7 +360,9 @@ async function generateAndroidPackageDiff(
   customDiff: (oldSource?: Buffer, newSource?: Buffer) => Buffer,
 ) {
   console.log(
-    `Running hdiffFromApk: ${apkPath} -> ${next} (${fs.statSync(apkPath).size} -> ${fs.statSync(next).size} bytes)`,
+    `Running hdiffFromApk: ${apkPath} -> ${next} (${
+      fs.statSync(apkPath).size
+    } -> ${fs.statSync(next).size} bytes)`,
   );
   await keepProcessAlive(
     'package diff',
@@ -308,13 +384,19 @@ async function main() {
   const v1 = path.join(artifactsDir, LOCAL_UPDATE_FILES.full);
   const v2 = path.join(artifactsDir, LOCAL_UPDATE_FILES.ppkFull);
   const v3 = path.join(artifactsDir, LOCAL_UPDATE_FILES.packageFull);
+  const v4 = path.join(artifactsDir, LOCAL_UPDATE_FILES.v2TrackFull);
   const ppkDiff = path.join(artifactsDir, LOCAL_UPDATE_FILES.ppkDiff);
+  const v2TrackDiff = path.join(
+    artifactsDir,
+    LOCAL_UPDATE_FILES.v2TrackDiff,
+  );
 
   bundleTo('e2e/entry.v1.ts', v1);
   bundleTo('e2e/entry.v2.ts', v2);
-  if (platform !== 'harmony') {
+  if (platform === 'android') {
     bundleTo('e2e/entry.v3.ts', v3);
   }
+  bundleTo('e2e/entry.v4.ts', v4);
 
   if (platform === 'android') {
     const apkPath = path.join(
@@ -334,14 +416,32 @@ async function main() {
       LOCAL_UPDATE_FILES.packageDiff,
     );
 
-    if (useFullFallbackArtifacts) {
-      console.log(
-        'Using full package fallback artifacts for Android on Linux.',
-      );
+    let androidHdiff: HdiffModuleInfo | null = null;
+    if (!useFullFallbackArtifacts) {
+      try {
+        androidHdiff = ensureHdiffModule();
+      } catch (error) {
+        // CI 上静默降级会让 hpatch/pdiff 路径悄悄失去覆盖(正是这次
+        // "标 lzma2 存原文"回归被藏住的机制),必须响亮失败;
+        // 本地开发机才允许退回 full 包,fallback 需要显式 env 才能在 CI 用。
+        if (process.env.CI) {
+          throw error;
+        }
+        console.warn(
+          `node-hdiffpatch unavailable (${
+            error instanceof Error ? error.message : String(error)
+          }), falling back to full package artifacts.`,
+        );
+        useFullFallbackArtifacts = true;
+      }
+    }
+
+    if (!androidHdiff) {
+      console.log('Using full package fallback artifacts for Android.');
       writeFallbackPatch('ppk diff', ppkDiff);
       writeFallbackPatch('package diff', packageDiffPath);
     } else {
-      const customDiff = ensureHdiffModule();
+      const { customDiff } = androidHdiff;
 
       console.log('Generating ppk diff...');
       await generatePpkDiff(v1, v2, ppkDiff, customDiff);
@@ -353,12 +453,23 @@ async function main() {
         packageDiffPath,
         customDiff,
       );
+
+      console.log('Generating v2-track ppk diff...');
+      await generateV2TrackPpkDiff(v3, v4, v2TrackDiff, androidHdiff);
     }
   } else {
-    const customDiff = ensureHdiffModule();
+    if (useFullFallbackArtifacts) {
+      console.log(`Using full package fallback artifacts for ${platform}.`);
+      writeFallbackPatch('ppk diff', ppkDiff);
+    } else {
+      const hdiff = ensureHdiffModule();
 
-    console.log('Generating ppk diff...');
-    await generatePpkDiff(v1, v2, ppkDiff, customDiff);
+      console.log('Generating ppk diff...');
+      await generatePpkDiff(v1, v2, ppkDiff, hdiff.customDiff);
+
+      console.log('Generating v2-track ppk diff...');
+      await generateV2TrackPpkDiff(v2, v4, v2TrackDiff, hdiff);
+    }
   }
 
   const manifestPath = path.join(artifactsDir, 'manifest.json');
