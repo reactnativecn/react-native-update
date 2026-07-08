@@ -210,6 +210,49 @@ void TestApplyPatchWithHbcTransformRejectsBadMeta() {
       "error should identify unsupported version: " + status.message);
 }
 
+// HDIFF13(diffStream)格式:hpatch_by_file 按 magic 自动分派,
+// v2 轨道的大 bundle patch 走此路径。fixtures 由 node-hdiffpatch 生成并
+// 已在 JS 侧验证过 round-trip。
+void TestApplyStreamFormatBundlePatch() {
+  TempDir temp;
+  FileSourcePatchOptions options;
+  options.source_root = JoinPath(temp.path, "src");
+  options.target_root = JoinPath(temp.path, "dst");
+  options.origin_bundle_path = JoinPath(g_fixtures_dir, "v96.hbc");
+  options.bundle_patch_path = JoinPath(g_fixtures_dir, "v96.streampatch.bin");
+  options.bundle_output_path = JoinPath(temp.path, "out/index.bundlejs");
+  options.enable_merge = false;
+
+  Status status = ApplyPatchFromFileSource(options);
+  Expect(status.ok, "stream-format patch should apply: " + status.message);
+  Expect(
+      ReadFile(options.bundle_output_path) ==
+          ReadFile(JoinPath(g_fixtures_dir, "v96b.hbc")),
+      "stream-format restored bundle must equal new bundle");
+}
+
+void TestApplyStreamFormatWithHbcTransform() {
+  TempDir temp;
+  FileSourcePatchOptions options;
+  options.source_root = JoinPath(temp.path, "src");
+  options.target_root = JoinPath(temp.path, "dst");
+  options.origin_bundle_path = JoinPath(g_fixtures_dir, "v96.hbc");
+  options.bundle_patch_path = JoinPath(g_fixtures_dir, "v96.tstreampatch.bin");
+  options.bundle_output_path = JoinPath(temp.path, "out/index.bundlejs");
+  options.enable_merge = false;
+  options.bundle_hbc_transform_meta =
+      ReadFile(JoinPath(g_fixtures_dir, "v96.meta.json"));
+
+  Status status = ApplyPatchFromFileSource(options);
+  Expect(
+      status.ok,
+      "transform + stream-format patch should apply: " + status.message);
+  Expect(
+      ReadFile(options.bundle_output_path) ==
+          ReadFile(JoinPath(g_fixtures_dir, "v96b.hbc")),
+      "transform+stream restored bundle must equal new bundle");
+}
+
 void TestApplyPatchFromFileSourceMergesAndCopies() {
   TempDir temp;
   const std::string source = JoinPath(temp.path, "origin");
@@ -687,6 +730,8 @@ int main(int argc, char** argv) {
     g_fixtures_dir = argv[1];
   }
   const std::vector<std::pair<std::string, void (*)()>> tests = {
+      {"ApplyStreamFormatBundlePatch", TestApplyStreamFormatBundlePatch},
+      {"ApplyStreamFormatWithHbcTransform", TestApplyStreamFormatWithHbcTransform},
       {"ApplyPatchWithHbcTransform", TestApplyPatchWithHbcTransform},
       {"ApplyPatchWithHbcTransformRejectsBadMeta", TestApplyPatchWithHbcTransformRejectsBadMeta},
       {"ApplyPatchFromFileSourceMergesAndCopies", TestApplyPatchFromFileSourceMergesAndCopies},
