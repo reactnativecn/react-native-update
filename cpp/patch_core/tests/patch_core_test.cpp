@@ -137,6 +137,79 @@ void ExpectEq(const std::string& left, const std::string& right, const std::stri
   }
 }
 
+std::string g_fixtures_dir = "cpp/patch_core/tests/fixtures";
+
+// 变换域 bundle patch 端到端:真实 hpatch + wire 元数据 → T(origin) →
+// hpatch → T⁻¹,结果必须与新 bundle 逐字节一致(fixtures 由 CLI 的 JS
+// 实现生成,同时充当跨实现 golden)。
+void TestApplyPatchWithHbcTransform() {
+  TempDir temp;
+  const std::string origin = JoinPath(g_fixtures_dir, "v96.hbc");
+  const std::string patch = JoinPath(g_fixtures_dir, "v96.tpatch.bin");
+  const std::string expected = ReadFile(JoinPath(g_fixtures_dir, "v96b.hbc"));
+  const std::string meta = ReadFile(JoinPath(g_fixtures_dir, "v96.meta.json"));
+  Expect(!expected.empty() && !meta.empty(), "hbc fixtures must exist");
+
+  FileSourcePatchOptions options;
+  options.source_root = JoinPath(temp.path, "src");
+  options.target_root = JoinPath(temp.path, "dst");
+  options.origin_bundle_path = origin;
+  options.bundle_patch_path = patch;
+  options.bundle_output_path = JoinPath(temp.path, "out/index.bundlejs");
+  options.enable_merge = false;
+  options.bundle_hbc_transform_meta = meta;
+
+  Status status = ApplyPatchFromFileSource(options);
+  Expect(status.ok, "hbc transform patch should succeed: " + status.message);
+  ExpectEq(
+      ReadFile(options.bundle_output_path).size() == expected.size()
+          ? std::string("same-size")
+          : std::string("size-mismatch"),
+      "same-size",
+      "restored bundle size");
+  Expect(
+      ReadFile(options.bundle_output_path) == expected,
+      "restored bundle must equal new bundle byte-for-byte");
+
+  // 临时文件必须被清理
+  Expect(
+      !Exists(options.bundle_output_path + ".hbct-origin") &&
+          !Exists(options.bundle_output_path + ".hbct-patched"),
+      "hbc transform temp files must be removed");
+}
+
+void TestApplyPatchWithHbcTransformRejectsBadMeta() {
+  TempDir temp;
+  FileSourcePatchOptions options;
+  options.source_root = JoinPath(temp.path, "src");
+  options.target_root = JoinPath(temp.path, "dst");
+  options.origin_bundle_path = JoinPath(g_fixtures_dir, "v96.hbc");
+  options.bundle_patch_path = JoinPath(g_fixtures_dir, "v96.tpatch.bin");
+  options.bundle_output_path = JoinPath(temp.path, "out/index.bundlejs");
+  options.enable_merge = false;
+
+  // 不可解析的元数据 → 失败(绝不能忽略元数据直接 hpatch)
+  options.bundle_hbc_transform_meta = "not json";
+  Expect(
+      !ApplyPatchFromFileSource(options).ok,
+      "malformed hbcTransform metadata must fail");
+  Expect(!Exists(options.bundle_output_path), "no output on failure");
+
+  // 不支持的变换规范版本 → 失败(调用方回退整包)
+  std::string meta = ReadFile(JoinPath(g_fixtures_dir, "v96.meta.json"));
+  const std::string needle = "\"v\":1";
+  const size_t pos = meta.find(needle);
+  Expect(pos != std::string::npos, "meta fixture must contain v:1");
+  meta.replace(pos, needle.size(), "\"v\":9");
+  options.bundle_hbc_transform_meta = meta;
+  Status status = ApplyPatchFromFileSource(options);
+  Expect(!status.ok, "unsupported hbcTransform version must fail");
+  Expect(
+      status.message.find("Unsupported hbcTransform version") !=
+          std::string::npos,
+      "error should identify unsupported version: " + status.message);
+}
+
 void TestApplyPatchFromFileSourceMergesAndCopies() {
   TempDir temp;
   const std::string source = JoinPath(temp.path, "origin");
@@ -609,8 +682,13 @@ void TestStateCoreSwitchToSameVersion() {
 
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
+  if (argc > 1) {
+    g_fixtures_dir = argv[1];
+  }
   const std::vector<std::pair<std::string, void (*)()>> tests = {
+      {"ApplyPatchWithHbcTransform", TestApplyPatchWithHbcTransform},
+      {"ApplyPatchWithHbcTransformRejectsBadMeta", TestApplyPatchWithHbcTransformRejectsBadMeta},
       {"ApplyPatchFromFileSourceMergesAndCopies", TestApplyPatchFromFileSourceMergesAndCopies},
       {"ApplyPatchMergeHardLinksUnchangedFiles", TestApplyPatchMergeHardLinksUnchangedFiles},
       {"ApplyPatchMergeFallsBackToByteCopy", TestApplyPatchMergeFallsBackToByteCopy},

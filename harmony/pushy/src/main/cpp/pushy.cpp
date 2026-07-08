@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "archive_patch_core.h"
+#include "hbc_transform_wire.h"
 #include "patch_core.h"
 #include "state_core.h"
 #include "state_ops.h"
@@ -686,6 +687,7 @@ napi_value ApplyPatchFromFileSource(napi_env env, napi_callback_info info) {
   std::string bundle_patch_path;
   std::string bundle_output_path;
   std::string merge_source_subdir;
+  std::string bundle_hbc_transform_meta;
   bool enable_merge = true;
 
   if (!GetOptionalStringArrayProperty(env, args[0], "copyFroms", &copy_froms) ||
@@ -697,6 +699,8 @@ napi_value ApplyPatchFromFileSource(napi_env env, napi_callback_info info) {
       !GetOptionalStringProperty(env, args[0], "bundlePatchPath", &bundle_patch_path) ||
       !GetOptionalStringProperty(env, args[0], "bundleOutputPath", &bundle_output_path) ||
       !GetOptionalStringProperty(env, args[0], "mergeSourceSubdir", &merge_source_subdir) ||
+      !GetOptionalStringProperty(
+          env, args[0], "bundleHbcTransformMeta", &bundle_hbc_transform_meta) ||
       !GetOptionalBoolProperty(env, args[0], "enableMerge", true, &enable_merge)) {
     return nullptr;
   }
@@ -713,6 +717,7 @@ napi_value ApplyPatchFromFileSource(napi_env env, napi_callback_info info) {
   work_data->options.bundle_patch_path = bundle_patch_path;
   work_data->options.bundle_output_path = bundle_output_path;
   work_data->options.merge_source_subdir = merge_source_subdir;
+  work_data->options.bundle_hbc_transform_meta = bundle_hbc_transform_meta;
   work_data->options.enable_merge = enable_merge;
 
   napi_value promise = nullptr;
@@ -876,13 +881,25 @@ bool ExportFunction(
 
 }  // namespace
 
+
+// 原生 patch 内核支持的 HBC 变换规范版本(hdiffv2 能力特征)
+static napi_value GetHbcTransformVersion(napi_env env, napi_callback_info) {
+  napi_value result = nullptr;
+  napi_create_uint32(
+      env,
+      static_cast<uint32_t>(pushy::hbc::kHbcTransformSupportedVersion),
+      &result);
+  return result;
+}
+
 napi_value Init(napi_env env, napi_value exports) {
   if (!ExportFunction(env, exports, "syncStateWithBinaryVersion", SyncStateWithBinaryVersion) ||
       !ExportFunction(env, exports, "runStateCore", RunStateCore) ||
       !ExportFunction(env, exports, "buildArchivePatchPlan", BuildArchivePatchPlan) ||
       !ExportFunction(env, exports, "buildCopyGroups", BuildCopyGroups) ||
       !ExportFunction(env, exports, "applyPatchFromFileSource", ApplyPatchFromFileSource) ||
-      !ExportFunction(env, exports, "cleanupOldEntries", CleanupOldEntries)) {
+      !ExportFunction(env, exports, "cleanupOldEntries", CleanupOldEntries) ||
+      !ExportFunction(env, exports, "getHbcTransformVersion", GetHbcTransformVersion)) {
     return nullptr;
   }
   return exports;

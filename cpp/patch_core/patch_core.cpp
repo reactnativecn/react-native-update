@@ -10,6 +10,9 @@
 
 #include <vector>
 
+#include "hbc_transform.h"
+#include "hbc_transform_wire.h"
+
 extern "C" {
 #include "hpatch.h"
 }
@@ -177,6 +180,51 @@ Status RemovePathRecursively(const std::string& path) {
 
   if (unlink(path.c_str()) != 0) {
     return MakeErrnoStatus("Failed to remove file " + path);
+  }
+  return Status::Ok();
+}
+
+Status ReadFileBytes(const std::string& path, std::vector<uint8_t>* out) {
+  FILE* file = fopen(path.c_str(), "rb");
+  if (file == nullptr) {
+    return MakeErrnoStatus("Failed to open file for reading " + path);
+  }
+  if (fseek(file, 0, SEEK_END) != 0) {
+    fclose(file);
+    return MakeErrnoStatus("Failed to seek file " + path);
+  }
+  const long size = ftell(file);
+  if (size < 0) {
+    fclose(file);
+    return MakeErrnoStatus("Failed to size file " + path);
+  }
+  if (fseek(file, 0, SEEK_SET) != 0) {
+    fclose(file);
+    return MakeErrnoStatus("Failed to rewind file " + path);
+  }
+  out->resize(static_cast<size_t>(size));
+  if (size > 0 &&
+      fread(out->data(), 1, out->size(), file) != out->size()) {
+    fclose(file);
+    return Status::Error("Failed to read file " + path);
+  }
+  fclose(file);
+  return Status::Ok();
+}
+
+Status WriteFileBytes(const std::string& path, const std::vector<uint8_t>& data) {
+  FILE* file = fopen(path.c_str(), "wb");
+  if (file == nullptr) {
+    return MakeErrnoStatus("Failed to open file for writing " + path);
+  }
+  if (!data.empty() && fwrite(data.data(), 1, data.size(), file) != data.size()) {
+    fclose(file);
+    remove(path.c_str());
+    return Status::Error("Failed to write file " + path);
+  }
+  if (fclose(file) != 0) {
+    remove(path.c_str());
+    return MakeErrnoStatus("Failed to flush file " + path);
   }
   return Status::Ok();
 }
@@ -393,6 +441,77 @@ const BundlePatcher& DefaultBundlePatcher() {
   return kPatcher;
 }
 
+namespace {
+
+// 变换域 bundle patch:T(origin) → hpatch → T⁻¹。
+// 元数据/变换的任何失败都返回错误——调用方沿既有失败路径回退整包;
+// 绝不能忽略元数据直接 hpatch(会产出损坏 bundle,虽然最终 hash 校验
+// 也会拦住,但应在此处快速失败)。
+Status ApplyBundlePatchWithHbcTransform(
+    const FileSourcePatchOptions& options,
+    const BundlePatcher& bundle_patcher) {
+  hbc::HbcTransformMeta meta;
+  if (!hbc::ParseHbcTransformMeta(options.bundle_hbc_transform_meta, &meta)) {
+    return Status::Error("Invalid hbcTransform metadata");
+  }
+  if (meta.v != hbc::kHbcTransformSupportedVersion) {
+    return Status::Error(
+        "Unsupported hbcTransform version " +
+        IntToString(static_cast<int>(meta.v)));
+  }
+  std::vector<hbc::HbcSectionDesc> sections_scratch;
+  const hbc::HbcLayoutDesc layout = hbc::BuildLayout(meta, &sections_scratch);
+
+  std::vector<uint8_t> origin;
+  Status status = ReadFileBytes(options.origin_bundle_path, &origin);
+  if (!status) {
+    return status;
+  }
+  if (!hbc::TransformHbcInPlace(origin.data(), origin.size(), layout, false)) {
+    return Status::Error("hbcTransform failed on origin bundle");
+  }
+
+  Status dir_status = EnsureDirectory(Dirname(options.bundle_output_path));
+  if (!dir_status) {
+    return dir_status;
+  }
+  const std::string temp_origin = options.bundle_output_path + ".hbct-origin";
+  const std::string temp_patched = options.bundle_output_path + ".hbct-patched";
+  status = WriteFileBytes(temp_origin, origin);
+  if (!status) {
+    return status;
+  }
+  origin = std::vector<uint8_t>(); // 及早释放,patch 期间只保留文件副本
+
+  Status patch_status =
+      bundle_patcher.Apply(temp_origin, options.bundle_patch_path, temp_patched);
+  remove(temp_origin.c_str());
+  if (!patch_status) {
+    remove(temp_patched.c_str());
+    return patch_status;
+  }
+
+  std::vector<uint8_t> patched;
+  status = ReadFileBytes(temp_patched, &patched);
+  remove(temp_patched.c_str());
+  if (!status) {
+    return status;
+  }
+  if (!hbc::TransformHbcInPlace(patched.data(), patched.size(), layout, true)) {
+    return Status::Error("hbcTransform inverse failed on patched bundle");
+  }
+
+  if (PathExists(options.bundle_output_path)) {
+    Status remove_status = RemovePathRecursively(options.bundle_output_path);
+    if (!remove_status) {
+      return remove_status;
+    }
+  }
+  return WriteFileBytes(options.bundle_output_path, patched);
+}
+
+}  // namespace
+
 Status ApplyPatchFromFileSource(
     const FileSourcePatchOptions& options,
     const BundlePatcher& bundle_patcher) {
@@ -401,10 +520,13 @@ Status ApplyPatchFromFileSource(
     return manifest_status;
   }
 
-  Status bundle_status = bundle_patcher.Apply(
-      options.origin_bundle_path,
-      options.bundle_patch_path,
-      options.bundle_output_path);
+  Status bundle_status =
+      options.bundle_hbc_transform_meta.empty()
+          ? bundle_patcher.Apply(
+                options.origin_bundle_path,
+                options.bundle_patch_path,
+                options.bundle_output_path)
+          : ApplyBundlePatchWithHbcTransform(options, bundle_patcher);
   if (!bundle_status) {
     return bundle_status;
   }

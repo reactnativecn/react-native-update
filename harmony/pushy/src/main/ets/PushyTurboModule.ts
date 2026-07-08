@@ -5,6 +5,7 @@ import {
 import common from '@ohos.app.ability.common';
 import { bundleManager } from '@kit.AbilityKit';
 import logger from './Logger';
+import NativePatchCore from './NativePatchCore';
 import { UpdateContext } from './UpdateContext';
 import { EventHub } from './EventHub';
 
@@ -150,6 +151,7 @@ export class PushyTurboModule extends UITurboModule {
       isFirstTime,
       rolledBackVersion,
       uuid,
+      hbcTransformVersion: NativePatchCore.getHbcTransformVersion(),
     };
     const logResult = {
       downloadRootDir: result.downloadRootDir,

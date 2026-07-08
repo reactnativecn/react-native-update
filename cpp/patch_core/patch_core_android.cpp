@@ -27,7 +27,8 @@ Java_cn_reactnative_modules_update_DownloadTask_applyPatchFromFileSource(
     jboolean enable_merge,
     jobjectArray copy_froms,
     jobjectArray copy_tos,
-    jobjectArray deletes) {
+    jobjectArray deletes,
+    jstring hbc_transform_meta) {
   const std::vector<std::string> from_values = JArrayToVector(env, copy_froms);
   const std::vector<std::string> to_values = JArrayToVector(env, copy_tos);
 
@@ -44,6 +45,7 @@ Java_cn_reactnative_modules_update_DownloadTask_applyPatchFromFileSource(
   options.bundle_output_path = JStringToString(env, bundle_output_path);
   options.merge_source_subdir = JStringToString(env, merge_source_subdir);
   options.enable_merge = enable_merge == JNI_TRUE;
+  options.bundle_hbc_transform_meta = JStringToString(env, hbc_transform_meta);
 
   for (size_t index = 0; index < from_values.size(); ++index) {
     options.manifest.copies.push_back(pushy::patch::CopyOperation{

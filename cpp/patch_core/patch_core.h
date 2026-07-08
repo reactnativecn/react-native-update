@@ -36,6 +36,11 @@ struct FileSourcePatchOptions {
   std::string bundle_output_path;
   std::string merge_source_subdir;
   bool enable_merge = true;
+  // __diff.json 中该 bundle patch 条目的 hbcTransform 元数据(原始 JSON)。
+  // 非空时 patch 走变换域:T(origin) → hpatch → T⁻¹。元数据不可解析或
+  // 变换规范版本不受支持时返回错误(调用方回退整包),绝不忽略元数据
+  // 直接应用——那会产出损坏的 bundle。
+  std::string bundle_hbc_transform_meta;
 };
 
 class BundlePatcher {

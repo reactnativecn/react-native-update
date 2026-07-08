@@ -34,6 +34,8 @@ else()
     set(HDP_SOURCES
          ${CMAKE_CURRENT_SOURCE_DIR}/pushy.cpp
          ${PATCH_CORE_DIR}/archive_patch_core.cpp
+         ${PATCH_CORE_DIR}/hbc_transform.cpp
+         ${PATCH_CORE_DIR}/hbc_transform_wire.cpp
          ${PATCH_CORE_DIR}/patch_core.cpp
          ${PATCH_CORE_DIR}/state_core.cpp
          ${ANDROID_JNI_DIR}/hpatch.c

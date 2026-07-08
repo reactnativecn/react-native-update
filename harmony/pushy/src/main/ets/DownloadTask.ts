@@ -16,6 +16,9 @@ export interface PatchManifestArrays {
   copyFroms: string[];
   copyTos: string[];
   deletes: string[];
+  // __diff.json 中对应 bundle patch 条目的 hbcTransform 元数据(原始 JSON
+  // 字符串);为空时 native 走现状路径
+  hbcTransformMeta: string;
 }
 
 export function parseManifestToArrays(
@@ -44,10 +47,23 @@ export function parseManifestToArrays(
     copyTos.push(to);
   }
 
+  const hbcTransform = manifest.hbcTransform as
+    | Record<string, object>
+    | undefined;
+  const hbcTransformEntry =
+    hbcTransform && typeof hbcTransform === 'object'
+      ? hbcTransform[HARMONY_BUNDLE_PATCH_ENTRY]
+      : undefined;
+  const hbcTransformMeta =
+    hbcTransformEntry && typeof hbcTransformEntry === 'object'
+      ? JSON.stringify(hbcTransformEntry)
+      : '';
+
   return {
     copyFroms,
     copyTos,
     deletes,
+    hbcTransformMeta,
   };
 }
 
@@ -214,6 +230,7 @@ export class DownloadTask {
         copyFroms: [],
         copyTos: [],
         deletes: [],
+        hbcTransformMeta: '',
       };
     }
 
@@ -229,6 +246,7 @@ export class DownloadTask {
     workingDirectory: string,
     bundlePatchPath: string,
     outputFile: string,
+    hbcTransformMeta = '',
   ): Promise<void> {
     const originBundlePath = `${workingDirectory}/${TEMP_ORIGIN_BUNDLE_ENTRY}`;
     try {
@@ -243,6 +261,7 @@ export class DownloadTask {
         bundlePatchPath,
         bundleOutputPath: outputFile,
         enableMerge: false,
+        bundleHbcTransformMeta: hbcTransformMeta,
       });
     } catch (error: any) {
       error.message = `Failed to process bundle patch: ${error.message}`;
@@ -534,6 +553,7 @@ export class DownloadTask {
       params.unzipDirectory,
       bundlePatchPath,
       `${params.unzipDirectory}/bundle.harmony.js`,
+      manifestArrays.hbcTransformMeta,
     );
     await this.copyFromResource(
       NativePatchCore.buildCopyGroups(
@@ -580,6 +600,7 @@ export class DownloadTask {
       bundleOutputPath: `${params.unzipDirectory}/bundle.harmony.js`,
       mergeSourceSubdir: plan.mergeSourceSubdir,
       enableMerge: plan.enableMerge,
+      bundleHbcTransformMeta: manifestArrays.hbcTransformMeta,
     });
     console.info('Patch from PPK completed');
     try {

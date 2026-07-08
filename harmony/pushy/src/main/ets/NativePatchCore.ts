@@ -47,6 +47,8 @@ export interface FileSourcePatchRequest {
   bundleOutputPath: string;
   mergeSourceSubdir?: string;
   enableMerge?: boolean;
+  /** __diff.json 中该 bundle patch 条目的 hbcTransform 元数据(原始 JSON) */
+  bundleHbcTransformMeta?: string;
 }
 
 interface NativePatchCoreBindings {
@@ -78,6 +80,8 @@ interface NativePatchCoreBindings {
     keepPrevious: string,
     maxAgeDays: number,
   ): Promise<void>;
+  /** 原生 patch 内核支持的 HBC 变换规范版本(hdiffv2 能力特征) */
+  getHbcTransformVersion(): number;
 }
 
 export default NativeUpdateCore as unknown as NativePatchCoreBindings;

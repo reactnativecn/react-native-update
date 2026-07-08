@@ -21,6 +21,8 @@ Hdp_Files := \
 
 LOCAL_SRC_FILES := \
 	../../cpp/patch_core/archive_patch_core.cpp \
+	../../cpp/patch_core/hbc_transform.cpp \
+	../../cpp/patch_core/hbc_transform_wire.cpp \
 	../../cpp/patch_core/patch_core.cpp \
 	../../cpp/patch_core/patch_core_android.cpp \
 	../../cpp/patch_core/state_core.cpp \

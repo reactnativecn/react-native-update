@@ -2,6 +2,7 @@
 #import "RCTPushyDownloader.h"
 #import "ZipArchive.h"
 #include "../../cpp/patch_core/archive_patch_core.h"
+#include "../../cpp/patch_core/hbc_transform_wire.h"
 #include "../../cpp/patch_core/error_codes.h"
 #include "../../cpp/patch_core/patch_core.h"
 #include "../../cpp/patch_core/state_core.h"
@@ -347,6 +348,9 @@ RCT_EXPORT_MODULE(RCTPushy);
         ret[@"rolledBackVersion"] = [defaults objectForKey:keyRolledBackMarked];
         ret[@"isFirstTime"] = [defaults objectForKey:keyFirstLoadMarked];
         ret[@"uuid"] = [defaults objectForKey:keyUuid];
+        // 原生 patch 内核支持的 HBC 变换规范版本(hdiffv2 能力特征),
+        // JS 随 checkUpdate 上报,服务端按能力门控下发变换域 patch
+        ret[@"hbcTransformVersion"] = @(pushy::hbc::kHbcTransformSupportedVersion);
         NSDictionary *pushyInfo = [defaults dictionaryForKey:keyPushyInfo];
         NSString *currentVersion = [pushyInfo objectForKey:paramCurrentVersion];
         ret[@"currentVersion"] = currentVersion;
@@ -740,6 +744,21 @@ RCT_EXPORT_METHOD(markSuccess:(RCTPromiseResolveBlock)resolve
     if (!optionStatus.ok) {
         callback(PushyNSErrorFromStatus(optionStatus));
         return;
+    }
+
+    // __diff.json 的 hbcTransform 元数据(HBC 变换域 patch,hdiffv2 轨道):
+    // 存在时透传给 patch 内核执行 T(origin) → hpatch → T⁻¹;缺失走现状路径。
+    NSDictionary *hbcTransform = json[@"hbcTransform"];
+    if ([hbcTransform isKindOfClass:[NSDictionary class]]) {
+        NSDictionary *meta = hbcTransform[BUNDLE_PATCH_NAME];
+        if ([meta isKindOfClass:[NSDictionary class]]) {
+            NSError *metaError = nil;
+            NSData *metaData = [NSJSONSerialization dataWithJSONObject:meta options:0 error:&metaError];
+            if (metaData != nil && metaError == nil) {
+                NSString *metaString = [[NSString alloc] initWithData:metaData encoding:NSUTF8StringEncoding];
+                options.bundle_hbc_transform_meta = PushyToStdString(metaString);
+            }
+        }
     }
 
     pushy::patch::Status status = pushy::patch::ApplyPatchFromFileSource(options);

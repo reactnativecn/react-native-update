@@ -39,6 +39,8 @@ c++ \
   "$ROOT_DIR/cpp/patch_core/archive_patch_core.cpp" \
   "$ROOT_DIR/cpp/patch_core/patch_core.cpp" \
   "$ROOT_DIR/cpp/patch_core/state_core.cpp" \
+  "$ROOT_DIR/cpp/patch_core/hbc_transform.cpp" \
+  "$ROOT_DIR/cpp/patch_core/hbc_transform_wire.cpp" \
   "$BUILD_DIR/hpatch.o" \
   "$BUILD_DIR/patch.o" \
   "$BUILD_DIR/file_for_patch.o" \
@@ -46,4 +48,15 @@ c++ \
   "$BUILD_DIR/Lzma2Dec.o" \
   -o "$BUILD_DIR/patch_core_test"
 
-"$BUILD_DIR/patch_core_test"
+c++ \
+  -std=c++17 \
+  -Wall \
+  -Wextra \
+  $SANITIZE_FLAGS \
+  "$ROOT_DIR/cpp/patch_core/tests/hbc_transform_test.cpp" \
+  "$ROOT_DIR/cpp/patch_core/hbc_transform.cpp" \
+  "$ROOT_DIR/cpp/patch_core/hbc_transform_wire.cpp" \
+  -o "$BUILD_DIR/hbc_transform_test"
+
+"$BUILD_DIR/patch_core_test" "$ROOT_DIR/cpp/patch_core/tests/fixtures"
+"$BUILD_DIR/hbc_transform_test" "$ROOT_DIR/cpp/patch_core/tests/fixtures"

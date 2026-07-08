@@ -53,6 +53,17 @@ class DownloadTask implements Runnable {
         final ArrayList<String> copyFroms = new ArrayList<String>();
         final ArrayList<String> copyTos = new ArrayList<String>();
         final ArrayList<String> deletes = new ArrayList<String>();
+        // __diff.json 的 hbcTransform 元数据(按 patch 条目名索引);
+        // 为空对象/缺失时返回 ""(native 走现状路径)
+        JSONObject hbcTransform;
+
+        String hbcTransformMetaFor(String patchEntryName) {
+            if (hbcTransform == null) {
+                return "";
+            }
+            JSONObject meta = hbcTransform.optJSONObject(patchEntryName);
+            return meta != null ? meta.toString() : "";
+        }
         // Maps a copy source path ("from") to the CRC32 of the file content,
         // when provided by the manifest ("copiesCrc"). Lets the resource
         // copier locate the file by content if the path is not present on
@@ -251,6 +262,7 @@ class DownloadTask implements Runnable {
                         contents.deletes,
                         contents.copyCrcs
                     );
+                    contents.hbcTransform = manifest.optJSONObject("hbcTransform");
                     continue;
                 }
 
@@ -311,7 +323,8 @@ class DownloadTask implements Runnable {
                 false,
                 new String[0],
                 new String[0],
-                new String[0]
+                new String[0],
+                contents.hbcTransformMetaFor("index.bundlejs.patch")
             );
         } finally {
             originBundleFile.delete();
@@ -345,7 +358,8 @@ class DownloadTask implements Runnable {
             plan.enableMerge,
             contents.copyFroms.toArray(new String[0]),
             contents.copyTos.toArray(new String[0]),
-            contents.deletes.toArray(new String[0])
+            contents.deletes.toArray(new String[0]),
+            contents.hbcTransformMetaFor("index.bundlejs.patch")
         );
         if (params.targetFile.exists()) {
             params.targetFile.delete();
@@ -444,7 +458,8 @@ class DownloadTask implements Runnable {
         boolean enableMerge,
         String[] copyFroms,
         String[] copyTos,
-        String[] deletes
+        String[] deletes,
+        String hbcTransformMeta
     );
 
     private static native void cleanupOldEntries(

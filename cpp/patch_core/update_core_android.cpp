@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "archive_patch_core.h"
+#include "hbc_transform_wire.h"
 #include "jni_util.h"
 #include "state_core.h"
 #include "state_ops.h"
@@ -288,6 +289,15 @@ jobject MakeStateResult(
 }
 
 }  // namespace
+
+// 客户端支持的 HBC 变换规范版本;JS 层经 getConstants 暴露给 checkUpdate,
+// 服务端据此决定是否下发变换域 patch(能力上报,而非 SDK 版本映射)。
+extern "C" JNIEXPORT jint JNICALL
+Java_cn_reactnative_modules_update_NativeUpdateCore_getHbcTransformVersion(
+    JNIEnv*,
+    jclass) {
+  return static_cast<jint>(pushy::hbc::kHbcTransformSupportedVersion);
+}
 
 extern "C" JNIEXPORT jobject JNICALL
 Java_cn_reactnative_modules_update_UpdateContext_syncStateWithBinaryVersion(
