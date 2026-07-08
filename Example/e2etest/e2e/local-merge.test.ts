@@ -2,6 +2,7 @@ import { by, device, element, waitFor } from 'detox';
 import {
   LOCAL_UPDATE_HASHES,
   LOCAL_UPDATE_LABELS,
+  LOCAL_UPDATE_PORT,
 } from './localUpdateConfig.ts';
 
 const RELOAD_TIMEOUT = 180000;
@@ -139,6 +140,10 @@ describe('Local Update Merge E2E', () => {
       delete: true,
       ...getDetoxLaunchArgs(),
     });
+    // 更新下载/检查请求在飞时不能算 "app busy":否则 Detox 的 idle 同步
+    // 会干等主队列清空直到用例超时(iOS 上的高频 flake 来源,症状是
+    // "work items pending on the dispatch queue")。
+    await device.setURLBlacklist([`.*:${LOCAL_UPDATE_PORT}.*`]);
   });
 
   it('covers local full update, diff merge, and package diff through checkUpdate + silentAndNow', async () => {

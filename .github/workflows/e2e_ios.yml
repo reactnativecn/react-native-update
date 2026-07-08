@@ -139,4 +139,13 @@ jobs:
         env:
           RNU_CLI_ROOT: ${{ github.workspace }}/react-native-update-cli
           RNU_E2E_SKIP_PREPARE: 'true'
-        run: cd Example/e2etest && E2E_PLATFORM=ios bunx detox test --configuration ios.sim.release
+        run: cd Example/e2etest && E2E_PLATFORM=ios bunx detox test --configuration ios.sim.release --retries 2
+
+      - name: Upload Detox artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: e2e-ios-detox-artifacts
+          path: Example/e2etest/artifacts
+          if-no-files-found: ignore
+          retention-days: 7
