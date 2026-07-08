@@ -1,8 +1,7 @@
 import { execSync } from 'node:child_process';
-// 与 CI 预热步骤共用同一份探测逻辑,避免两处各自实现选到不同设备
-const {
-  detectIosSimulatorType,
-} = require('./scripts/detect-ios-simulator-type.js');
+// 与 CI 预热步骤共用同一份探测逻辑,避免两处各自实现选到不同设备。
+// 用 import(不能用 require):bunx detox 以 ESM 方式加载本文件。
+import { detectIosSimulatorType } from './scripts/detect-ios-simulator-type.js';
 
 function detectAndroidAvdName() {
   if (process.env.DETOX_AVD_NAME) {
