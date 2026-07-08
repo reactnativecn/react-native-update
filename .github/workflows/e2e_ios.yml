@@ -95,6 +95,15 @@ jobs:
             echo "no matching simulator found, skipping pre-boot"
           fi
 
+      - name: Cache Homebrew downloads
+        # bottle 按 URL 内容寻址,restore-keys 前缀命中即省下载(装/链接照常)
+        uses: actions/cache@v5.0.4
+        with:
+          path: ~/Library/Caches/Homebrew
+          key: ${{ runner.os }}-brew-e2e-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-brew-e2e-
+
       - name: Install applesimutils and ccache
         run: brew trust wix/brew && HOMEBREW_NO_AUTO_UPDATE=1 brew install wix/brew/applesimutils ccache
 
@@ -127,6 +136,15 @@ jobs:
       - name: Install react-native-update-cli dependencies
         run: cd react-native-update-cli && bun install --frozen-lockfile && bun run build
 
+      - name: Cache Metro transform cache
+        # 内容寻址(等价 ccache 之于 clang):陈旧条目只影响命中率不影响正确性
+        uses: actions/cache@v5.0.4
+        with:
+          path: Example/e2etest/.metro-cache
+          key: ${{ runner.os }}-metro-e2e-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-metro-e2e-
+
       - name: Prepare local update artifacts
         env:
           E2E_PLATFORM: ios
@@ -141,7 +159,20 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cocoapods-e2e-
 
+      - name: Cache built e2e app (keyed on native inputs)
+        # 命中 = native 输入(两个 ios 工程、cpp/jni、podspec、依赖锁)一字未改,
+        # 跳过 pod install + xcodebuild,只重新注入 JS bundle(见下)。
+        # 故意不设 restore-keys:部分命中就是错的二进制,宁可全量重建。
+        id: cache-ios-app
+        uses: actions/cache@v5.0.4
+        with:
+          path: |
+            Example/e2etest/ios/build/Build/Products/Release-iphonesimulator/AwesomeProject.app
+            Example/e2etest/ios/build/hermesc
+          key: ${{ runner.os }}-e2e-app-xcode-26.4-${{ hashFiles('Example/e2etest/ios/**', 'Example/e2etest/package.json', 'Example/e2etest/bun.lock', 'react-native-update.podspec', 'react-native.config.js', 'expo-module.config.json', 'ios/**', 'cpp/**', 'android/jni/**') }}
+
       - name: Install CocoaPods dependencies
+        if: steps.cache-ios-app.outputs.cache-hit != 'true'
         # USE_CCACHE=1 让 react_native_post_install 给所有 pod target 接上
         # RN 自带的 ccache 编译器包装脚本
         run: cd Example/e2etest/ios && USE_CCACHE=1 pod install
@@ -160,9 +191,17 @@ jobs:
         run: cd Example/e2etest && bunx detox build-framework-cache
 
       - name: Detox build (ios.sim.release)
+        if: steps.cache-ios-app.outputs.cache-hit != 'true'
         env:
           RNU_CLI_ROOT: ${{ github.workspace }}/react-native-update-cli
-        run: cd Example/e2etest && E2E_PLATFORM=ios bunx detox build --configuration ios.sim.release
+        run: |
+          cd Example/e2etest && E2E_PLATFORM=ios bunx detox build --configuration ios.sim.release
+          # hermesc 进缓存区:命中 run 没有 Pods,注入脚本需要它编 HBC
+          cp ios/Pods/hermes-engine/destroot/bin/hermesc ios/build/hermesc
+
+      - name: Refresh JS bundle in cached app
+        if: steps.cache-ios-app.outputs.cache-hit == 'true'
+        run: cd Example/e2etest && ./scripts/refresh-ios-app-bundle.sh
 
       - name: Detox test (ios.sim.release)
         env:

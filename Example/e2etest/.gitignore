@@ -76,3 +76,4 @@ coverage/
 android/app/.cxx/
 *.xcresult
 result*.xml
+.metro-cache/
