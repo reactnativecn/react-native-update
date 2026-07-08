@@ -253,6 +253,30 @@ void TestApplyStreamFormatWithHbcTransform() {
       "transform+stream restored bundle must equal new bundle");
 }
 
+// HDIFFSF20 允许 compressedSize==0 表示 diff payload 为 RAW。node-hdiffpatch
+// 2.x 的 v5 writer 在这种小 diff 上仍会保留 lzma2 标签,客户端必须按
+// compressedSize 判定是否解压,不能只看 compressType。
+void TestApplySingleFormatRawStoredWithLzma2Label() {
+  TempDir temp;
+  FileSourcePatchOptions options;
+  options.source_root = JoinPath(temp.path, "src");
+  options.target_root = JoinPath(temp.path, "dst");
+  options.origin_bundle_path = JoinPath(g_fixtures_dir, "rawstored.old.bin");
+  options.bundle_patch_path =
+      JoinPath(g_fixtures_dir, "rawstored.lzma2label.patch.bin");
+  options.bundle_output_path = JoinPath(temp.path, "out/index.bundlejs");
+  options.enable_merge = false;
+
+  Status status = ApplyPatchFromFileSource(options);
+  Expect(
+      status.ok,
+      "raw-stored single-format patch should apply: " + status.message);
+  Expect(
+      ReadFile(options.bundle_output_path) ==
+          ReadFile(JoinPath(g_fixtures_dir, "rawstored.new.bin")),
+      "raw-stored single-format restored bundle must equal new bundle");
+}
+
 void TestApplyPatchFromFileSourceMergesAndCopies() {
   TempDir temp;
   const std::string source = JoinPath(temp.path, "origin");
@@ -732,6 +756,8 @@ int main(int argc, char** argv) {
   const std::vector<std::pair<std::string, void (*)()>> tests = {
       {"ApplyStreamFormatBundlePatch", TestApplyStreamFormatBundlePatch},
       {"ApplyStreamFormatWithHbcTransform", TestApplyStreamFormatWithHbcTransform},
+      {"ApplySingleFormatRawStoredWithLzma2Label",
+       TestApplySingleFormatRawStoredWithLzma2Label},
       {"ApplyPatchWithHbcTransform", TestApplyPatchWithHbcTransform},
       {"ApplyPatchWithHbcTransformRejectsBadMeta", TestApplyPatchWithHbcTransformRejectsBadMeta},
       {"ApplyPatchFromFileSourceMergesAndCopies", TestApplyPatchFromFileSourceMergesAndCopies},

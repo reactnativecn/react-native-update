@@ -63,7 +63,9 @@ static int hpatch_by_stream(const hpatch_TStreamInput* old,hpatch_BOOL isLoadOld
         _check(old->streamSize==patInfo->oldDataSize,kHPatch_error_old_size);
         _check(out_new->streamSize>=patInfo->newDataSize,kHPatch_error_new_size);
         out_new->streamSize=patInfo->newDataSize;
-        if (strlen(patInfo->compressType)>0){
+        // v5 writer 可能保留 lzma2 标签但以 RAW 存储小 diff;compressedSize==0
+        // 才是格式里的未压缩判据,不能按标签强行走解压。
+        if ((strlen(patInfo->compressType)>0)&&(patInfo->compressedSize>0)){
             decompressPlugin=getDecompressPlugin(patInfo->compressType);
             _check(decompressPlugin,kHPatch_error_compressType);
         }
