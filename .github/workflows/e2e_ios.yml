@@ -43,7 +43,8 @@ concurrency:
 jobs:
   e2e-ios:
     runs-on: macos-26
-    timeout-minutes: 30
+    # --retries 2 时一次失败重试就会把总时长推过 30 分钟,留足余量
+    timeout-minutes: 50
     steps:
       - name: Checkout react-native-update
         uses: actions/checkout@v7
@@ -142,7 +143,8 @@ jobs:
         run: cd Example/e2etest && E2E_PLATFORM=ios bunx detox test --configuration ios.sim.release --retries 2
 
       - name: Upload Detox artifacts
-        if: failure()
+        # cancelled() 覆盖 job 超时被杀的场景,否则超时时拿不到现场
+        if: failure() || cancelled()
         uses: actions/upload-artifact@v7.0.1
         with:
           name: e2e-ios-detox-artifacts
