@@ -25,6 +25,7 @@ function App() {
     lastError,
     progress: { received, total } = {},
     currentVersionInfo,
+    resetToPackagedBundle,
   } = useUpdate();
   const client = contextClient!;
   const [lastEvent, setLastEvent] = useState('idle');
@@ -102,6 +103,22 @@ function App() {
           }}
         >
           <Text style={styles.buttonText}>Use SilentAndLater</Text>
+        </Pressable>
+        <Pressable
+          testID="reset-to-packaged"
+          style={styles.button}
+          onPress={async () => {
+            setLastEvent('triggerReset');
+            try {
+              await resetToPackagedBundle({ restart: false });
+              setLastEvent('resetDone');
+            } catch (e) {
+              setLastEvent('resetFailed');
+              setLastEventData(e instanceof Error ? e.message : String(e));
+            }
+          }}
+        >
+          <Text style={styles.buttonText}>Reset</Text>
         </Pressable>
       </View>
 

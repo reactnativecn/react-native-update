@@ -166,16 +166,43 @@ async function runDeferredUpdate(
 }
 
 describe('Local Update Merge E2E', () => {
-  beforeEach(async () => {
+  beforeAll(async () => {
+    // 只在套件开头做一次卸载重装保证初装干净;用例间的状态清理走
+    // resetToPackagedBundle(见 beforeEach),省掉每用例 ~30-60s 的
+    // uninstall/reinstall 仪式(CI 上还是 simctl flake 大户)。
     await device.launchApp({
       newInstance: true,
       delete: true,
+      ...getDetoxLaunchArgs(),
+    });
+  });
+
+  beforeEach(async () => {
+    await device.launchApp({
+      newInstance: true,
       ...getDetoxLaunchArgs(),
     });
     // 更新下载/检查请求在飞时不能算 "app busy":否则 Detox 的 idle 同步
     // 会干等主队列清空直到用例超时(iOS 上的高频 flake 来源,症状是
     // "work items pending on the dispatch queue")。
     await device.setURLBlacklist([`.*:${LOCAL_UPDATE_PORT}.*`]);
+
+    // 无条件 reset(已是基座时为幂等空操作)再重启,统一回到打包基座。
+    // 顺带让 resetToPackagedBundle 获得每次 CI 的常驻 e2e 覆盖——
+    // 它坏了会在下面的 BINARY_BASE 断言上立刻暴露。
+    await waitForReady();
+    await waitFor(element(by.id('reset-to-packaged')))
+      .toBeVisible()
+      .withTimeout(10000);
+    await element(by.id('reset-to-packaged')).tap();
+    await waitFor(element(by.id('last-event')))
+      .toHaveText('lastEvent: resetDone')
+      .withTimeout(15000);
+    await relaunchAppPreservingData();
+    await device.setURLBlacklist([`.*:${LOCAL_UPDATE_PORT}.*`]);
+    await waitForReady();
+    await waitForBundleLabel(LOCAL_UPDATE_LABELS.base);
+    await waitForHash('');
   });
 
   it('covers local full update, diff merge, package diff, and v2-track diff through checkUpdate + silentAndNow', async () => {
