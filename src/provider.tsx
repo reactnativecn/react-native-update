@@ -388,6 +388,13 @@ export const UpdateProvider = ({
     return client.restartApp();
   }, [client]);
 
+  const resetToPackagedBundle = useCallback(
+    async (resetOptions?: { restart?: boolean }) => {
+      return client.resetToPackagedBundle(resetOptions);
+    },
+    [client],
+  );
+
   useEffect(() => {
     if (!assertWeb()) {
       return;
@@ -438,6 +445,7 @@ export const UpdateProvider = ({
       currentVersionInfo,
       parseTestQrCode,
       restartApp,
+      resetToPackagedBundle,
     }),
     [
       checkUpdate,
@@ -452,6 +460,7 @@ export const UpdateProvider = ({
       downloadAndInstallApk,
       parseTestQrCode,
       restartApp,
+      resetToPackagedBundle,
     ],
   );
 

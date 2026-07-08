@@ -61,6 +61,8 @@ export default {
   error_storage_permission_rejected:
     'Storage permission denied, unable to download the APK',
   error_apk_download_failed: 'Failed to download or install the APK',
+  error_reset_not_supported:
+    'resetToPackagedBundle is not available in the installed native module. Please rebuild the app with the latest react-native-update.',
 
   // Development messages
   dev_debug_disabled:

@@ -303,6 +303,36 @@ public class UpdateContext {
         this.cleanUp();
     }
 
+    /**
+     * Reset to the bundle packaged in the binary: wipe the whole update state
+     * (so the next launch resolves to the built-in bundle) and delete every
+     * downloaded version. Only the client uuid survives — it identifies the
+     * install for gray release bucketing and must not change on reset.
+     */
+    public void resetToPackagedBundle() {
+        StateCoreResult resetState = new StateCoreResult();
+        resetState.packageVersion = getPackageVersion();
+        resetState.buildTime = getBuildTime();
+        resetState.firstTime = false;
+        resetState.firstTimeOk = true;
+        String uuid = sp.getString("uuid", null);
+        SharedPreferences.Editor editor = sp.edit();
+        editor.clear();
+        applyState(editor, resetState);
+        if (uuid != null) {
+            editor.putString("uuid", uuid);
+        }
+        persistEditor(editor, "reset to packaged bundle");
+        ignoreRollback = false;
+        Log.i(TAG, "Reset to packaged bundle");
+
+        DownloadTaskParams params = new DownloadTaskParams();
+        params.type = DownloadTaskParams.TASK_TYPE_CLEANUP;
+        params.maxAgeDays = 0;
+        params.unzipDirectory = rootDir;
+        enqueue(params);
+    }
+
     public void clearRollbackMark() {
         StateCoreResult currentState = getStateSnapshot();
         StateCoreResult nextState = runStateCore(

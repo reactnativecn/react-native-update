@@ -76,6 +76,11 @@ public class UpdateModule extends ReactContextBaseJavaModule {
     }
 
     @ReactMethod
+    public void resetToPackagedBundle(Promise promise) {
+        UpdateModuleImpl.resetToPackagedBundle(updateContext, promise);
+    }
+
+    @ReactMethod
     public void setUuid(String uuid) {
         UpdateModuleImpl.setUuid(updateContext, uuid);
     }

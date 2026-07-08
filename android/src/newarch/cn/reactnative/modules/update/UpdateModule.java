@@ -74,6 +74,11 @@ public class UpdateModule extends NativePushySpec {
     }
 
     @Override
+    public void resetToPackagedBundle(Promise promise) {
+        UpdateModuleImpl.resetToPackagedBundle(updateContext, promise);
+    }
+
+    @Override
     public void setUuid(String uuid, Promise promise) {
         UpdateModuleImpl.setUuid(updateContext, uuid, promise);
     }

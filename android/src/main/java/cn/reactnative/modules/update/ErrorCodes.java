@@ -16,6 +16,7 @@ final class ErrorCodes {
     static final String SWITCH_VERSION_FAILED = "SWITCH_VERSION_FAILED";
     static final String MARK_SUCCESS_FAILED = "MARK_SUCCESS_FAILED";
     static final String RESTART_FAILED = "RESTART_FAILED";
+    static final String RESET_FAILED = "RESET_FAILED";
     static final String INVALID_HASH_INFO = "INVALID_HASH_INFO";
     static final String UNSUPPORTED_PLATFORM = "UNSUPPORTED_PLATFORM";
 

@@ -372,6 +372,52 @@ export class UpdateContext {
     });
   }
 
+  /**
+   * 恢复到二进制内置包：清空整个更新状态机（下次启动即回内置 bundle）并删除
+   * 全部已下载版本。仅保留 uuid —— 它标识安装实例、用于灰度分桶，reset 不应改变。
+   */
+  public resetToPackagedBundle(): void {
+    this.trace('resetToPackagedBundle:before');
+    const state = this.getStateSnapshot();
+    const resetState: StateCoreResult = {
+      packageVersion: state.packageVersion,
+      buildTime: state.buildTime,
+      currentVersion: '',
+      lastVersion: '',
+      firstTime: false,
+      firstTimeOk: true,
+      rolledBackVersion: '',
+    };
+    // 删除已下载版本的 hash_* 元信息（不走 clear()：它是异步的，且会连带清掉
+    // uuid —— 见 syncStateWithBinaryVersion 的注释）。getAllSync 在旧 SDK 上
+    // 可能不存在，此时残留的 hash_* 只是无害孤儿数据，不影响 reset 语义。
+    const prefsWithGetAll = this.preferences as preferences.Preferences & {
+      getAllSync?: () => Record<string, unknown>;
+    };
+    if (typeof prefsWithGetAll.getAllSync === 'function') {
+      try {
+        const all = prefsWithGetAll.getAllSync();
+        for (const key of Object.keys(all)) {
+          if (key.startsWith('hash_')) {
+            this.preferences.deleteSync(key);
+          }
+        }
+      } catch (e: any) {
+        console.error('Failed to clear hash info on reset:', e);
+      }
+    }
+    this.persistState(resetState, { clearFirstLoadMarker: true });
+    UpdateContext.ignoreRollback = false;
+
+    // maxAgeDays=0 且不保留任何版本：全量删除下载目录内容（后台线程，尽力而为）
+    NativePatchCore.cleanupOldEntries(this.rootDir, '', '', 0).catch(
+      (error: Object) => {
+        console.error('reset cleanup failed:', error);
+      },
+    );
+    this.trace('resetToPackagedBundle:after');
+  }
+
   public async downloadFullUpdate(url: string, hash: string): Promise<void> {
     try {
       const params = this.createTaskParams(

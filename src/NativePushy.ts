@@ -19,6 +19,7 @@ export interface Spec extends TurboModule {
   restartApp(): Promise<void>;
   setNeedUpdate(options: { hash: string }): Promise<void>;
   markSuccess(): Promise<void>;
+  resetToPackagedBundle(): Promise<void>;
   downloadPatchFromPpk(options: {
     updateUrl: string;
     hash: string;

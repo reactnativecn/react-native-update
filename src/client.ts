@@ -951,6 +951,40 @@ export class Pushy {
     }
     return PushyModule.restartApp();
   };
+  /**
+   * Reset to the bundle packaged in the binary: wipes every downloaded update
+   * and the whole update state on the native side, so the app loads the
+   * built-in bundle on the next launch (or immediately with
+   * `{ restart: true }`). The client uuid is preserved.
+   */
+  resetToPackagedBundle = async (options?: { restart?: boolean }) => {
+    if (typeof PushyModule.resetToPackagedBundle !== 'function') {
+      // The JS layer can arrive via hot update onto an older binary whose
+      // native module predates this method; fail loudly instead of pretending
+      // the reset happened.
+      const err = new UpdateError(
+        this.t('error_reset_not_supported'),
+        'RESET_FAILED',
+      );
+      this.emitError(err, 'errorReset');
+      throw err;
+    }
+    try {
+      await PushyModule.resetToPackagedBundle();
+    } catch (e) {
+      const err = toUpdateError(e, 'RESET_FAILED');
+      this.emitError(err, 'errorReset');
+      throw err;
+    }
+    // The downloaded versions are gone; drop JS bookkeeping referring to them
+    // so a stale downloadedHash cannot be switched to.
+    sharedState.downloadedHash = undefined;
+    sharedState.marked = false;
+    this.report({ type: 'reset' });
+    if (options?.restart) {
+      return this.restartApp();
+    }
+  };
 }
 
 // for international users

@@ -26,6 +26,7 @@ export type UpdateErrorCode =
   | 'PATCH_FAILED'
   | 'FILE_OPERATION_FAILED'
   | 'RESTART_FAILED'
+  | 'RESET_FAILED'
   | 'INVALID_HASH_INFO'
   | 'UNSUPPORTED_PLATFORM';
 

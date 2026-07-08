@@ -191,6 +191,19 @@ public class UpdateModuleImpl {
         });
     }
 
+    public static void resetToPackagedBundle(
+        final UpdateContext updateContext,
+        final Promise promise
+    ) {
+        StateSerialRunner.run(promise, ErrorCodes.RESET_FAILED, "resetToPackagedBundle", new StateSerialRunner.Operation() {
+            @Override
+            public void run() {
+                updateContext.resetToPackagedBundle();
+                promise.resolve(true);
+            }
+        });
+    }
+
     private static void setUuidInternal(UpdateContext updateContext, String uuid) {
         updateContext.setKv("uuid", uuid);
     }

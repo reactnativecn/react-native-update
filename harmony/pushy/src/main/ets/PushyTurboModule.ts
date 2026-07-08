@@ -233,6 +233,16 @@ export class PushyTurboModule extends UITurboModule {
     }
   }
 
+  async resetToPackagedBundle(): Promise<void> {
+    logger.debug(TAG, ',call resetToPackagedBundle');
+    try {
+      this.context.resetToPackagedBundle();
+    } catch (error) {
+      logger.error(TAG, `resetToPackagedBundle failed: ${getErrorMessage(error)}`);
+      throw Error(`resetToPackagedBundle failed: ${getErrorMessage(error)}`);
+    }
+  }
+
   async downloadPatchFromPpk(options: {
     updateUrl: string;
     hash: string;

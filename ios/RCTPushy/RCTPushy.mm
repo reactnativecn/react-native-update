@@ -518,6 +518,51 @@ RCT_EXPORT_METHOD(markSuccess:(RCTPromiseResolveBlock)resolve
     #endif
 }
 
+RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+{
+    // Reset to the bundle packaged in the binary: wipe the whole update state
+    // (so the next launch resolves to the built-in bundle) and delete every
+    // downloaded version. Only the client uuid survives — it identifies the
+    // install for gray release bucketing and must not change on reset.
+    PushyWithStateLock(^{
+        NSUserDefaults *defaults = PushyDefaults();
+
+        // A default-constructed State is exactly the reset state (no current /
+        // last version, first_time=false, first_time_ok=true); keep the binary
+        // identity so the next launch does not re-trigger the package-updated
+        // sync path.
+        pushy::state::State state;
+        state.package_version = PushyToStdString([RCTPushy packageVersion]);
+        state.build_time = PushyToStdString([RCTPushy buildTime]);
+        PushyApplyStateToDefaults(defaults, state);
+
+        for (NSString *key in [defaults dictionaryRepresentation].allKeys) {
+            if ([key hasPrefix:keyHashInfo]) {
+                [defaults removeObjectForKey:key];
+            }
+        }
+        [defaults removeObjectForKey:keyFirstLoadMarked];
+        [defaults removeObjectForKey:KeyPackageUpdatedMarked];
+        ignoreRollback = false;
+    });
+
+    dispatch_async(_fileQueue, ^{
+        // maxAgeDays=0 and no versions to keep: remove every downloaded entry.
+        pushy::patch::Status status = pushy::patch::CleanupOldEntries(
+            PushyToStdString([RCTPushy downloadDir]),
+            "",
+            "",
+            0
+        );
+        if (!status.ok) {
+            RCTLogWarn(@"Pushy reset cleanup error: %s", status.message.c_str());
+        }
+    });
+
+    resolve(@true);
+}
+
 
 
 #pragma mark - private

@@ -18,6 +18,8 @@ class DownloadTaskParams {
     String      url;
     String      hash;
     String      originHash;
+    // TASK_TYPE_CLEANUP only: entries younger than this survive; 0 = delete all
+    int         maxAgeDays = 3;
     File        targetFile;
     File        unzipDirectory;
     File        originDirectory;

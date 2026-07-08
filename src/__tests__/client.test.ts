@@ -27,6 +27,9 @@ const setupClientMocks = ({
   downloadFullUpdate = mock(() => Promise.resolve()),
   addProgressListener = mock(() => ({ remove: mock(() => {}) })),
   restartApp = mock(() => Promise.resolve()),
+  // null simulates an older native module without the method (undefined would
+  // just re-trigger this default).
+  resetToPackagedBundle = mock(() => Promise.resolve()),
 }: {
   isFirstTime?: boolean;
   markSuccess?: ReturnType<typeof mock>;
@@ -37,6 +40,7 @@ const setupClientMocks = ({
   downloadFullUpdate?: ReturnType<typeof mock>;
   addProgressListener?: ReturnType<typeof mock>;
   restartApp?: ReturnType<typeof mock>;
+  resetToPackagedBundle?: ReturnType<typeof mock> | null;
 } = {}) => {
   (globalThis as any).__DEV__ = false;
 
@@ -64,6 +68,7 @@ const setupClientMocks = ({
       downloadFullUpdate,
       downloadAndInstallApk: mock(() => Promise.resolve()),
       restartApp,
+      resetToPackagedBundle,
     },
     buildTime: '2023-01-01',
     cInfo: {
@@ -965,6 +970,67 @@ describe('Cresc class', () => {
     expect(client.options.server?.queryUrls).toEqual([
       'https://q.example.com',
     ]);
+  });
+});
+
+describe('resetToPackagedBundle', () => {
+  test('calls native reset and clears JS download bookkeeping', async () => {
+    const resetToPackagedBundle = mock(() => Promise.resolve());
+    const restartApp = mock(() => Promise.resolve());
+    setupClientMocks({ resetToPackagedBundle, restartApp });
+    const { Pushy, sharedState } = await importFreshClient('reset-basic');
+    sharedState.downloadedHash = 'stale-hash';
+    sharedState.marked = true;
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    await client.resetToPackagedBundle();
+
+    expect(resetToPackagedBundle).toHaveBeenCalledTimes(1);
+    expect(sharedState.downloadedHash).toBeUndefined();
+    expect(sharedState.marked).toBe(false);
+    // No restart unless explicitly requested.
+    expect(restartApp).not.toHaveBeenCalled();
+  });
+
+  test('restart: true reloads the app after the reset', async () => {
+    const resetToPackagedBundle = mock(() => Promise.resolve());
+    const restartApp = mock(() => Promise.resolve());
+    setupClientMocks({ resetToPackagedBundle, restartApp });
+    const { Pushy } = await importFreshClient('reset-restart');
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    await client.resetToPackagedBundle({ restart: true });
+
+    expect(resetToPackagedBundle).toHaveBeenCalledTimes(1);
+    expect(restartApp).toHaveBeenCalledTimes(1);
+  });
+
+  test('throws RESET_FAILED when the native module lacks the method', async () => {
+    // Simulates new JS arriving via hot update onto an older binary.
+    setupClientMocks({ resetToPackagedBundle: null });
+    const { Pushy } = await importFreshClient('reset-unsupported');
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    await expect(client.resetToPackagedBundle()).rejects.toMatchObject({
+      code: 'RESET_FAILED',
+    });
+  });
+
+  test('propagates native failures with the RESET_FAILED code and keeps state', async () => {
+    const resetToPackagedBundle = mock(() =>
+      Promise.reject(Error('disk full')),
+    );
+    setupClientMocks({ resetToPackagedBundle });
+    const { Pushy, sharedState } = await importFreshClient('reset-native-fail');
+    sharedState.downloadedHash = 'stale-hash';
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    await expect(client.resetToPackagedBundle()).rejects.toMatchObject({
+      code: 'RESET_FAILED',
+      message: 'disk full',
+    });
+    // The native reset did not happen, so the bookkeeping must not be wiped.
+    expect(sharedState.downloadedHash).toBe('stale-hash');
   });
 });
 

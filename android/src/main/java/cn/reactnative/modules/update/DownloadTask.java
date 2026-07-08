@@ -371,7 +371,7 @@ class DownloadTask implements Runnable {
             params.unzipDirectory.getAbsolutePath(),
             params.hash,
             params.originHash,
-            3
+            params.maxAgeDays
         );
     }
 

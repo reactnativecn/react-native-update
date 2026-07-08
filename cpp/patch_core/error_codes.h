@@ -31,6 +31,9 @@ constexpr const char* kSwitchVersionFailed = "SWITCH_VERSION_FAILED";
 constexpr const char* kMarkSuccessFailed = "MARK_SUCCESS_FAILED";
 // reloadUpdate / restartApp failed.
 constexpr const char* kRestartFailed = "RESTART_FAILED";
+// resetToPackagedBundle failed (state wipe or cleanup could not run), or the
+// installed native module predates the method (JS-layer detection).
+constexpr const char* kResetFailed = "RESET_FAILED";
 // Stored or provided hash info is not a valid JSON object.
 constexpr const char* kInvalidHashInfo = "INVALID_HASH_INFO";
 // The method is not supported on this platform (e.g. downloadAndInstallApk

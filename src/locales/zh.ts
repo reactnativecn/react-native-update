@@ -56,6 +56,8 @@ export default {
   error_apk_pending_install: '安装包已下载完成，请在系统安装界面完成安装',
   error_storage_permission_rejected: '存储权限被拒绝，无法下载安装包',
   error_apk_download_failed: '安装包下载或安装失败',
+  error_reset_not_supported:
+    '当前安装的原生模块不支持 resetToPackagedBundle，请使用最新版 react-native-update 重新打包后再试。',
 
   // Development messages
   dev_debug_disabled:
