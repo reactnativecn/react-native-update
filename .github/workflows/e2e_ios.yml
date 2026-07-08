@@ -43,8 +43,9 @@ concurrency:
 jobs:
   e2e-ios:
     runs-on: macos-26
-    # --retries 2 时一次失败重试就会把总时长推过 30 分钟,留足余量
-    timeout-minutes: 50
+    # 绿色基线 ~16 分钟;40 分钟覆盖最坏情况:一次 --retries 1 失败重试
+    # (失败用例会等满各级长超时)
+    timeout-minutes: 40
     steps:
       - name: Checkout react-native-update
         uses: actions/checkout@v7
@@ -79,6 +80,20 @@ jobs:
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: '26.4'
+
+      - name: Boot iOS simulator in background
+        # 模拟器冷启动要 ~2 分钟,提前异步 boot,让它和依赖安装/xcodebuild
+        # 并行;型号偏好顺序与 .detoxrc.ts 的 detectIosSimulatorType 保持一致。
+        # 失败无害:detox 测试阶段会自己 boot。
+        run: |
+          for prefix in "iPhone 17" "iPhone 16" "iPhone 15" "iPhone 14"; do
+            udid=$(xcrun simctl list devices available | sed -n "s/^ *${prefix}[^(]*(\([0-9A-F-]\{36\}\)).*/\1/p" | head -1)
+            if [ -n "$udid" ]; then
+              echo "pre-booting $prefix ($udid)"
+              xcrun simctl boot "$udid" || true
+              break
+            fi
+          done
 
       - name: Install applesimutils
         run: brew trust wix/brew && HOMEBREW_NO_AUTO_UPDATE=1 brew install wix/brew/applesimutils
@@ -140,7 +155,7 @@ jobs:
         env:
           RNU_CLI_ROOT: ${{ github.workspace }}/react-native-update-cli
           RNU_E2E_SKIP_PREPARE: 'true'
-        run: cd Example/e2etest && E2E_PLATFORM=ios bunx detox test --configuration ios.sim.release --retries 2
+        run: cd Example/e2etest && E2E_PLATFORM=ios bunx detox test --configuration ios.sim.release --retries 1
 
       - name: Upload Detox artifacts
         # cancelled() 覆盖 job 超时被杀的场景,否则超时时拿不到现场

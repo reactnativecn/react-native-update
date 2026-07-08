@@ -137,7 +137,8 @@ jobs:
           script: cd Example/e2etest && E2E_PLATFORM=android bunx detox test --configuration android.emu.release --headless --record-logs all --retries 1
 
       - name: Upload Detox artifacts
-        if: failure()
+        # cancelled() 覆盖 job 超时被杀的场景,否则超时时拿不到现场
+        if: failure() || cancelled()
         uses: actions/upload-artifact@v7.0.1
         with:
           name: e2e-android-detox-artifacts
@@ -244,7 +245,8 @@ jobs:
           script: cd .e2e-rn077-oldarch/AwesomeProject && E2E_PLATFORM=android bunx detox test --configuration android.emu.release --headless --record-logs all --retries 1
 
       - name: Upload Detox artifacts
-        if: failure()
+        # cancelled() 覆盖 job 超时被杀的场景,否则超时时拿不到现场
+        if: failure() || cancelled()
         uses: actions/upload-artifact@v7.0.1
         with:
           name: e2e-android-rn077-oldarch-detox-artifacts

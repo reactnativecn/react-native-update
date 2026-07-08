@@ -78,7 +78,8 @@ jobs:
         run: cd Example/e2etest && npx jest --config e2e/harmony.jest.config.js
 
       - name: Collect failure diagnostics
-        if: failure()
+        # cancelled() 覆盖 job 超时被杀的场景,否则超时时拿不到现场
+        if: failure() || cancelled()
         run: |
           set +e
           mkdir -p harmony-diagnostics
@@ -91,7 +92,8 @@ jobs:
           true
 
       - name: Upload failure diagnostics
-        if: failure()
+        # cancelled() 覆盖 job 超时被杀的场景,否则超时时拿不到现场
+        if: failure() || cancelled()
         uses: actions/upload-artifact@v6
         with:
           name: harmony-e2e-diagnostics
