@@ -68,9 +68,6 @@ function createReactNativeProject() {
 function copyE2eHarness() {
   [
     '.detoxrc.js',
-    '.detoxrc.ts',
-    '.eslintrc.js',
-    '.prettierrc.js',
     '.watchmanconfig',
     'app.json',
     'e2e',
@@ -107,7 +104,6 @@ function writePackageJson() {
       'prepare:e2e': 'node scripts/run-prepare-local-update-artifacts.js',
       'test:e2e:android':
         'E2E_PLATFORM=android detox test --configuration android.emu.release --headless --record-logs all',
-      lint: 'eslint .',
       apk: 'cd android && ./gradlew assembleRelease',
     },
     dependencies: {
@@ -118,8 +114,7 @@ function writePackageJson() {
     devDependencies: {
       ...generatedPackageJson.devDependencies,
       '@types/node': '^24.6.0',
-      detox: '20.50.1',
-      'ts-node': '^10.9.2',
+      detox: '20.51.4',
     },
     engines: {
       node: '>=22',

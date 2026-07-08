@@ -1,3 +1,27 @@
-require('ts-node/register/transpile-only');
+const path = require('node:path');
 
-module.exports = require('./jest.config.ts').default;
+const moduleDir = __dirname;
+
+/** @type {import('jest').Config} */
+const config = {
+  rootDir: '..',
+  testMatch: ['<rootDir>/e2e/**/*.test.ts'],
+  // Harmony tests use their own runner (harmony.jest.config.js), not Detox.
+  testPathIgnorePatterns: ['/e2e/harmony/'],
+  testTimeout: 300000,
+  maxWorkers: 1,
+  moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node'],
+  transform: {
+    '^.+\\.(js|jsx|ts|tsx)$': [
+      'babel-jest',
+      { configFile: path.resolve(moduleDir, '../babel.config.js') },
+    ],
+  },
+  globalSetup: '<rootDir>/e2e/globalSetup.js',
+  globalTeardown: '<rootDir>/e2e/globalTeardown.js',
+  reporters: ['detox/runners/jest/reporter'],
+  testEnvironment: 'detox/runners/jest/testEnvironment',
+  verbose: true,
+};
+
+module.exports = config;

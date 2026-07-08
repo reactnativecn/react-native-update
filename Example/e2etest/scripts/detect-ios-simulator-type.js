@@ -1,4 +1,4 @@
-// iOS 模拟器探测,.detoxrc.ts 与 CI 预热步骤共用同一份逻辑——
+// iOS 模拟器探测,.detoxrc.js 与 CI 预热步骤共用同一份逻辑——
 // 两处各写一份曾导致预热 boot 了 detox 不用的设备(同名设备横跨多个
 // runtime,shell 版取了旧 runtime 的实例),白等一次冷启动。
 const { execSync } = require('node:child_process');
