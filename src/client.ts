@@ -956,25 +956,33 @@ export class Pushy {
    * and the whole update state on the native side, so the app loads the
    * built-in bundle on the next launch (or immediately with
    * `{ restart: true }`). The client uuid is preserved.
+   *
+   * Returns whether the reset actually happened. Like the other update-flow
+   * APIs it never throws by default — failures land in lastError/onError with
+   * code RESET_FAILED — but the boolean must not be ignored: a false means the
+   * app is still running the hot-updated bundle. Set `throwError` to throw.
    */
-  resetToPackagedBundle = async (options?: { restart?: boolean }) => {
+  resetToPackagedBundle = async (options?: {
+    restart?: boolean;
+  }): Promise<boolean> => {
     if (typeof PushyModule.resetToPackagedBundle !== 'function') {
       // The JS layer can arrive via hot update onto an older binary whose
-      // native module predates this method; fail loudly instead of pretending
-      // the reset happened.
+      // native module predates this method.
       const err = new UpdateError(
         this.t('error_reset_not_supported'),
         'RESET_FAILED',
       );
       this.emitError(err, 'errorReset');
-      throw err;
+      this.throwIfEnabled(err);
+      return false;
     }
     try {
       await PushyModule.resetToPackagedBundle();
     } catch (e) {
       const err = toUpdateError(e, 'RESET_FAILED');
       this.emitError(err, 'errorReset');
-      throw err;
+      this.throwIfEnabled(err);
+      return false;
     }
     // The downloaded versions are gone; drop JS bookkeeping referring to them
     // so a stale downloadedHash cannot be switched to.
@@ -982,8 +990,9 @@ export class Pushy {
     sharedState.marked = false;
     this.report({ type: 'reset' });
     if (options?.restart) {
-      return this.restartApp();
+      await this.restartApp();
     }
+    return true;
   };
 }
 

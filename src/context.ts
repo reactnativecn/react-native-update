@@ -44,7 +44,9 @@ export const UpdateContext = createContext<{
   } | null;
   parseTestQrCode: (code: string) => boolean;
   restartApp: () => Promise<void>;
-  resetToPackagedBundle: (options?: { restart?: boolean }) => Promise<void>;
+  resetToPackagedBundle: (options?: {
+    restart?: boolean;
+  }) => Promise<boolean | void>;
   currentHash: string;
   packageVersion: string;
   client?: Pushy | Cresc;

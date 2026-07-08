@@ -983,8 +983,9 @@ describe('resetToPackagedBundle', () => {
     sharedState.marked = true;
     const client = new Pushy({ appKey: 'demo-app' });
 
-    await client.resetToPackagedBundle();
+    const result = await client.resetToPackagedBundle();
 
+    expect(result).toBe(true);
     expect(resetToPackagedBundle).toHaveBeenCalledTimes(1);
     expect(sharedState.downloadedHash).toBeUndefined();
     expect(sharedState.marked).toBe(false);
@@ -1005,18 +1006,33 @@ describe('resetToPackagedBundle', () => {
     expect(restartApp).toHaveBeenCalledTimes(1);
   });
 
-  test('throws RESET_FAILED when the native module lacks the method', async () => {
-    // Simulates new JS arriving via hot update onto an older binary.
+  test('resolves false with RESET_FAILED via onError when the native module lacks the method', async () => {
+    // Simulates new JS arriving via hot update onto an older binary. Like the
+    // other update-flow APIs this must not throw by default.
     setupClientMocks({ resetToPackagedBundle: null });
     const { Pushy } = await importFreshClient('reset-unsupported');
     const client = new Pushy({ appKey: 'demo-app' });
+    const seen: any[] = [];
+    client.onError((err: any) => seen.push(err));
+
+    const result = await client.resetToPackagedBundle();
+
+    expect(result).toBe(false);
+    expect(seen).toHaveLength(1);
+    expect(seen[0].code).toBe('RESET_FAILED');
+  });
+
+  test('throwError option makes an unsupported reset throw', async () => {
+    setupClientMocks({ resetToPackagedBundle: null });
+    const { Pushy } = await importFreshClient('reset-unsupported-throw');
+    const client = new Pushy({ appKey: 'demo-app', throwError: true });
 
     await expect(client.resetToPackagedBundle()).rejects.toMatchObject({
       code: 'RESET_FAILED',
     });
   });
 
-  test('propagates native failures with the RESET_FAILED code and keeps state', async () => {
+  test('resolves false on native failure and keeps state', async () => {
     const resetToPackagedBundle = mock(() =>
       Promise.reject(Error('disk full')),
     );
@@ -1024,11 +1040,14 @@ describe('resetToPackagedBundle', () => {
     const { Pushy, sharedState } = await importFreshClient('reset-native-fail');
     sharedState.downloadedHash = 'stale-hash';
     const client = new Pushy({ appKey: 'demo-app' });
+    const seen: any[] = [];
+    client.onError((err: any) => seen.push(err));
 
-    await expect(client.resetToPackagedBundle()).rejects.toMatchObject({
-      code: 'RESET_FAILED',
-      message: 'disk full',
-    });
+    const result = await client.resetToPackagedBundle();
+
+    expect(result).toBe(false);
+    expect(seen[0].code).toBe('RESET_FAILED');
+    expect(seen[0].message).toBe('disk full');
     // The native reset did not happen, so the bookkeeping must not be wiped.
     expect(sharedState.downloadedHash).toBe('stale-hash');
   });

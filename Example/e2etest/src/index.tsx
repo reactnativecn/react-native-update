@@ -109,13 +109,9 @@ function App() {
           style={styles.button}
           onPress={async () => {
             setLastEvent('triggerReset');
-            try {
-              await resetToPackagedBundle({ restart: false });
-              setLastEvent('resetDone');
-            } catch (e) {
-              setLastEvent('resetFailed');
-              setLastEventData(e instanceof Error ? e.message : String(e));
-            }
+            // 静默失败语义:失败不抛错而是返回 false,错误进 lastError
+            const ok = await resetToPackagedBundle({ restart: false });
+            setLastEvent(ok ? 'resetDone' : 'resetFailed');
           }}
         >
           <Text style={styles.buttonText}>Reset</Text>
