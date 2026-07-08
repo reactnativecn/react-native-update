@@ -149,7 +149,7 @@ function configureAndroidOldArchitecture() {
   appBuildGradle = appBuildGradle.replace(
     /dependencies \{\n/,
     [
-      'def detoxVersion = "20.50.1"',
+      'def detoxVersion = new groovy.json.JsonSlurper().parse(file("$rootDir/../node_modules/detox/package.json")).version',
       '',
       'repositories {',
       '    maven {',

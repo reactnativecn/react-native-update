@@ -109,7 +109,9 @@ android {
 }
 
 
-def detoxVersion = "20.50.1"
+// 与 node_modules 里的 detox 保持同版:硬编码曾在 20.50→20.51 升级时
+// 让 gradle 去远端仓库找不存在的 POM
+def detoxVersion = new groovy.json.JsonSlurper().parse(file("$rootDir/../node_modules/detox/package.json")).version
 
 repositories {
     maven {
