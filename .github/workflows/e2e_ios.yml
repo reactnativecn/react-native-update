@@ -95,8 +95,19 @@ jobs:
             fi
           done
 
-      - name: Install applesimutils
-        run: brew trust wix/brew && HOMEBREW_NO_AUTO_UPDATE=1 brew install wix/brew/applesimutils
+      - name: Install applesimutils and ccache
+        run: brew trust wix/brew && HOMEBREW_NO_AUTO_UPDATE=1 brew install wix/brew/applesimutils ccache
+
+      - name: Cache ccache
+        # ccache 按(预处理后)内容寻址,不受 fresh checkout 的 mtime 影响——
+        # 这是 DerivedData 缓存在 -UseNewBuildSystem=NO 下做不到的。
+        # 陈旧条目不影响正确性,只影响命中率,所以 restore-keys 用前缀即可。
+        uses: actions/cache@v5.0.4
+        with:
+          path: ~/Library/Caches/ccache
+          key: ${{ runner.os }}-ccache-e2e-xcode-26.4-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-ccache-e2e-xcode-26.4-
 
       - name: Install e2etest dependencies
         run: cd Example/e2etest && bun install --frozen-lockfile
@@ -131,7 +142,9 @@ jobs:
             ${{ runner.os }}-cocoapods-e2e-
 
       - name: Install CocoaPods dependencies
-        run: cd Example/e2etest/ios && pod install
+        # USE_CCACHE=1 让 react_native_post_install 给所有 pod target 接上
+        # RN 自带的 ccache 编译器包装脚本
+        run: cd Example/e2etest/ios && USE_CCACHE=1 pod install
 
       - name: Cache Detox iOS framework
         id: cache-detox-ios-framework

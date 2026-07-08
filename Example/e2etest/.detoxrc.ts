@@ -138,6 +138,8 @@ const config = {
       device: {
         type: iosSimulatorType,
       },
+      // CI 上没人看窗口:跳过 `open -a Simulator`(GUI 启动 + 持续渲染开销)
+      headless: !!process.env.CI,
     },
     attached: {
       type: 'android.attached',
