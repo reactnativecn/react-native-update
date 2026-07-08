@@ -882,12 +882,12 @@ bool ExportFunction(
 }  // namespace
 
 
-// 原生 patch 内核支持的 HBC 变换规范版本(hdiffv2 能力特征)
-static napi_value GetHbcTransformVersion(napi_env env, napi_callback_info) {
+// 原生 patch 内核可消费的 diff 轨道版本(2 = hdiffv2 轨道)
+static napi_value GetSupportedDiffVersion(napi_env env, napi_callback_info) {
   napi_value result = nullptr;
   napi_create_uint32(
       env,
-      static_cast<uint32_t>(pushy::hbc::kHbcTransformSupportedVersion),
+      static_cast<uint32_t>(pushy::hbc::kSupportedDiffVersion),
       &result);
   return result;
 }
@@ -899,7 +899,7 @@ napi_value Init(napi_env env, napi_value exports) {
       !ExportFunction(env, exports, "buildCopyGroups", BuildCopyGroups) ||
       !ExportFunction(env, exports, "applyPatchFromFileSource", ApplyPatchFromFileSource) ||
       !ExportFunction(env, exports, "cleanupOldEntries", CleanupOldEntries) ||
-      !ExportFunction(env, exports, "getHbcTransformVersion", GetHbcTransformVersion)) {
+      !ExportFunction(env, exports, "getSupportedDiffVersion", GetSupportedDiffVersion)) {
     return nullptr;
   }
   return exports;

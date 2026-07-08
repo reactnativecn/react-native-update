@@ -9,9 +9,18 @@
 namespace pushy {
 namespace hbc {
 
-// 客户端当前支持的变换规范版本。生成端(CLI)在 __diff.json 里写入 v;
-// v 不在支持范围时调用方必须放弃 diff 应用(回退整包),不能忽略元数据。
+// 客户端当前支持的变换规范版本(内部 wire 版本,仅用于校验 __diff.json
+// 中 hbcTransform.v)。v 不在支持范围时调用方必须放弃 diff 应用(回退
+// 整包),不能忽略元数据。
 constexpr uint32_t kHbcTransformSupportedVersion = 1;
+
+// 客户端可消费的 diff 轨道版本(客户端↔服务端接口用这个数字):
+//   1 = baseline(普通 hdiff single 格式)
+//   2 = v2 轨道(HBC 变换元数据 spec v1 + HDIFF13 流式容器)
+// 经 getConstants 暴露给 JS,随 checkUpdate 以 diffV 上报,服务端据此
+// 决定下发 v2/ 前缀产物。轨道号与 OSS 前缀/文档中的 "v2" 语义对齐;
+// 变换 spec 版本是其内部实现细节(轨道 v2 ⇒ spec ≤ 1)。
+constexpr uint32_t kSupportedDiffVersion = 2;
 
 // __diff.json 中单个 bundle patch 条目的 hbcTransform 元数据:
 // {"v":1,"hbcVersion":96,"layout":{"counts":19,"sections":[[ci,es,[[b,bi,bits],...]],...]}}

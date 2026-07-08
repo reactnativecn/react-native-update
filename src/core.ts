@@ -65,10 +65,10 @@ export const rolledBackVersion: string = PushyConstants.rolledBackVersion;
 export const isRolledBack: boolean = !!rolledBackVersion;
 
 export const buildTime: string = PushyConstants.buildTime;
-// 原生 patch 内核支持的 HBC 变换规范版本(hdiffv2 能力特征);
-// 旧原生无此常量时为 0(不上报能力,服务端下发旧格式 patch)
-export const hbcTransformVersion: number =
-	PushyConstants.hbcTransformVersion || 0;
+// 原生 patch 内核可消费的 diff 轨道版本(2 = hdiffv2 轨道:HBC 变换 +
+// 流式容器);旧原生无此常量时为 0(不上报,服务端只发 baseline)
+export const supportedDiffVersion: number =
+	PushyConstants.supportedDiffVersion || 0;
 let uuid = PushyConstants.uuid;
 
 async function getLocalHashInfo(hash: string) {

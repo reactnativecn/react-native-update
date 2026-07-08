@@ -348,9 +348,9 @@ RCT_EXPORT_MODULE(RCTPushy);
         ret[@"rolledBackVersion"] = [defaults objectForKey:keyRolledBackMarked];
         ret[@"isFirstTime"] = [defaults objectForKey:keyFirstLoadMarked];
         ret[@"uuid"] = [defaults objectForKey:keyUuid];
-        // 原生 patch 内核支持的 HBC 变换规范版本(hdiffv2 能力特征),
-        // JS 随 checkUpdate 上报,服务端按能力门控下发变换域 patch
-        ret[@"hbcTransformVersion"] = @(pushy::hbc::kHbcTransformSupportedVersion);
+        // 原生 patch 内核可消费的 diff 轨道版本(2 = hdiffv2 轨道),
+        // JS 随 checkUpdate 以 diffV 上报,服务端按能力门控下发
+        ret[@"supportedDiffVersion"] = @(pushy::hbc::kSupportedDiffVersion);
         NSDictionary *pushyInfo = [defaults dictionaryForKey:keyPushyInfo];
         NSString *currentVersion = [pushyInfo objectForKey:paramCurrentVersion];
         ret[@"currentVersion"] = currentVersion;

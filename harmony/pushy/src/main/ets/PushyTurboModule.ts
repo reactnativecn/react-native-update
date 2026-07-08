@@ -151,7 +151,7 @@ export class PushyTurboModule extends UITurboModule {
       isFirstTime,
       rolledBackVersion,
       uuid,
-      hbcTransformVersion: NativePatchCore.getHbcTransformVersion(),
+      supportedDiffVersion: NativePatchCore.getSupportedDiffVersion(),
     };
     const logResult = {
       downloadRootDir: result.downloadRootDir,

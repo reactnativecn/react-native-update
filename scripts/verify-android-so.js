@@ -27,7 +27,7 @@ const REQUIRED_SYMBOLS = [
   'Java_cn_reactnative_modules_update_DownloadTask_buildCopyGroups',
   'Java_cn_reactnative_modules_update_UpdateContext_syncStateWithBinaryVersion',
   'Java_cn_reactnative_modules_update_UpdateContext_runStateCore',
-  'Java_cn_reactnative_modules_update_NativeUpdateCore_getHbcTransformVersion',
+  'Java_cn_reactnative_modules_update_NativeUpdateCore_getSupportedDiffVersion',
 ];
 
 const SHT_DYNSYM = 11;

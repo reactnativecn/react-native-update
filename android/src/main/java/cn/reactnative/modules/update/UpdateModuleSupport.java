@@ -35,7 +35,7 @@ final class UpdateModuleSupport {
         }
 
         constants.put("uuid", updateContext.getKv("uuid"));
-        constants.put("hbcTransformVersion", NativeUpdateCore.hbcTransformVersion());
+        constants.put("supportedDiffVersion", NativeUpdateCore.supportedDiffVersion());
         return constants;
     }
 

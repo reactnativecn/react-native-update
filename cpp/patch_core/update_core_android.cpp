@@ -290,13 +290,13 @@ jobject MakeStateResult(
 
 }  // namespace
 
-// 客户端支持的 HBC 变换规范版本;JS 层经 getConstants 暴露给 checkUpdate,
-// 服务端据此决定是否下发变换域 patch(能力上报,而非 SDK 版本映射)。
+// 客户端可消费的 diff 轨道版本(能力上报,而非 SDK 版本映射);JS 层经
+// getConstants 暴露,随 checkUpdate 以 diffV 上报,服务端据此下发 v2 轨道。
 extern "C" JNIEXPORT jint JNICALL
-Java_cn_reactnative_modules_update_NativeUpdateCore_getHbcTransformVersion(
+Java_cn_reactnative_modules_update_NativeUpdateCore_getSupportedDiffVersion(
     JNIEnv*,
     jclass) {
-  return static_cast<jint>(pushy::hbc::kHbcTransformSupportedVersion);
+  return static_cast<jint>(pushy::hbc::kSupportedDiffVersion);
 }
 
 extern "C" JNIEXPORT jobject JNICALL

@@ -80,8 +80,8 @@ interface NativePatchCoreBindings {
     keepPrevious: string,
     maxAgeDays: number,
   ): Promise<void>;
-  /** 原生 patch 内核支持的 HBC 变换规范版本(hdiffv2 能力特征) */
-  getHbcTransformVersion(): number;
+  /** 原生 patch 内核可消费的 diff 轨道版本(2 = hdiffv2 轨道) */
+  getSupportedDiffVersion(): number;
 }
 
 export default NativeUpdateCore as unknown as NativePatchCoreBindings;

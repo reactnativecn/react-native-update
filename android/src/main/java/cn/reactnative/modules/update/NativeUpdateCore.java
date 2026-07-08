@@ -25,13 +25,14 @@ final class NativeUpdateCore {
     }
 
     /**
-     * 原生 patch 内核支持的 HBC 变换规范版本(hdiffv2 能力特征)。
-     * 经 getConstants 暴露给 JS,再随 checkUpdate 上报,服务端按能力门控。
+     * 原生 patch 内核可消费的 diff 轨道版本(2 = hdiffv2 轨道)。
+     * 经 getConstants 暴露给 JS,再随 checkUpdate 以 diffV 上报,
+     * 服务端按能力门控下发。
      */
-    static int hbcTransformVersion() {
+    static int supportedDiffVersion() {
         ensureLoaded();
-        return getHbcTransformVersion();
+        return getSupportedDiffVersion();
     }
 
-    private static native int getHbcTransformVersion();
+    private static native int getSupportedDiffVersion();
 }

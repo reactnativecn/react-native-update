@@ -9,7 +9,7 @@ import {
   cInfo,
   currentVersion,
   currentVersionInfo,
-  hbcTransformVersion,
+  supportedDiffVersion,
   isFirstTime,
   isRolledBack,
   packageVersion,
@@ -573,8 +573,8 @@ export class Pushy {
       hash: currentVersion,
       buildTime,
       cInfo,
-      // hdiffv2 能力特征:服务端据此决定是否下发 HBC 变换域 patch
-      ...(hbcTransformVersion ? { hbcT: hbcTransformVersion } : {}),
+      // 可消费的 diff 轨道版本(2 = hdiffv2 轨道),服务端据此门控下发
+      ...(supportedDiffVersion ? { diffV: supportedDiffVersion } : {}),
       ...extra,
     };
     if (__DEV__) {
