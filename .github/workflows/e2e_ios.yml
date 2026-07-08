@@ -82,18 +82,18 @@ jobs:
           xcode-version: '26.4'
 
       - name: Boot iOS simulator in background
-        # 模拟器冷启动要 ~2 分钟,提前异步 boot,让它和依赖安装/xcodebuild
-        # 并行;型号偏好顺序与 .detoxrc.ts 的 detectIosSimulatorType 保持一致。
+        # 模拟器冷启动要 2-5 分钟,提前异步 boot,让它和依赖安装/xcodebuild
+        # 并行。型号必须用与 .detoxrc.ts 完全同一份探测代码——此前 shell 里
+        # 另写一份选中了 detox 不用的设备,预热全部白费。
         # 失败无害:detox 测试阶段会自己 boot。
         run: |
-          for prefix in "iPhone 17" "iPhone 16" "iPhone 15" "iPhone 14"; do
-            udid=$(xcrun simctl list devices available | sed -n "s/^ *${prefix}[^(]*(\([0-9A-F-]\{36\}\)).*/\1/p" | head -1)
-            if [ -n "$udid" ]; then
-              echo "pre-booting $prefix ($udid)"
-              xcrun simctl boot "$udid" || true
-              break
-            fi
-          done
+          udid=$(node Example/e2etest/scripts/detect-ios-simulator-type.js --udid)
+          if [ -n "$udid" ]; then
+            echo "pre-booting $(node Example/e2etest/scripts/detect-ios-simulator-type.js) ($udid)"
+            xcrun simctl boot "$udid" || true
+          else
+            echo "no matching simulator found, skipping pre-boot"
+          fi
 
       - name: Install applesimutils and ccache
         run: brew trust wix/brew && HOMEBREW_NO_AUTO_UPDATE=1 brew install wix/brew/applesimutils ccache

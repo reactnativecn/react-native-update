@@ -1,45 +1,8 @@
 import { execSync } from 'node:child_process';
-
-function detectIosSimulatorType() {
-  if (process.env.DETOX_IOS_DEVICE_TYPE) {
-    return process.env.DETOX_IOS_DEVICE_TYPE;
-  }
-
-  if (process.platform !== 'darwin') {
-    return 'iPhone 14';
-  }
-
-  try {
-    const output = execSync('xcrun simctl list devices available', {
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).toString();
-
-    const lines = output
-      .split('\n')
-      .map(line => line.trim())
-      .filter(Boolean);
-
-    const preferredPrefixes = ['iPhone 17', 'iPhone 16', 'iPhone 15', 'iPhone 14'];
-
-    for (const prefix of preferredPrefixes) {
-      const line = lines.find(item => item.startsWith(prefix) && item.includes('('));
-      if (line) {
-        return line.split(' (')[0];
-      }
-    }
-
-    const fallbackLine = lines.find(
-      item => item.startsWith('iPhone ') && item.includes('('),
-    );
-    if (fallbackLine) {
-      return fallbackLine.split(' (')[0];
-    }
-  } catch {
-    // fall through to default
-  }
-
-  return 'iPhone 14';
-}
+// 与 CI 预热步骤共用同一份探测逻辑,避免两处各自实现选到不同设备
+const {
+  detectIosSimulatorType,
+} = require('./scripts/detect-ios-simulator-type.js');
 
 function detectAndroidAvdName() {
   if (process.env.DETOX_AVD_NAME) {
