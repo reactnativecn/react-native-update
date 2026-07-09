@@ -64,6 +64,12 @@ typedef NS_ENUM(NSInteger, PushyType) {
 };
 
 static std::atomic<bool> ignoreRollback{false};
+// The version whose bundle this process actually loaded (resolved in
+// +bundleURL). resetToPackagedBundle must not delete its directory: update
+// assets (images/fonts) are read from it on demand at runtime, so wiping it
+// under a silent (no-restart) reset would break every image the running app
+// has not loaded yet. Guarded by the state lock.
+static NSString *pushyLaunchVersion = nil;
 
 // Serializes every read-modify-write of the persisted update state. The state
 // machine itself is a pure function (state_core), but callers run on different
@@ -305,6 +311,7 @@ RCT_EXPORT_MODULE(RCTPushy);
                 [visitedVersions addObject:loadVersion];
                 NSString *bundlePath = [[downloadDir stringByAppendingPathComponent:loadVersion] stringByAppendingPathComponent:BUNDLE_FILE_NAME];
                 if ([[NSFileManager defaultManager] fileExistsAtPath:bundlePath isDirectory:NULL]) {
+                    pushyLaunchVersion = loadVersion;
                     resolvedURL = [NSURL fileURLWithPath:bundlePath];
                     return;
                 } else {
@@ -380,7 +387,16 @@ RCT_EXPORT_MODULE(RCTPushy);
 {
     self = [super init];
     if (self) {
-        _fileQueue = dispatch_queue_create("cn.reactnative.pushy.file", DISPATCH_QUEUE_SERIAL);
+        // One process-wide serial queue, not per-instance: a bridge reload can
+        // briefly keep two RCTPushy instances alive, and destructive file work
+        // (resetToPackagedBundle's full cleanup) must stay serialized with the
+        // other instance's unzip/patch jobs.
+        static dispatch_queue_t sharedFileQueue;
+        static dispatch_once_t onceToken;
+        dispatch_once(&onceToken, ^{
+            sharedFileQueue = dispatch_queue_create("cn.reactnative.pushy.file", DISPATCH_QUEUE_SERIAL);
+        });
+        _fileQueue = sharedFileQueue;
     }
     return self;
 }
@@ -522,11 +538,15 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 {
     // Reset to the bundle packaged in the binary: wipe the whole update state
-    // (so the next launch resolves to the built-in bundle) and delete every
-    // downloaded version. Only the client uuid survives — it identifies the
-    // install for gray release bucketing and must not change on reset.
+    // (so the next launch resolves to the built-in bundle) and delete the
+    // downloaded versions, keeping only the directory of the version this
+    // process is running from (a silent reset must not break its on-demand
+    // asset loads). Only the client uuid survives — it identifies the install
+    // for gray release bucketing and must not change on reset.
+    __block NSString *keepVersion = nil;
     PushyWithStateLock(^{
         NSUserDefaults *defaults = PushyDefaults();
+        keepVersion = pushyLaunchVersion;
 
         // A default-constructed State is exactly the reset state (no current /
         // last version, first_time=false, first_time_ok=true); keep the binary
@@ -548,10 +568,11 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
     });
 
     dispatch_async(_fileQueue, ^{
-        // maxAgeDays=0 and no versions to keep: remove every downloaded entry.
+        // maxAgeDays=0: remove every downloaded entry except the running
+        // version's directory (cleaned up by the next regular cleanup).
         pushy::patch::Status status = pushy::patch::CleanupOldEntries(
             PushyToStdString([RCTPushy downloadDir]),
-            "",
+            PushyToStdString(keepVersion),
             "",
             0
         );

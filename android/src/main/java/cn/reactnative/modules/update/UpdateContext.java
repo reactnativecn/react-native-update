@@ -28,6 +28,13 @@ public class UpdateContext {
     private ReactInstanceManager reactInstanceManager;
     private boolean isUsingBundleUrl;
     private boolean ignoreRollback;
+    // The version whose bundle this process actually loaded (resolved in
+    // getBundleUrl). resetToPackagedBundle must not delete its directory:
+    // update assets (images/fonts) are read from it on demand at runtime, so
+    // wiping it under a silent (no-restart) reset would break every image the
+    // running app has not loaded yet. Volatile: written during launch, read
+    // from the state serial executor.
+    private volatile String launchVersion;
     private static final int STATE_OP_SWITCH_VERSION = 1;
     private static final int STATE_OP_MARK_SUCCESS = 2;
     private static final int STATE_OP_ROLLBACK = 3;
@@ -305,9 +312,11 @@ public class UpdateContext {
 
     /**
      * Reset to the bundle packaged in the binary: wipe the whole update state
-     * (so the next launch resolves to the built-in bundle) and delete every
-     * downloaded version. Only the client uuid survives — it identifies the
-     * install for gray release bucketing and must not change on reset.
+     * (so the next launch resolves to the built-in bundle) and delete the
+     * downloaded versions, keeping only the directory of the version this
+     * process is running from (a silent reset must not break its on-demand
+     * asset loads). Only the client uuid survives — it identifies the install
+     * for gray release bucketing and must not change on reset.
      */
     public void resetToPackagedBundle() {
         StateCoreResult resetState = new StateCoreResult();
@@ -329,6 +338,10 @@ public class UpdateContext {
         DownloadTaskParams params = new DownloadTaskParams();
         params.type = DownloadTaskParams.TASK_TYPE_CLEANUP;
         params.maxAgeDays = 0;
+        // Keep the directory of the version this process is running from (a
+        // silent reset would otherwise break its on-demand asset loads); the
+        // orphaned directory is removed by the next regular cleanup.
+        params.hash = launchVersion;
         params.unzipDirectory = rootDir;
         enqueue(params);
     }
@@ -435,6 +448,7 @@ public class UpdateContext {
                 currentVersion = this.rollBack();
                 continue;
             }
+            launchVersion = currentVersion;
             return bundleFile.toString();
         }
 

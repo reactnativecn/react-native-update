@@ -27,6 +27,10 @@ export class UpdateContext {
   private static DEBUG: boolean = false;
   private static isUsingBundleUrl: boolean = false;
   private static ignoreRollback: boolean = false;
+  // 本进程实际加载的热更版本（getBundleUrl 解析成功时记录）。
+  // resetToPackagedBundle 不能删它的目录：热更包内的图片等资源是运行时按需
+  // 读盘的，静默（不重启）reset 若删掉会导致后续所有未加载过的资源失败。
+  private static launchVersion: string = '';
   private static cachedPackageVersion: string = '';
   private static cachedBuildTime: string = '';
   // 单例：确保 bundle provider 与 TurboModule 共用同一份 preferences 内存状态，
@@ -296,9 +300,26 @@ export class UpdateContext {
     return params;
   }
 
+  // 串行化下载/补丁任务与破坏性清理（reset 的全量删除）：Android 靠单线程
+  // download executor 天然串行，Harmony 的 NAPI 任务跑在 libuv worker 池上，
+  // 若不排队，reset 的 RemovePathRecursively 可能与正在写入的解压/打补丁并发，
+  // 产出"bundle 在、资源半删"的目录且可能被后续 switchVersion 激活。
+  private taskChain: Promise<void> = Promise.resolve();
+
+  private enqueueSerialTask<T>(job: () => Promise<T>): Promise<T> {
+    const run = this.taskChain.then(job);
+    this.taskChain = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
   private async executeTask(params: DownloadTaskParams): Promise<void> {
-    const downloadTask = new DownloadTask(this.context);
-    await downloadTask.execute(params);
+    await this.enqueueSerialTask(() => {
+      const downloadTask = new DownloadTask(this.context);
+      return downloadTask.execute(params);
+    });
   }
 
   public syncStateWithBinaryVersion(
@@ -374,7 +395,8 @@ export class UpdateContext {
 
   /**
    * 恢复到二进制内置包：清空整个更新状态机（下次启动即回内置 bundle）并删除
-   * 全部已下载版本。仅保留 uuid —— 它标识安装实例、用于灰度分桶，reset 不应改变。
+   * 已下载版本——仅保留当前运行版本的目录（静默 reset 不能破坏运行中 bundle
+   * 的按需资源加载）。uuid 保留 —— 它标识安装实例、用于灰度分桶，reset 不应改变。
    */
   public resetToPackagedBundle(): void {
     this.trace('resetToPackagedBundle:before');
@@ -409,12 +431,18 @@ export class UpdateContext {
     this.persistState(resetState, { clearFirstLoadMarker: true });
     UpdateContext.ignoreRollback = false;
 
-    // maxAgeDays=0 且不保留任何版本：全量删除下载目录内容（后台线程，尽力而为）
-    NativePatchCore.cleanupOldEntries(this.rootDir, '', '', 0).catch(
-      (error: Object) => {
-        console.error('reset cleanup failed:', error);
-      },
-    );
+    // maxAgeDays=0：删除下载目录内容，仅保留当前运行版本的目录（残留目录由
+    // 下次常规清理回收）。挂到串行任务链尾，避免与在飞的解压/打补丁并发。
+    this.enqueueSerialTask(() =>
+      NativePatchCore.cleanupOldEntries(
+        this.rootDir,
+        UpdateContext.launchVersion,
+        '',
+        0,
+      ),
+    ).catch((error: Object) => {
+      console.error('reset cleanup failed:', error);
+    });
     this.trace('resetToPackagedBundle:after');
   }
 
@@ -558,6 +586,7 @@ export class UpdateContext {
           version = this.rollBack();
           continue;
         }
+        UpdateContext.launchVersion = version;
         return bundleFile;
       } catch (e) {
         console.error('Failed to access bundle file:', e);
