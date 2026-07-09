@@ -146,6 +146,115 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # Debug 构建启动冒烟:codegen 生成的 Java spec 把常量校验等检查包在
+  # ReactBuildConfig.DEBUG 内,上面的 release e2e 物理上跑不到这些代码路径
+  # (v10.48.2 的 "doesn't declare constants" 启动崩溃就是这样漏掉的)。
+  # 只验证 debug 包能启动进首屏,不跑更新流,所以不需要更新 server 和产物。
+  e2e-android-debug-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout react-native-update
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Cache Bun dependencies
+        uses: actions/cache@v5
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-e2e-${{ hashFiles('Example/e2etest/bun.lock', 'react-native-update-cli/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-e2e-
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: |
+            Example/e2etest/bun.lock
+            Example/e2etest/android/*.gradle
+            Example/e2etest/android/**/*.gradle
+            Example/e2etest/android/gradle/wrapper/gradle-wrapper.properties
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Install e2etest dependencies
+        run: cd Example/e2etest && bun install --frozen-lockfile
+
+      - name: Link local react-native-update
+        run: |
+          set -euo pipefail
+          export LOCAL_RNU_VERSION="$(node -p "require('./Example/e2etest/node_modules/react-native-update/package.json').version")"
+          LOCAL_RNU_DIR="$PWD/Example/e2etest/.e2e-artifacts/local-react-native-update"
+          rm -rf "$LOCAL_RNU_DIR" Example/e2etest/node_modules/react-native-update
+          mkdir -p "$LOCAL_RNU_DIR"
+          cp package.json react-native-update.podspec react-native.config.js expo-module.config.json "$LOCAL_RNU_DIR"/
+          rsync -a --exclude='.git' src ios android cpp scripts "$LOCAL_RNU_DIR"/
+          node -e "const fs = require('fs'); const file = 'Example/e2etest/.e2e-artifacts/local-react-native-update/package.json'; const pkg = JSON.parse(fs.readFileSync(file, 'utf8')); pkg.version = process.env.LOCAL_RNU_VERSION; fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + '\n');"
+          ln -s ../.e2e-artifacts/local-react-native-update Example/e2etest/node_modules/react-native-update
+
+      - name: Detox build (android.emu.debug)
+        env:
+          DETOX_ANDROID_ARCHS: x86_64
+          DETOX_AVD_NAME: api34
+        run: cd Example/e2etest && bunx detox build --configuration android.emu.debug
+
+      - name: Start Metro in background
+        run: |
+          cd Example/e2etest
+          mkdir -p .e2e-artifacts
+          nohup bun start > .e2e-artifacts/metro.log 2>&1 &
+          # 预热 dev bundle:趁模拟器启动的窗口把首个 bundle 编出来,
+          # 避免 app 首次加载时现编,把冒烟等待时间全吃掉
+          nohup bash -c 'for i in $(seq 1 90); do curl -sf http://localhost:8081/status >/dev/null && break; sleep 2; done; curl -sf --max-time 420 -o /dev/null "http://localhost:8081/index.bundle?platform=android&dev=true&minify=false"' > .e2e-artifacts/metro-prewarm.log 2>&1 &
+
+      - name: Detox test (android.emu.debug boot smoke)
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          DETOX_ANDROID_ARCHS: x86_64
+          DETOX_AVD_NAME: api34
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          avd-name: api34
+          emulator-boot-timeout: 900
+          script: |
+            cd Example/e2etest
+            for i in $(seq 1 90); do curl -sf http://localhost:8081/status >/dev/null && break; sleep 2; done
+            curl -sf --max-time 420 -o /dev/null "http://localhost:8081/index.bundle?platform=android&dev=true&minify=false" || { echo '::error::Metro dev bundle failed to build'; tail -n 100 .e2e-artifacts/metro.log; exit 1; }
+            bunx detox test --configuration android.emu.debug --config e2e/smoke/jest.config.js --no-start --headless --record-logs all --retries 1
+
+      - name: Upload Detox artifacts
+        # cancelled() 覆盖 job 超时被杀的场景,否则超时时拿不到现场
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: e2e-android-debug-smoke-detox-artifacts
+          path: |
+            Example/e2etest/artifacts
+            Example/e2etest/.e2e-artifacts/metro.log
+            Example/e2etest/.e2e-artifacts/metro-prewarm.log
+          if-no-files-found: ignore
+          retention-days: 7
+
   e2e-android-rn077-oldarch:
     runs-on: ubuntu-latest
     timeout-minutes: 35

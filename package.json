@@ -25,6 +25,7 @@
     "build:android-release": "cd Example/e2etest && bun && detox build --configuration android.emu.release",
     "test:android-release": "cd Example/e2etest && E2E_PLATFORM=android bun detox test --configuration android.emu.release --headless --record-logs all",
     "test:android-debug": "cd Example/e2etest && E2E_PLATFORM=android detox test --configuration android.emu.debug --headless --record-logs all",
+    "smoke:android-debug": "cd Example/e2etest && detox test --configuration android.emu.debug --config e2e/smoke/jest.config.js",
     "e2e:ios": "bun build:ios-release && bun test:ios-release",
     "e2e:android": "bun build:android-release && bun test:android-release",
     "tests:emulator:prepare": "cd .github/workflows/scripts/functions && bun && bun build",
