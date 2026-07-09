@@ -149,6 +149,20 @@ async function main(): Promise<void> {
       }
       console.log(`Using publish version ${version}`);
       await modifyPackageJson({ version });
+      // Last gate for any CI publish path: publish.yml is expected to have
+      // replaced android/lib with CI-built binaries by now — verify here so a
+      // future workflow that skips that step can never silently ship stale
+      // committed .so files. Pure Node, runs in the HarmonyOS docker image too.
+      console.log('Verifying Android native libraries...');
+      const verifyResult = Bun.spawnSync(
+        ['node', path.join(__dirname, 'verify-android-so.js')],
+        { stdio: ['inherit', 'inherit', 'inherit'] },
+      );
+      if (verifyResult.exitCode !== 0) {
+        throw new Error(
+          `Android .so verification failed with exit code ${verifyResult.exitCode}`,
+        );
+      }
     } else {
       console.log(
         'ℹ️  Not in GitHub CI, skipping version resolution and package.json modification',

@@ -160,8 +160,11 @@ jobs:
             ${{ runner.os }}-cocoapods-e2e-
 
       - name: Cache built e2e app (keyed on native inputs)
-        # 命中 = native 输入(两个 ios 工程、cpp/jni、podspec、依赖锁)一字未改,
-        # 跳过 pod install + xcodebuild,只重新注入 JS bundle(见下)。
+        # 命中 = native 输入(两个 ios 工程、cpp/jni、podspec、依赖锁、codegen 输入)
+        # 一字未改,跳过 pod install + xcodebuild,只重新注入 JS bundle(见下)。
+        # codegen 输入必须参与 key:TurboModule 胶水在 pod install 时由根
+        # package.json 的 codegenConfig + src/Native*.ts spec 生成,漏了它们
+        # 会在改 spec 后把新 JS 注入到旧胶水的二进制上。
         # 故意不设 restore-keys:部分命中就是错的二进制,宁可全量重建。
         id: cache-ios-app
         uses: actions/cache@v5.0.4
@@ -169,7 +172,7 @@ jobs:
           path: |
             Example/e2etest/ios/build/Build/Products/Release-iphonesimulator/AwesomeProject.app
             Example/e2etest/ios/build/hermesc
-          key: ${{ runner.os }}-e2e-app-xcode-26.4-${{ hashFiles('Example/e2etest/ios/**', 'Example/e2etest/package.json', 'Example/e2etest/bun.lock', 'react-native-update.podspec', 'react-native.config.js', 'expo-module.config.json', 'ios/**', 'cpp/**', 'android/jni/**') }}
+          key: ${{ runner.os }}-e2e-app-xcode-26.4-${{ hashFiles('Example/e2etest/ios/**', 'Example/e2etest/package.json', 'Example/e2etest/bun.lock', 'react-native-update.podspec', 'react-native.config.js', 'expo-module.config.json', 'ios/**', 'cpp/**', 'android/jni/**', 'src/Native*.ts', 'package.json') }}
 
       - name: Install CocoaPods dependencies
         if: steps.cache-ios-app.outputs.cache-hit != 'true'

@@ -46,14 +46,21 @@ jobs:
   build_android_so:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # Keep in sync with PINNED_NDK_VERSION in scripts/build-android-so.sh.
+      NDK_VERSION: 28.2.13676358
     steps:
       - uses: actions/checkout@v7
         with:
           submodules: recursive
       - name: Install pinned NDK
-        run: echo "y" | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;28.2.13676358"
+        run: echo "y" | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;$NDK_VERSION"
       - name: Build and verify native libraries
-        run: bash scripts/build-android-so.sh
+        # The runner image presets ANDROID_NDK_HOME/ANDROID_NDK_ROOT to its
+        # bundled NDK, which would win over the pinned install in the script's
+        # resolution order — force the pinned one so published .so files don't
+        # drift with runner image upgrades.
+        run: ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$NDK_VERSION" bash scripts/build-android-so.sh
       - uses: actions/upload-artifact@v4
         with:
           name: android-so
@@ -81,6 +88,11 @@ jobs:
           node-version: 24
           registry-url: 'https://registry.npmjs.org'
       - run: bun install --frozen-lockfile
+      # Drop the committed binaries first: the artifact must fully replace
+      # android/lib, so any layout regression makes the verify step fail loudly
+      # instead of silently passing against stale committed .so files.
+      - name: Remove committed Android native libraries
+        run: rm -rf android/lib
       - name: Use CI-built Android native libraries
         uses: actions/download-artifact@v8
         with:
@@ -121,6 +133,11 @@ jobs:
           node-version: 24
           registry-url: 'https://registry.npmjs.org'
       - run: bun install --frozen-lockfile
+      # Drop the committed binaries first: the artifact must fully replace
+      # android/lib, so any layout regression makes the verify step fail loudly
+      # instead of silently passing against stale committed .so files.
+      - name: Remove committed Android native libraries
+        run: rm -rf android/lib
       - name: Use CI-built Android native libraries
         uses: actions/download-artifact@v8
         with:
@@ -128,23 +145,23 @@ jobs:
           path: android/lib
       - name: Verify Android native libraries
         run: node scripts/verify-android-so.js
+      # Fail closed: the package must always ship harmony/pushy.har
+      # (.npmignore explicitly whitelists it). If the previous release can't
+      # be fetched, fix the cause or re-run — never publish a HAR-less package.
       - name: Fetch previous Harmony HAR
         shell: bash
         run: |
           PREV_VERSION="${{ needs.check_changes.outputs.prev_tag }}"
           PREV_VERSION="${PREV_VERSION#v}"
-          echo "Attempting to fetch harmony/pushy.har from react-native-update@$PREV_VERSION"
-          npm pack react-native-update@$PREV_VERSION || true
-          tar -xzf react-native-update-${PREV_VERSION}.tgz package/harmony/pushy.har || true
-          if [ -f package/harmony/pushy.har ]; then
-            mkdir -p harmony
-            cp package/harmony/pushy.har harmony/pushy.har
-            echo "Successfully restored pushy.har from previous release."
-          else
-            echo "No harmony/pushy.har found in previous release or fetch failed."
-          fi
+          echo "Fetching harmony/pushy.har from react-native-update@$PREV_VERSION"
+          npm pack "react-native-update@$PREV_VERSION"
+          tar -xzf "react-native-update-${PREV_VERSION}.tgz" package/harmony/pushy.har
+          mkdir -p harmony
+          cp package/harmony/pushy.har harmony/pushy.har
           # Clean up temporary pack and extraction files to prevent publishing them
-          rm -rf react-native-update-${PREV_VERSION}.tgz package || true
+          rm -rf "react-native-update-${PREV_VERSION}.tgz" package
+      - name: Verify Harmony HAR artifact
+        run: test -f harmony/pushy.har
       - name: Publish to npm
         shell: bash
         run: |
