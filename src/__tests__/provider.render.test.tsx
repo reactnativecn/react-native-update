@@ -25,6 +25,7 @@ const updateResult: CheckResult = {
 const createClient = (options: Record<string, any> = {}) => {
   let progressCallback: ((data: ProgressData) => void) | undefined;
   const errorListeners = new Set<(e: Error, eventType?: string) => void>();
+  const emittedErrors = new WeakSet<Error>();
   const client = {
     options: {
       updateStrategy: 'alwaysAlert',
@@ -56,10 +57,14 @@ const createClient = (options: Record<string, any> = {}) => {
       };
     }),
     // Simulates the real client contract: errors are emitted to onError
-    // listeners (report + lastError/Alert path) regardless of throwError.
+    // listeners (report + lastError/Alert path) regardless of throwError,
+    // and wasEmitted() answers whether an error object went through the
+    // pipeline (the provider uses it to avoid double-surfacing).
     emitError: (e: Error, eventType = 'errorChecking') => {
+      emittedErrors.add(e);
       errorListeners.forEach(listener => listener(e, eventType));
     },
+    wasEmitted: (e: unknown) => e instanceof Error && emittedErrors.has(e),
     emitProgress: (data: ProgressData) => progressCallback?.(data),
   };
   return client;
@@ -160,6 +165,27 @@ describe('UpdateProvider rendering', () => {
     expect((mockAlert.mock.calls[0] as any[])[0]).toBe(
       'error_update_check_failed',
     );
+  });
+
+  test('a user-hook error carrying a foreign code is still surfaced (JS2-4)', async () => {
+    const client = createClient({ updateStrategy: 'alwaysAlert' });
+    const hookError: any = new Error('axios network error');
+    // axios-style code on an error that never entered the client pipeline;
+    // the old `!e?.code` heuristic wrongly treated it as already surfaced.
+    hookError.code = 'ERR_NETWORK';
+    client.checkUpdate.mockImplementation(async () => {
+      throw hookError;
+    });
+
+    const captured: { current?: any } = {};
+    const Probe = () => {
+      captured.current = useUpdate();
+      return null;
+    };
+    await renderProvider(client, <Probe />);
+
+    expect(captured.current.lastError).toBe(hookError);
+    expect(mockAlert).toHaveBeenCalledTimes(1);
   });
 
   test('alertUpdateAndIgnoreError suppresses the error alert but keeps lastError', async () => {

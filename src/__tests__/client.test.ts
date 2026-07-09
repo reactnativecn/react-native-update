@@ -559,6 +559,63 @@ describe('error pipeline (onError + stable codes, EH-1/EH-2/EH-3)', () => {
     expect(seen[0].e.code).toBe('INVALID_OPTIONS');
   });
 
+  test('a beforeReload hook throw gets USER_HOOK_ERROR, distinct from pipeline failures (JS2-3)', async () => {
+    setupClientMocks();
+    const { Pushy, sharedState } = await importFreshClient(
+      'pipeline-user-hook-error',
+    );
+    sharedState.downloadedHash = 'next-hash';
+    sharedState.applyingUpdate = false;
+    const client = new Pushy({
+      appKey: 'demo-app',
+      beforeReload: () => {
+        throw new Error('hook exploded');
+      },
+    });
+    const seen: any[] = [];
+    client.onError((e: any, eventType: string) => {
+      seen.push({ e, eventType });
+    });
+
+    await expect(client.switchVersion('next-hash')).rejects.toThrow(
+      'hook exploded',
+    );
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0].eventType).toBe('errorSwitchVersion');
+    // Distinct code: telemetry excludes USER_HOOK_ERROR from server-side
+    // patch-health stats (a hook bug is not a bad patch).
+    expect(seen[0].e.code).toBe('USER_HOOK_ERROR');
+    expect(sharedState.applyingUpdate).toBe(false);
+  });
+
+  test('concurrent checkUpdate reusing a failing in-flight check keeps its contracts (JS2-1)', async () => {
+    setupClientMocks();
+    (globalThis as any).fetch = mock(async () => {
+      throw new Error('offline');
+    });
+    const { Pushy } = await importFreshClient('pipeline-check-cache-error');
+    const states: any[] = [];
+    const client = new Pushy({
+      appKey: 'demo-app',
+      afterCheckUpdate: (state: any) => {
+        states.push(state);
+      },
+    });
+
+    // The second call starts inside the 5s window and awaits the first
+    // call's in-flight promise (the cache path). Before the fix it rejected
+    // raw, bypassing throwError:false and afterCheckUpdate entirely.
+    const first = client.checkUpdate();
+    const second = client.checkUpdate();
+    expect(await first).toBeUndefined();
+    expect(await second).toBeUndefined();
+
+    // "Every check ends with a notification" — both calls, both as errors.
+    expect(states).toHaveLength(2);
+    expect(states.every(s => s.status === 'error')).toBe(true);
+  });
+
   test('apk download failure keeps the native error and reports its message (EH-4)', async () => {
     const downloadAndInstallApk = mock(() =>
       Promise.reject(Error('disk full')),
@@ -852,6 +909,36 @@ describe('downloadUpdate fallback chain', () => {
     expect(seen).toHaveLength(1);
     expect(seen[0].eventType).toBe('errorUpdate');
     expect(seen[0].e).toBe(err);
+  });
+
+  test('a native PATCH_FAILED rejection survives to the thrown error (JS2-2)', async () => {
+    // Before the fix, the strategy loop re-created a plain Error from the
+    // i18n message, dropping the native code — telemetry then classified
+    // every failure as download_fail and patch_fail never fired.
+    const patchError: any = Error('hpatch failed');
+    patchError.code = 'PATCH_FAILED';
+    setupDownloadMocks({
+      downloadPatchFromPpk: mock(() => Promise.reject(Error('diff fail'))),
+      downloadPatchFromPackage: mock(() => Promise.reject(Error('pdiff fail'))),
+      downloadFullUpdate: mock(() => Promise.reject(patchError)),
+    });
+    const { Pushy, sharedState } = await importFreshClient(
+      'dl-patch-failed-code',
+    );
+    sharedState.downloadedHash = undefined;
+    const client = new Pushy({ appKey: 'demo-app', maxRetries: 0 });
+    const seen: any[] = [];
+    client.onError((e: any, eventType: string) => {
+      seen.push({ e, eventType });
+    });
+
+    const err: any = await client
+      .downloadUpdate(updateInfo)
+      .catch((e: any) => e);
+
+    expect(err.code).toBe('PATCH_FAILED');
+    expect(err.cause).toBe(patchError);
+    expect(seen[0].e.code).toBe('PATCH_FAILED');
   });
 
   test('deduplicates concurrent downloads of the same hash (JS-8)', async () => {

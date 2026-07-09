@@ -12,6 +12,21 @@ describe('resolveServerEventType', () => {
     expect(resolveServerEventType('markSuccess')).toBe('mark_success');
     expect(resolveServerEventType('rollback')).toBe('rollback');
     expect(resolveServerEventType('errorSwitchVersion')).toBe('patch_fail');
+    expect(
+      resolveServerEventType('errorSwitchVersion', 'SWITCH_VERSION_FAILED'),
+    ).toBe('patch_fail');
+  });
+
+  test('errorSwitchVersion excludes user-hook and restart failures (JS2-3)', () => {
+    // A user beforeReload hook throwing, or a restart-mechanics failure, is
+    // not a patch-quality signal and must stay out of the server-side stats
+    // that drive the rollback safety net.
+    expect(
+      resolveServerEventType('errorSwitchVersion', 'USER_HOOK_ERROR'),
+    ).toBeUndefined();
+    expect(
+      resolveServerEventType('errorSwitchVersion', 'RESTART_FAILED'),
+    ).toBeUndefined();
   });
 
   test('splits errorUpdate by underlying native code', () => {

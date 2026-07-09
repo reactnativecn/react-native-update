@@ -40,7 +40,12 @@ import {
   testUrls,
 } from './utils';
 import i18n from './i18n';
-import { toUpdateError, UpdateError, UpdateErrorCode } from './error';
+import {
+  asUpdateErrorCode,
+  toUpdateError,
+  UpdateError,
+  UpdateErrorCode,
+} from './error';
 import { dedupeEndpoints, executeEndpointFallback } from './endpoint';
 import {
   resolveServerEventHash,
@@ -325,6 +330,7 @@ export class Pushy {
     }
   };
   private errorListeners = new Set<UpdateErrorListener>();
+  private emittedErrors = new WeakSet<Error>();
   /**
    * Subscribe to every error the client reports (regardless of throwError).
    * Returns an unsubscribe function.
@@ -335,6 +341,15 @@ export class Pushy {
       this.errorListeners.delete(listener);
     };
   };
+  /**
+   * Whether this exact error object already went through emitError (and was
+   * therefore delivered to onError subscribers). Lets UI layers decide if a
+   * caught error still needs surfacing — checking `e.code` is not enough,
+   * since axios/system errors carry their own code without ever entering the
+   * pipeline.
+   */
+  wasEmitted = (e: unknown): boolean =>
+    e instanceof Error && this.emittedErrors.has(e);
   /**
    * Single exit point for errors: reports to the logger (with the stable
    * code) and notifies onError listeners. Whether to also throw stays with
@@ -348,6 +363,7 @@ export class Pushy {
       data,
     }: { message?: string; data?: Record<string, string | number> } = {},
   ) => {
+    this.emittedErrors.add(error);
     this.report({ type, message, code: error.code, data });
     for (const listener of this.errorListeners) {
       try {
@@ -502,7 +518,10 @@ export class Pushy {
         }
       } catch (e) {
         sharedState.applyingUpdate = false;
-        const err = toUpdateError(e, 'SWITCH_VERSION_FAILED');
+        // A throw from the user's beforeReload hook is business-code failure,
+        // not an update-pipeline one: give it a distinct code so telemetry
+        // excludes it from the server-side patch-health stats.
+        const err = toUpdateError(e, 'USER_HOOK_ERROR');
         this.emitError(err, 'errorSwitchVersion', {
           data: { newVersion: hash },
         });
@@ -563,9 +582,20 @@ export class Pushy {
       this.lastChecking &&
       now - this.lastChecking < 1000 * 5
     ) {
-      const result = await this.lastRespJson;
-      this.notifyAfterCheckUpdate({ status: 'completed', result });
-      return result;
+      try {
+        const result = await this.lastRespJson;
+        this.notifyAfterCheckUpdate({ status: 'completed', result });
+        return result;
+      } catch (e: any) {
+        // The shared in-flight check failed. Its initiating call reports it
+        // through emitError/throw; this call must still honor its own
+        // contract — afterCheckUpdate always fires and throwError applies —
+        // without double-reporting the same error.
+        const err = toUpdateError(e, 'CHECK_FAILED');
+        this.notifyAfterCheckUpdate({ status: 'error', error: err });
+        this.throwIfEnabled(err);
+        return undefined;
+      }
     }
     this.lastChecking = now;
     const fetchBody: Record<string, any> = {
@@ -804,7 +834,14 @@ export class Pushy {
               message: e.message,
             });
             errorMessages.push(errorMessage);
-            lastError = Error(errorMessage);
+            // Keep the i18n message for display, but preserve the native
+            // rejection's stable code (e.g. PATCH_FAILED vs DOWNLOAD_FAILED —
+            // telemetry classifies on it) and the original error as cause.
+            lastError = new UpdateError(
+              errorMessage,
+              asUpdateErrorCode(e?.code) ?? 'DOWNLOAD_FAILED',
+              { cause: e },
+            );
             log(errorMessage);
           }
         } else if (!url && strategy.devNoopWhenNoUrl && __DEV__) {

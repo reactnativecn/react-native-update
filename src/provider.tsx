@@ -152,10 +152,12 @@ export const UpdateProvider = ({
         ]);
         return true;
       } catch (e: any) {
-        // Client pipeline errors carry a code and were already surfaced via
-        // the onError subscription; errors thrown by user hooks
-        // (afterDownloadUpdate) bypass the pipeline and are surfaced here.
-        if (!e?.code) {
+        // Client pipeline errors were already surfaced via the onError
+        // subscription; errors thrown by user hooks (afterDownloadUpdate)
+        // bypass the pipeline and are surfaced here. Asking the client
+        // instead of checking `e.code` matters: axios/system errors carry
+        // their own code without ever entering the pipeline.
+        if (!client.wasEmitted(e)) {
           setLastError(e);
           alertError(client.t('update_failed'), e.message);
         }
@@ -186,10 +188,10 @@ export const UpdateProvider = ({
       try {
         rootInfo = await client.checkUpdate(extra);
       } catch (e: any) {
-        // Client pipeline errors carry a code and were already surfaced via
-        // the onError subscription; errors thrown by user hooks
-        // (beforeCheckUpdate) bypass the pipeline and are surfaced here.
-        if (!e?.code) {
+        // Client pipeline errors were already surfaced via the onError
+        // subscription; errors thrown by user hooks (beforeCheckUpdate)
+        // bypass the pipeline and are surfaced here (see wasEmitted).
+        if (!client.wasEmitted(e)) {
           setLastError(e);
           alertError(client.t('error_update_check_failed'), e.message);
         }

@@ -1,5 +1,12 @@
 import { mock } from 'bun:test';
 
+// Safety net: no test may ever hit the real network (a leaked fetch would
+// e.g. POST telemetry to the production endpoint). Tests that assert on
+// fetch behavior overwrite this per-case.
+(globalThis as any).fetch = mock(async () => {
+  throw new Error('fetch is not mocked in this test');
+});
+
 // Test helpers for the react-native mock below. Render tests import these to
 // observe alerts and to simulate AppState transitions.
 export const mockAlert = mock(() => {});

@@ -43,7 +43,12 @@ export const resolveServerEventType = (
     case 'errorUpdate':
       return code === 'PATCH_FAILED' ? 'patch_fail' : 'download_fail';
     case 'errorSwitchVersion':
-      return 'patch_fail';
+      // Activation failures are patch-health signals, but a throw from a
+      // user hook (beforeReload) or a restart-mechanics failure is not —
+      // those must not poison the stats driving the rollback safety net.
+      return code === 'USER_HOOK_ERROR' || code === 'RESTART_FAILED'
+        ? undefined
+        : 'patch_fail';
     case 'markSuccess':
       return 'mark_success';
     case 'rollback':
