@@ -18,6 +18,15 @@ const path = require('path');
 const LIB_DIR = path.resolve(__dirname, '..', 'android', 'lib');
 const ABIS = ['arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64'];
 
+// ELF e_machine per ABI, so a symbol-complete .so placed in the wrong ABI
+// directory (mixed-up artifacts) still fails verification.
+const ABI_MACHINE = {
+  'arm64-v8a': 0xb7, // EM_AARCH64
+  'armeabi-v7a': 0x28, // EM_ARM
+  x86: 0x03, // EM_386
+  x86_64: 0x3e, // EM_X86_64
+};
+
 // JNI entry points the Java `native` declarations bind to. Keep in sync with
 // the native methods in android/src/main/java/cn/reactnative/modules/update/.
 const REQUIRED_SYMBOLS = [
@@ -34,7 +43,7 @@ const SHT_DYNSYM = 11;
 const SHN_UNDEF = 0;
 
 /** Returns the set of defined dynamic symbol names exported by an ELF file. */
-function readDynamicSymbols(buffer) {
+function readDynamicSymbols(buffer, expectedMachine) {
   if (
     buffer.length < 64 ||
     buffer[0] !== 0x7f ||
@@ -46,6 +55,12 @@ function readDynamicSymbols(buffer) {
   if (buffer[5] !== 1) {
     // ei_data: all Android ABIs are little-endian.
     throw new Error('unsupported ELF endianness');
+  }
+  const machine = buffer.readUInt16LE(0x12);
+  if (expectedMachine !== undefined && machine !== expectedMachine) {
+    throw new Error(
+      `wrong architecture: e_machine 0x${machine.toString(16)} (expected 0x${expectedMachine.toString(16)})`,
+    );
   }
 
   const shoff = is64
@@ -123,7 +138,7 @@ for (const abi of ABIS) {
 
   let symbols;
   try {
-    symbols = readDynamicSymbols(fs.readFileSync(soPath));
+    symbols = readDynamicSymbols(fs.readFileSync(soPath), ABI_MACHINE[abi]);
   } catch (error) {
     console.error(`error: cannot read symbols from ${soPath}: ${error.message}`);
     failed = true;

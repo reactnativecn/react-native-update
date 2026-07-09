@@ -48,7 +48,7 @@ const reactNativeVersion =
 const artifactsRoot = path.join(projectRoot, '.e2e-artifacts');
 const pidFile = path.join(artifactsRoot, '.server.pid');
 
-function killExistingServer() {
+async function killExistingServer() {
   if (!fs.existsSync(pidFile)) {
     return;
   }
@@ -57,6 +57,18 @@ function killExistingServer() {
     const pid = Number(fs.readFileSync(pidFile, 'utf8').trim());
     if (pid > 0) {
       process.kill(pid, 'SIGTERM');
+      // Wait for the old process to actually exit: starting the new server
+      // while the old one still owns the port dies with EADDRINUSE, and the
+      // only symptom would be the 30s ready-timeout.
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline) {
+        try {
+          process.kill(pid, 0);
+        } catch {
+          return; // process is gone
+        }
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
     }
   } catch {
     // ignore stale pid
@@ -109,16 +121,20 @@ function startServer() {
   const serverScript = path.join(projectRoot, 'scripts/local-e2e-server.ts');
   fs.mkdirSync(artifactsRoot, { recursive: true });
 
+  // Keep server output diagnosable: a silently dying server (e.g.
+  // EADDRINUSE) otherwise only surfaces as an unexplained ready-timeout.
+  const logFd = fs.openSync(path.join(artifactsRoot, 'server.log'), 'a');
   const child = spawn('bun', [serverScript], {
     cwd: projectRoot,
     detached: true,
-    stdio: 'ignore',
+    stdio: ['ignore', logFd, logFd],
     env: {
       ...process.env,
       E2E_ASSET_PORT: String(LOCAL_UPDATE_PORT),
     },
   });
   child.unref();
+  fs.closeSync(logFd);
   fs.writeFileSync(pidFile, String(child.pid));
 }
 
@@ -246,7 +262,7 @@ async function globalSetup() {
     throw new Error(`Unsupported E2E_PLATFORM: ${platform}`);
   }
 
-  killExistingServer();
+  await killExistingServer();
   if (process.env.RNU_E2E_SKIP_PREPARE === 'true') {
     ensurePreparedArtifacts(platform);
   } else {

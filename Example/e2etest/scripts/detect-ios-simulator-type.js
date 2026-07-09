@@ -22,12 +22,18 @@ function detectIosSimulatorType() {
       .map(line => line.trim())
       .filter(Boolean);
 
+    // Strip the trailing "(UDID) (State)" instead of cutting at the first
+    // " (" — device names can themselves contain parentheses, e.g.
+    // "iPhone SE (3rd generation)".
+    const extractName = line =>
+      line.replace(/\s*\([0-9A-Fa-f-]{36}\).*$/, '').trim();
+
     const preferredPrefixes = ['iPhone 17', 'iPhone 16', 'iPhone 15', 'iPhone 14'];
 
     for (const prefix of preferredPrefixes) {
       const line = lines.find(item => item.startsWith(prefix) && item.includes('('));
       if (line) {
-        return line.split(' (')[0];
+        return extractName(line);
       }
     }
 
@@ -35,7 +41,7 @@ function detectIosSimulatorType() {
       item => item.startsWith('iPhone ') && item.includes('('),
     );
     if (fallbackLine) {
-      return fallbackLine.split(' (')[0];
+      return extractName(fallbackLine);
     }
   } catch {
     // fall through to default

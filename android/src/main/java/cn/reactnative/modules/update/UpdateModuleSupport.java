@@ -5,6 +5,7 @@ import static androidx.core.content.FileProvider.getUriForFile;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
+import android.util.Log;
 import com.facebook.react.bridge.ReactApplicationContext;
 import java.io.File;
 import java.util.HashMap;
@@ -35,7 +36,16 @@ final class UpdateModuleSupport {
         }
 
         constants.put("uuid", updateContext.getKv("uuid"));
-        constants.put("supportedDiffVersion", NativeUpdateCore.supportedDiffVersion());
+        int supportedDiffVersion = 0;
+        try {
+            supportedDiffVersion = NativeUpdateCore.supportedDiffVersion();
+        } catch (UnsatisfiedLinkError e) {
+            // A mismatched librnupdate.so (stale manual copy / build cache)
+            // must not crash startup via getConstants; 0 simply means "no v2
+            // diff track" and the server degrades gracefully.
+            Log.e("pushy", "supportedDiffVersion missing from librnupdate.so", e);
+        }
+        constants.put("supportedDiffVersion", supportedDiffVersion);
         return constants;
     }
 

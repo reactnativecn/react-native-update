@@ -109,6 +109,10 @@ const defaultClientOptions: ClientOptions = {
 export const sharedState: {
   progressHandlers: Record<string, EmitterSubscription>;
   downloadingTasks: Record<string, Promise<string | undefined>>;
+  // Progress callbacks per hash: concurrent downloadUpdate callers of the
+  // same hash each register theirs here instead of the second one being
+  // silently dropped by the in-flight dedup.
+  progressCallbacks: Record<string, Set<(data: ProgressData) => void>>;
   downloadedHash?: string;
   toHash?: string;
   apkStatus: 'downloading' | 'downloaded' | null;
@@ -117,6 +121,7 @@ export const sharedState: {
 } = {
   progressHandlers: {},
   downloadingTasks: {},
+  progressCallbacks: {},
   downloadedHash: undefined,
   apkStatus: null,
   marked: false,
@@ -364,7 +369,14 @@ export class Pushy {
     }: { message?: string; data?: Record<string, string | number> } = {},
   ) => {
     this.emittedErrors.add(error);
-    this.report({ type, message, code: error.code, data });
+    this.report({
+      type,
+      message,
+      code: error.code,
+      // Structured context from the error (e.g. HTTP status) reaches the
+      // logger; explicit data wins on key conflicts.
+      data: error.extra ? { ...error.extra, ...data } : data,
+    });
     for (const listener of this.errorListeners) {
       try {
         listener(error, type);
@@ -685,6 +697,10 @@ export class Pushy {
     const existingTask = sharedState.downloadingTasks[hash];
     if (existingTask) {
       log(`download for hash ${hash} already in progress, reusing it`);
+      // The second caller's progress callback must still fire.
+      if (onDownloadProgress) {
+        sharedState.progressCallbacks[hash]?.add(onDownloadProgress);
+      }
       return existingTask;
     }
     const task = this.performDownload(updateInfo, onDownloadProgress);
@@ -712,38 +728,42 @@ export class Pushy {
     if (!hash) {
       return;
     }
-    if (sharedState.progressHandlers[hash]) {
-      return;
-    }
     const patchStartTime = Date.now();
+    // One native listener per hash dispatching to a callback set, so
+    // concurrent callers deduped onto this task can each observe progress
+    // (they register via downloadUpdate).
+    const progressCallbacks = new Set<(data: ProgressData) => void>();
     if (onDownloadProgress) {
-      const wrapProgress = (data: ProgressData) => {
-        onDownloadProgress({
-          ...data,
-          progress: computeProgress(data.received, data.total),
-        });
-      };
-      // @ts-expect-error harmony not in existing platforms
-      if (Platform.OS === 'harmony') {
-        sharedState.progressHandlers[hash] = DeviceEventEmitter.addListener(
-          'RCTPushyDownloadProgress',
-          (progressData: ProgressData) => {
-            if (progressData.hash === hash) {
-              wrapProgress(progressData);
-            }
-          },
-        );
-      } else {
-        sharedState.progressHandlers[hash] =
-          pushyNativeEventEmitter.addListener(
-            'RCTPushyDownloadProgress',
-            (progressData: ProgressData) => {
-              if (progressData.hash === hash) {
-                wrapProgress(progressData);
-              }
-            },
-          );
+      progressCallbacks.add(onDownloadProgress);
+    }
+    sharedState.progressCallbacks[hash] = progressCallbacks;
+    const dispatchProgress = (data: ProgressData) => {
+      const callbacks = sharedState.progressCallbacks[hash];
+      if (!callbacks || callbacks.size === 0) {
+        return;
       }
+      const payload = {
+        ...data,
+        progress: computeProgress(data.received, data.total),
+      };
+      callbacks.forEach(callback => callback(payload));
+    };
+    const onNativeProgress = (progressData: ProgressData) => {
+      if (progressData.hash === hash) {
+        dispatchProgress(progressData);
+      }
+    };
+    // @ts-expect-error harmony not in existing platforms
+    if (Platform.OS === 'harmony') {
+      sharedState.progressHandlers[hash] = DeviceEventEmitter.addListener(
+        'RCTPushyDownloadProgress',
+        onNativeProgress,
+      );
+    } else {
+      sharedState.progressHandlers[hash] = pushyNativeEventEmitter.addListener(
+        'RCTPushyDownloadProgress',
+        onNativeProgress,
+      );
     }
     const maxRetries = Math.max(0, Math.floor(this.options.maxRetries ?? 3));
     let succeeded = '';
@@ -857,6 +877,7 @@ export class Pushy {
       sharedState.progressHandlers[hash].remove();
       delete sharedState.progressHandlers[hash];
     }
+    delete sharedState.progressCallbacks[hash];
     if (!succeeded) {
       const message = errorMessages.join(';');
       if (lastError) {
@@ -983,10 +1004,22 @@ export class Pushy {
     }
   };
   restartApp = async () => {
-    if (!(await this.runBeforeReload({ type: 'restartApp' }))) {
-      return;
+    try {
+      if (!(await this.runBeforeReload({ type: 'restartApp' }))) {
+        return;
+      }
+    } catch (e) {
+      const err = toUpdateError(e, 'USER_HOOK_ERROR');
+      this.emitError(err, 'errorRestart');
+      throw err;
     }
-    return PushyModule.restartApp();
+    try {
+      return await PushyModule.restartApp();
+    } catch (e) {
+      const err = toUpdateError(e, 'RESTART_FAILED');
+      this.emitError(err, 'errorRestart');
+      throw err;
+    }
   };
   /**
    * Reset to the bundle packaged in the binary: wipes every downloaded update
@@ -1002,6 +1035,11 @@ export class Pushy {
   resetToPackagedBundle = async (options?: {
     restart?: boolean;
   }): Promise<boolean> => {
+    if (!assertWeb()) {
+      // On web PushyModule is a Proxy of noops, so the feature-detect below
+      // would report a false success.
+      return false;
+    }
     if (typeof PushyModule.resetToPackagedBundle !== 'function') {
       // The JS layer can arrive via hot update onto an older binary whose
       // native module predates this method.
@@ -1024,10 +1062,18 @@ export class Pushy {
     // The downloaded versions are gone; drop JS bookkeeping referring to them
     // so a stale downloadedHash cannot be switched to.
     sharedState.downloadedHash = undefined;
+    sharedState.toHash = undefined;
     sharedState.marked = false;
     this.report({ type: 'reset' });
     if (options?.restart) {
-      await this.restartApp();
+      try {
+        await this.restartApp();
+      } catch (e: any) {
+        // The reset itself succeeded and the restart failure was already
+        // reported through the pipeline; the boolean must still say "state
+        // is reset".
+        log('restart after reset failed:', e?.message || e);
+      }
     }
     return true;
   };

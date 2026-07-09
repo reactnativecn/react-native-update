@@ -26,9 +26,13 @@ fi
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
+# --minify false matches react-native-xcode.sh on the Hermes path (metro
+# minification is left to hermesc), so the injected bundle stays the same
+# shape as a full xcodebuild would produce.
 bunx react-native bundle \
   --platform ios \
   --dev false \
+  --minify false \
   --entry-file index.js \
   --bundle-output "$TMP/main.jsbundle" \
   --assets-dest "$APP"

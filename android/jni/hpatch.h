@@ -30,12 +30,6 @@ enum {
     kHPatch_error_new_size      =-15,
 };
 
-int hpatch_getInfo_by_mem(hpatch_singleCompressedDiffInfo* out_patinfo,
-                          const uint8_t* pat,size_t patsize);
-
-//patInfo can NULL
-int hpatch_by_mem(const uint8_t* old,size_t oldsize, uint8_t* newBuf,size_t newsize,
-                  const uint8_t* pat,size_t patsize,const hpatch_singleCompressedDiffInfo* patInfo);
 int hpatch_by_file(const char* oldfile, const char* newfile, const char* patchfile);
 
 #ifdef __cplusplus

@@ -400,10 +400,12 @@ export class UpdateContext {
    */
   public resetToPackagedBundle(): void {
     this.trace('resetToPackagedBundle:before');
-    const state = this.getStateSnapshot();
+    // 实时读取二进制身份（与 Android/iOS 对齐），而非 preferences 快照：
+    // meta.json 读取失败时快照可能为空，reset 持久化空值会让下次启动误判
+    // binary 变更多做一轮 cleanUp+persist。
     const resetState: StateCoreResult = {
-      packageVersion: state.packageVersion,
-      buildTime: state.buildTime,
+      packageVersion: this.getPackageVersion(),
+      buildTime: this.getBuildTime(),
       currentVersion: '',
       lastVersion: '',
       firstTime: false,

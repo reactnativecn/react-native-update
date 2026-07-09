@@ -468,7 +468,6 @@ export class DownloadTask {
         },
       );
 
-      refreshWatchdog();
       const responseCode = await httpRequest.requestInStream(params.url, {
         method: http.RequestMethod.GET,
         readTimeout: 60000,
@@ -481,6 +480,11 @@ export class DownloadTask {
         throw Error(`Server error: ${responseCode}`);
       }
 
+      // watchdog 到这里才首次启动：requestInStream 阶段已有 connect/readTimeout
+      // 覆盖；若提早启动，连接超过 60s 时 inactivityPromise 会在 race 尚无订阅者
+      // 时 reject（unhandled rejection），且 promise 一经 reject 无法复活——
+      // 即使随后数据正常流入，race 也必然以 "Download stalled" 失败。
+      refreshWatchdog();
       await Promise.race([dataEndPromise, inactivityPromise]);
       const stats = await fileIo.stat(params.targetFile);
       const fileSize = stats.size;

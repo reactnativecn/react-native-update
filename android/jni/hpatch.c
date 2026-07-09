@@ -18,15 +18,6 @@
 #define  _check(v,errorType) do{ \
     if (!(v)){ if (result==kHPatch_ok) result=errorType; if (!_isInClear){ goto _clear; }; } }while(0)
 
-int hpatch_getInfo_by_mem(hpatch_singleCompressedDiffInfo* out_patinfo,
-                          const uint8_t* pat,size_t patsize){
-    hpatch_TStreamInput patStream;
-    mem_as_hStreamInput(&patStream,pat,pat+patsize);
-    if (!getSingleCompressedDiffInfo(out_patinfo,&patStream,0))
-        return kHPatch_error_info;//data error;
-    return kHPatch_ok; //ok
-}
-
 static hpatch_TDecompress* getDecompressPlugin(const char* compressType){
 #ifdef  _CompressPlugin_zlib
     if (zlibDecompressPlugin.is_can_open(compressType))
@@ -94,17 +85,6 @@ _clear:
     _isInClear=hpatch_TRUE;
     if (temp_cache){ free(temp_cache); temp_cache=0; }
     return result;
-}
-
-int hpatch_by_mem(const uint8_t* old,size_t oldsize,uint8_t* newBuf,size_t newsize,
-                  const uint8_t* pat,size_t patsize,const hpatch_singleCompressedDiffInfo* patInfo){
-    hpatch_TStreamInput oldStream;
-    hpatch_TStreamInput patStream;
-    hpatch_TStreamOutput newStream;
-    mem_as_hStreamInput(&oldStream,old,old+oldsize);
-    mem_as_hStreamInput(&patStream,pat,pat+patsize);
-    mem_as_hStreamOutput(&newStream,newBuf,newBuf+newsize);
-    return hpatch_by_stream(&oldStream,hpatch_FALSE,&patStream,&newStream,patInfo);
 }
 
 // HDIFF13(diffStream 产物,v2 轨道的大 bundle patch):流式应用,

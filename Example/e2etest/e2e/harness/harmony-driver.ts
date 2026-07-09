@@ -80,6 +80,10 @@ export class HarmonyDriver {
     const fullArgs = this.target ? ['-t', this.target, ...args] : args;
     const { stdout } = await execFileAsync(HDC, fullArgs, {
       maxBuffer: 16 * 1024 * 1024,
+      // A half-disconnected device can hang hdc indefinitely; fail the single
+      // call fast instead of eating the whole 300s jest timeout with no
+      // pointer to the culprit.
+      timeout: 15_000,
     });
     return stdout;
   }

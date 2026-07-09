@@ -57,6 +57,7 @@ export type EventType =
   | 'errorMarkSuccess'
   | 'reset'
   | 'errorReset'
+  | 'errorRestart'
   | 'errorSwitchVersion'
   | 'downloadingApk'
   | 'rejectStoragePermission'

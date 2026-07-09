@@ -26,8 +26,9 @@ public class UpdateContext {
     private final SharedPreferences sp;
 
     private ReactInstanceManager reactInstanceManager;
-    private boolean isUsingBundleUrl;
-    private boolean ignoreRollback;
+    // Written on the launch path, read from executor/JS threads.
+    private volatile boolean isUsingBundleUrl;
+    private volatile boolean ignoreRollback;
     // The version whose bundle this process actually loaded (resolved in
     // getBundleUrl). resetToPackagedBundle must not delete its directory:
     // update assets (images/fonts) are read from it on demand at runtime, so

@@ -1,5 +1,6 @@
 package cn.reactnative.modules.update;
 
+import android.util.Log;
 import androidx.annotation.Nullable;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.modules.core.DeviceEventManagerModule;
@@ -28,9 +29,17 @@ final class UpdateEventEmitter {
             return;
         }
 
-        reactContext
-            .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
-            .emit(eventName, params);
+        try {
+            reactContext
+                .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
+                .emit(eventName, params);
+        } catch (RuntimeException e) {
+            // The instance can be torn down between the check above and the
+            // emit (this SDK itself triggers reloads); sendEvent runs on the
+            // main thread, so a throw here would crash the app for a lost
+            // progress tick.
+            Log.w("pushy", "sendEvent " + eventName + " failed: " + e.getMessage());
+        }
     }
 
     @SuppressWarnings("deprecation")

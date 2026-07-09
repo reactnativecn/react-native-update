@@ -405,15 +405,21 @@ export const UpdateProvider = ({
       if (!url) {
         return;
       }
-      const params = new URL(url).searchParams;
-      const payload = {
-        type: params.get('type'),
-        data: params.get('data'),
-      };
-      parseTestPayload(payload);
+      try {
+        const params = new URL(url).searchParams;
+        const payload = {
+          type: params.get('type'),
+          data: params.get('data'),
+        };
+        parseTestPayload(payload);
+      } catch (e: any) {
+        // A malformed deep link (new URL throws) must not become an
+        // unhandled rejection / a throw inside the 'url' event handler.
+        log('parseLinking: invalid url', e?.message || e);
+      }
     };
 
-    Linking.getInitialURL().then(parseLinking);
+    Linking.getInitialURL().then(parseLinking).catch(noop);
     const linkingHandler = ({ url }: { url: string }) => {
       parseLinking(url);
     };

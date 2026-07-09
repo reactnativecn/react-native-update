@@ -70,7 +70,9 @@ std::string GetString(napi_env env, napi_value value, bool* ok) {
     return std::string();
   }
 
-  std::string result(length, '\0');
+  // length + 1 so NAPI's terminating '\0' lands inside owned storage instead
+  // of the string's past-the-end terminator slot (formally UB to write).
+  std::string result(length + 1, '\0');
   size_t written = 0;
   if (napi_get_value_string_utf8(
           env, value, result.data(), length + 1, &written) != napi_ok) {
@@ -738,9 +740,13 @@ napi_value ApplyPatchFromFileSource(napi_env env, napi_callback_info info) {
             auto* w = static_cast<ApplyPatchWork*>(data);
             w->status = pushy::patch::ApplyPatchFromFileSource(w->options);
           },
-          [](napi_env cb_env, napi_status, void* data) {
+          [](napi_env cb_env, napi_status status, void* data) {
             auto* w = static_cast<ApplyPatchWork*>(data);
-            if (w->status.ok) {
+            if (status != napi_ok) {
+              // Cancelled/aborted before execute ran: w->status is
+              // meaningless; still settle the promise so it never hangs.
+              RejectDeferredWithMessage(cb_env, w->deferred, "async work aborted");
+            } else if (w->status.ok) {
               napi_value undefined_value = nullptr;
               napi_get_undefined(cb_env, &undefined_value);
               napi_resolve_deferred(cb_env, w->deferred, undefined_value);
@@ -826,9 +832,11 @@ napi_value CleanupOldEntries(napi_env env, napi_callback_info info) {
             w->status = pushy::patch::CleanupOldEntries(
                 w->root_dir, w->keep_current, w->keep_previous, w->max_age_days);
           },
-          [](napi_env cb_env, napi_status, void* data) {
+          [](napi_env cb_env, napi_status status, void* data) {
             auto* w = static_cast<CleanupWork*>(data);
-            if (w->status.ok) {
+            if (status != napi_ok) {
+              RejectDeferredWithMessage(cb_env, w->deferred, "async work aborted");
+            } else if (w->status.ok) {
               napi_value undefined_value = nullptr;
               napi_get_undefined(cb_env, &undefined_value);
               napi_resolve_deferred(cb_env, w->deferred, undefined_value);

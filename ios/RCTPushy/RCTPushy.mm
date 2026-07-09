@@ -904,6 +904,13 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
             NSError *unzipError = error;
             if (!succeeded && unzipError == nil) {
                 unzipError = PushyErrorWithCode(pushy::error_codes::kPatchFailed, @"unzip failed");
+            } else if (unzipError != nil && unzipError.userInfo[PushyErrorCodeKey] == nil) {
+                // SSZipArchive's own NSError (corrupt zip, bad magic, ...) has
+                // no stable code; without one, downloadUpdate's fallback would
+                // classify it as DOWNLOAD_FAILED even though the download
+                // succeeded — keep the classification deterministic.
+                unzipError = PushyErrorWithCode(pushy::error_codes::kPatchFailed,
+                                                unzipError.localizedDescription ?: @"unzip failed");
             }
             completionHandler(unzipError);
         }];

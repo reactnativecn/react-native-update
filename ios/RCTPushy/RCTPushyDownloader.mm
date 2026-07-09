@@ -92,6 +92,12 @@ totalBytesExpectedToWrite:(int64_t)totalBytesExpectedToWrite
     // Normalize an unknown total (NSURLSessionTransferSizeUnknown == -1) to 0 so
     // the JS side does not compute a negative/NaN percentage.
     long long total = totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : 0;
+    if (totalBytesWritten > total) {
+        // Encoded responses (gzip): the expected total counts compressed bytes
+        // while written counts decompressed ones, so the percentage would run
+        // past 100%. Treat the total as unknown instead.
+        total = 0;
+    }
     if (total > 0) {
         int percentage = (int)((totalBytesWritten * 100.0 / total) + 0.5);
         if (percentage <= self.lastReportedPercentage) {

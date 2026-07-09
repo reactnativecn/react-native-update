@@ -85,12 +85,15 @@ class DownloadTask implements Runnable {
     }
 
     private void postProgress(final long received, final long total) {
+        // Cross-platform progress contract: unknown length is reported as
+        // total=0, never a raw -1 (OkHttp's contentLength for chunked/gzip).
+        final long normalizedTotal = total > 0 ? total : 0;
         mainHandler.post(new Runnable() {
             @Override
             public void run() {
                 WritableMap progress = Arguments.createMap();
                 progress.putDouble("received", received);
-                progress.putDouble("total", total);
+                progress.putDouble("total", normalizedTotal);
                 progress.putString("hash", hash);
                 UpdateEventEmitter.sendEvent("RCTPushyDownloadProgress", progress);
             }
@@ -136,6 +139,7 @@ class DownloadTask implements Runnable {
                         int percentage = (int) (received * 100.0 / contentLength + 0.5);
                         if (percentage > currentPercentage) {
                             currentPercentage = percentage;
+                            lastPostedBytes = received;
                             postProgress(received, contentLength);
                         }
                     } else if (received - lastPostedBytes >= PROGRESS_BYTES_THRESHOLD) {
@@ -149,7 +153,11 @@ class DownloadTask implements Runnable {
             if (contentLength >= 0 && received != contentLength) {
                 throw new IOException("Unexpected eof while reading downloaded update");
             }
-            postProgress(received, contentLength);
+            // Final progress event, skipped when the loop already posted this
+            // exact value (known length reaching 100% posts it in-loop).
+            if (received != lastPostedBytes) {
+                postProgress(received, contentLength);
+            }
         }
 
     }

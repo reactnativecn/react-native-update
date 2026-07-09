@@ -5,12 +5,6 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-set(PUSHY_MODULE_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../..)
-set(PUSHY_ABI ${CMAKE_OHOS_ARCH_ABI})
-if(NOT PUSHY_ABI)
-    set(PUSHY_ABI ${OHOS_ARCH})
-endif()
-set(PREBUILT_RNUPDATE_PATH ${PUSHY_MODULE_ROOT}/libs/${PUSHY_ABI}/librnupdate.so)
 set(CMAKE_VERBOSE_MAKEFILE on)
 
 set(REPO_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../)
@@ -24,44 +18,42 @@ if(NOT EXISTS ${PATCH_CORE_DIR}/patch_core.cpp)
     set(PATCH_CORE_DIR ${STAGED_NATIVE_DIR}/patch_core)
 endif()
 
-if(EXISTS ${PREBUILT_RNUPDATE_PATH})
-    add_library(rnupdate SHARED IMPORTED GLOBAL)
-    set_target_properties(rnupdate PROPERTIES IMPORTED_LOCATION ${PREBUILT_RNUPDATE_PATH})
-else()
-    # When building the HAR itself, native sources are compiled from the repo checkout.
-    set(HDIFFPATCH_DIR ${ANDROID_JNI_DIR}/HDiffPatch)
-    set(LZMA_DIR ${ANDROID_JNI_DIR}/lzma)
-    set(HDP_SOURCES
-         ${CMAKE_CURRENT_SOURCE_DIR}/pushy.cpp
-         ${PATCH_CORE_DIR}/archive_patch_core.cpp
-         ${PATCH_CORE_DIR}/hbc_transform.cpp
-         ${PATCH_CORE_DIR}/hbc_transform_wire.cpp
-         ${PATCH_CORE_DIR}/patch_core.cpp
-         ${PATCH_CORE_DIR}/state_core.cpp
-         ${ANDROID_JNI_DIR}/hpatch.c
-         ${HDIFFPATCH_DIR}/libHDiffPatch/HPatch/patch.c
-         ${HDIFFPATCH_DIR}/file_for_patch.c
-         ${LZMA_DIR}/C/LzmaDec.c
-         ${LZMA_DIR}/C/Lzma2Dec.c
-    )
+# Always compile from source. A prebuilt-import branch used to live here, but
+# it had no symbol verification: a stale libs/<abi>/librnupdate.so missing a
+# newly added export (e.g. getSupportedDiffVersion) would silently ship and
+# crash getConstants at runtime.
+set(HDIFFPATCH_DIR ${ANDROID_JNI_DIR}/HDiffPatch)
+set(LZMA_DIR ${ANDROID_JNI_DIR}/lzma)
+set(HDP_SOURCES
+     ${CMAKE_CURRENT_SOURCE_DIR}/pushy.cpp
+     ${PATCH_CORE_DIR}/archive_patch_core.cpp
+     ${PATCH_CORE_DIR}/hbc_transform.cpp
+     ${PATCH_CORE_DIR}/hbc_transform_wire.cpp
+     ${PATCH_CORE_DIR}/patch_core.cpp
+     ${PATCH_CORE_DIR}/state_core.cpp
+     ${ANDROID_JNI_DIR}/hpatch.c
+     ${HDIFFPATCH_DIR}/libHDiffPatch/HPatch/patch.c
+     ${HDIFFPATCH_DIR}/file_for_patch.c
+     ${LZMA_DIR}/C/LzmaDec.c
+     ${LZMA_DIR}/C/Lzma2Dec.c
+)
 
-    add_library(rnupdate SHARED
-        ${HDP_SOURCES}
-    )
+add_library(rnupdate SHARED
+    ${HDP_SOURCES}
+)
 
-    target_include_directories(rnupdate PRIVATE
-         ${CMAKE_CURRENT_SOURCE_DIR}
-         ${PATCH_CORE_DIR}
-         ${ANDROID_JNI_DIR}
-         ${HDIFFPATCH_DIR}
-         ${HDIFFPATCH_DIR}/libHDiffPatch/HPatch
-         ${LZMA_DIR}/C
-    )
+target_include_directories(rnupdate PRIVATE
+     ${CMAKE_CURRENT_SOURCE_DIR}
+     ${PATCH_CORE_DIR}
+     ${ANDROID_JNI_DIR}
+     ${HDIFFPATCH_DIR}
+     ${HDIFFPATCH_DIR}/libHDiffPatch/HPatch
+     ${LZMA_DIR}/C
+)
 
-    target_link_libraries(rnupdate PUBLIC
-        libace_napi.z.so
-    )
-endif()
+target_link_libraries(rnupdate PUBLIC
+    libace_napi.z.so
+)
 
 if(TARGET rnoh)
     add_library(rnoh_pushy SHARED
