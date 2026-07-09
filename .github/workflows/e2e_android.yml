@@ -236,11 +236,12 @@ jobs:
           arch: x86_64
           avd-name: api34
           emulator-boot-timeout: 900
+          # 注意:emulator-runner 把 script 的每一行单独用 sh -c 执行,
+          # cd 不会跨行生效,所以每行必须自包含。
           script: |
-            cd Example/e2etest
             for i in $(seq 1 90); do curl -sf http://localhost:8081/status >/dev/null && break; sleep 2; done
-            curl -sf --max-time 420 -o /dev/null "http://localhost:8081/index.bundle?platform=android&dev=true&minify=false" || { echo '::error::Metro dev bundle failed to build'; tail -n 100 .e2e-artifacts/metro.log; exit 1; }
-            bunx detox test --configuration android.emu.debug --config e2e/smoke/jest.config.js --no-start --headless --record-logs all --retries 1
+            curl -sf --max-time 420 -o /dev/null "http://localhost:8081/index.bundle?platform=android&dev=true&minify=false" || { echo '::error::Metro dev bundle failed to build'; tail -n 100 Example/e2etest/.e2e-artifacts/metro.log; exit 1; }
+            cd Example/e2etest && bunx detox test --configuration android.emu.debug --config e2e/smoke/jest.config.js --no-start --headless --record-logs all --retries 1
 
       - name: Upload Detox artifacts
         # cancelled() 覆盖 job 超时被杀的场景,否则超时时拿不到现场
