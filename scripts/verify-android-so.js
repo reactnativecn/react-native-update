@@ -41,6 +41,39 @@ const REQUIRED_SYMBOLS = [
 
 const SHT_DYNSYM = 11;
 const SHN_UNDEF = 0;
+const PT_LOAD = 1;
+
+// Google Play requires 16 KB page-size support for 64-bit ABIs: every ELF
+// LOAD segment must be aligned to at least 16384 bytes. v10.45.0–v10.48.0
+// shipped 4 KB-aligned libraries because the publish CI resolved an old NDK,
+// and nothing caught it — this check makes that failure loud.
+const PAGE_ALIGN_ABIS = { 'arm64-v8a': 16384, x86_64: 16384 };
+
+/** Returns the smallest p_align among the ELF's LOAD segments. */
+function readMinLoadAlignment(buffer) {
+  const is64 = buffer[4] === 2;
+  const phoff = is64
+    ? Number(buffer.readBigUInt64LE(0x20))
+    : buffer.readUInt32LE(0x1c);
+  const phentsize = buffer.readUInt16LE(is64 ? 0x36 : 0x2a);
+  const phnum = buffer.readUInt16LE(is64 ? 0x38 : 0x2c);
+
+  let min = Infinity;
+  for (let i = 0; i < phnum; i++) {
+    const base = phoff + i * phentsize;
+    if (buffer.readUInt32LE(base) !== PT_LOAD) {
+      continue;
+    }
+    const align = is64
+      ? Number(buffer.readBigUInt64LE(base + 0x30))
+      : buffer.readUInt32LE(base + 0x1c);
+    min = Math.min(min, align);
+  }
+  if (min === Infinity) {
+    throw new Error('no LOAD segments');
+  }
+  return min;
+}
 
 /** Returns the set of defined dynamic symbol names exported by an ELF file. */
 function readDynamicSymbols(buffer, expectedMachine) {
@@ -136,13 +169,34 @@ for (const abi of ABIS) {
     continue;
   }
 
+  const buffer = fs.readFileSync(soPath);
   let symbols;
   try {
-    symbols = readDynamicSymbols(fs.readFileSync(soPath), ABI_MACHINE[abi]);
+    symbols = readDynamicSymbols(buffer, ABI_MACHINE[abi]);
   } catch (error) {
     console.error(`error: cannot read symbols from ${soPath}: ${error.message}`);
     failed = true;
     continue;
+  }
+
+  const requiredAlign = PAGE_ALIGN_ABIS[abi];
+  if (requiredAlign) {
+    try {
+      const align = readMinLoadAlignment(buffer);
+      if (align < requiredAlign) {
+        console.error(
+          `error: ${soPath} LOAD segments aligned to ${align} bytes; Google Play ` +
+            `requires ${requiredAlign} (16 KB page size) for ${abi}. Rebuild with ` +
+            `NDK r28+ ('npm run build:so').`,
+        );
+        failed = true;
+      }
+    } catch (error) {
+      console.error(
+        `error: cannot read LOAD alignment from ${soPath}: ${error.message}`,
+      );
+      failed = true;
+    }
   }
 
   const missing = REQUIRED_SYMBOLS.filter(symbol => !symbols.has(symbol));
