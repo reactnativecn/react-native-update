@@ -95,7 +95,11 @@ bool TransformHbcInPlace(
     }
     for (uint32_t f = 0; f < s.deltaFieldCount; ++f) {
       const HbcDeltaField& field = s.deltaFields[f];
-      if (field.bits < 1 || field.bits > 32 || field.bit + field.bits > 32 ||
+      // bit 必须单独设上界:bit=0xFFFFFFFF 时 bit+bits 的 uint32 求和会回绕
+      // 绕过 >32 检查,改写阶段的 << bit 就成了移位量 ≥32 的 UB。
+      // bits≥1 时合法 bit 必 ≤31。
+      if (field.bits < 1 || field.bits > 32 || field.bit > 31 ||
+          field.bit + field.bits > 32 ||
           static_cast<uint64_t>(field.byte) + 4 > s.entrySize) {
         return false;
       }

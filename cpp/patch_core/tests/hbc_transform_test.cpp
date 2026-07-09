@@ -2,8 +2,11 @@
 // 1) 与 JS 参考实现(react-native-update-cli src/utils/hbcTransform.ts)
 //    做 golden 对拍——fixtures/*.t.hbc 由 JS 实现生成;
 // 2) 可逆性 property check;
-// 3) 非法输入/非法描述表拒绝(buffer 必须保持原样)。
+// 3) 非法输入/非法描述表拒绝(buffer 必须保持原样);
+// 4) wire 解析器(ParseHbcTransformMeta/BuildLayout)的正向/负向直测——
+//    它解析的是随 patch 下发的不可信输入,拒绝分支必须逐条有覆盖。
 #include "../hbc_transform.h"
+#include "../hbc_transform_wire.h"
 
 #include <cstdio>
 #include <cstring>
@@ -13,9 +16,12 @@
 
 namespace {
 
+using pushy::hbc::BuildLayout;
 using pushy::hbc::HbcDeltaField;
 using pushy::hbc::HbcLayoutDesc;
 using pushy::hbc::HbcSectionDesc;
+using pushy::hbc::HbcTransformMeta;
+using pushy::hbc::ParseHbcTransformMeta;
 using pushy::hbc::TransformHbcInPlace;
 
 int g_failures = 0;
@@ -193,6 +199,154 @@ void TestRejections(const std::string& dir) {
     const HbcLayoutDesc badLayout = {19, bad, 1};
     CHECK(!TransformHbcInPlace(buf.data(), buf.size(), badLayout, false));
   }
+  // CP2-1 回归:bit=0xFFFFFFFF 时 bit+bits 的 uint32 求和回绕为 0,
+  // 曾绕过 >32 检查进入改写阶段(移位量 ≥32 的 UB)。必须拒绝且不改字节。
+  {
+    std::vector<uint8_t> buf = good;
+    const std::vector<uint8_t> before = buf;
+    const HbcDeltaField badField[] = {{0, 0xffffffffu, 1}};
+    const HbcSectionDesc bad[] = {{5, 4, badField, 1}};
+    const HbcLayoutDesc badLayout = {19, bad, 1};
+    CHECK(!TransformHbcInPlace(buf.data(), buf.size(), badLayout, false));
+    CHECK(buf == before);
+  }
+  // bit=31 本身合法,但 bit+bits=33 不回绕也必须拒绝
+  {
+    std::vector<uint8_t> buf = good;
+    const HbcDeltaField badField[] = {{0, 31, 2}};
+    const HbcSectionDesc bad[] = {{5, 4, badField, 1}};
+    const HbcLayoutDesc badLayout = {19, bad, 1};
+    CHECK(!TransformHbcInPlace(buf.data(), buf.size(), badLayout, false));
+  }
+  // 非法描述表:bits=0
+  {
+    std::vector<uint8_t> buf = good;
+    const HbcDeltaField badField[] = {{0, 0, 0}};
+    const HbcSectionDesc bad[] = {{5, 4, badField, 1}};
+    const HbcLayoutDesc badLayout = {19, bad, 1};
+    CHECK(!TransformHbcInPlace(buf.data(), buf.size(), badLayout, false));
+  }
+}
+
+// ---- wire 解析器直测 ----
+
+std::string ReadTextFileOrDie(const std::string& path) {
+  const std::vector<uint8_t> raw = ReadFileOrDie(path);
+  return std::string(raw.begin(), raw.end());
+}
+
+void TestWireParser(const std::string& dir) {
+  // 正向:真实 fixture 解析 + BuildLayout 后与手写 kLayoutV96 等效
+  // (对 v96.hbc 变换产物与 golden 逐字节一致 = 端到端等效性证明)
+  {
+    HbcTransformMeta meta;
+    CHECK(ParseHbcTransformMeta(ReadTextFileOrDie(dir + "v96.meta.json"), &meta));
+    CHECK(meta.v == 1);
+    CHECK(meta.hbcVersion == 96);
+    CHECK(meta.headerCountFields == 19);
+    CHECK(meta.sections.size() == 15);
+    std::vector<HbcSectionDesc> scratch;
+    const HbcLayoutDesc layout = BuildLayout(meta, &scratch);
+    std::vector<uint8_t> buf = ReadFileOrDie(dir + "v96.hbc");
+    CHECK(TransformHbcInPlace(buf.data(), buf.size(), layout, false));
+    CHECK(buf == ReadFileOrDie(dir + "v96.t.hbc"));
+  }
+
+  const std::string minimalLayout =
+      R"("layout":{"counts":19,"sections":[[5,4,[]]]})";
+  const std::string minimal =
+      R"({"v":1,"hbcVersion":96,)" + minimalLayout + "}";
+
+  // 正向:最小合法输入;未知键(各种值形态)被跳过;边界位域 [0,31,1] 合法
+  {
+    HbcTransformMeta meta;
+    CHECK(ParseHbcTransformMeta(minimal, &meta));
+    CHECK(ParseHbcTransformMeta(
+        R"({"v":1,"hbcVersion":96,"future":{"a":[1,"s\"x",true,null],"b":-1.5e3},)" +
+            minimalLayout + "}",
+        &meta));
+    CHECK(ParseHbcTransformMeta(
+        R"({"v":1,"hbcVersion":96,"layout":{"counts":19,"sections":[[5,4,[[0,31,1]]]]}})",
+        &meta));
+    CHECK(meta.sections[0].deltaFields[0].bit == 31);
+  }
+
+  // 负向:每条拒绝分支单测,解析必须返回 false
+  const char* rejects[] = {
+      // 非 JSON / 结构破损
+      "not json",
+      "",
+      "{",
+      R"({"v":1,"hbcVersion":96})", // 缺 layout
+      R"({"v":1,"layout":{"counts":19,"sections":[[5,4,[]]]}})", // 缺 hbcVersion
+      R"({"hbcVersion":96,"layout":{"counts":19,"sections":[[5,4,[]]]}})", // 缺 v
+      R"({"v":1,"hbcVersion":96,"layout":{"counts":19}})", // 缺 sections
+      R"({"v":1,"hbcVersion":96,"layout":{"sections":[[5,4,[]]]}})", // 缺 counts
+      R"({"v":1,"hbcVersion":96,"layout":{"counts":19,"sections":[]}})", // 空 sections
+      R"({"v":1,"hbcVersion":96,"layout":{"counts":0,"sections":[[5,4,[]]]}})", // counts=0
+      R"({"v":1,"hbcVersion":96,"layout":[1,2]})", // layout 非对象
+      // 尾部多余内容
+      R"({"v":1,"hbcVersion":96,"layout":{"counts":19,"sections":[[5,4,[]]]}} x)",
+      // 键含转义(本格式的键不允许反斜杠;raw string 里 \x 就是两个字符)
+      R"({"v\x":1,"v":1,"hbcVersion":96,"layout":{"counts":19,"sections":[[5,4,[]]]}})",
+      // ParseUInt 溢出(>0xffffffff)与负数
+      R"({"v":4294967296,"hbcVersion":96,"layout":{"counts":19,"sections":[[5,4,[]]]}})",
+      R"({"v":-1,"hbcVersion":96,"layout":{"counts":19,"sections":[[5,4,[]]]}})",
+      // 位域语义:CP2-1 的 bit 溢出、bit+bits>32、bits=0、bits=33
+      R"({"v":1,"hbcVersion":96,"layout":{"counts":19,"sections":[[5,4,[[0,4294967295,1]]]]}})",
+      R"({"v":1,"hbcVersion":96,"layout":{"counts":19,"sections":[[5,4,[[0,31,2]]]]}})",
+      R"({"v":1,"hbcVersion":96,"layout":{"counts":19,"sections":[[5,4,[[0,0,0]]]]}})",
+      R"({"v":1,"hbcVersion":96,"layout":{"counts":19,"sections":[[5,4,[[0,0,33]]]]}})",
+      // delta field 元组长度不对
+      R"({"v":1,"hbcVersion":96,"layout":{"counts":19,"sections":[[5,4,[[0,0]]]]}})",
+  };
+  for (const char* json : rejects) {
+    HbcTransformMeta meta;
+    if (ParseHbcTransformMeta(json, &meta)) {
+      std::fprintf(stderr, "FAIL: wire parser accepted: %s\n", json);
+      ++g_failures;
+    }
+  }
+
+  // 负向:输入尺寸上限(64KB)
+  {
+    std::string huge = minimal;
+    huge.insert(1, std::string(65 * 1024, ' '));
+    HbcTransformMeta meta;
+    CHECK(!ParseHbcTransformMeta(huge, &meta));
+  }
+  // 负向:未知键的值嵌套深度超限(kMaxDepth=8)
+  {
+    std::string deep = R"({"v":1,"hbcVersion":96,"x":)";
+    for (int i = 0; i < 12; ++i) deep += '[';
+    deep += '1';
+    for (int i = 0; i < 12; ++i) deep += ']';
+    deep += ',' + minimalLayout + "}";
+    HbcTransformMeta meta;
+    CHECK(!ParseHbcTransformMeta(deep, &meta));
+  }
+  // 负向:sections 超过 64 个
+  {
+    std::string many = R"({"v":1,"hbcVersion":96,"layout":{"counts":19,"sections":[)";
+    for (int i = 0; i < 65; ++i) {
+      if (i) many += ',';
+      many += "[5,4,[]]";
+    }
+    many += "]}}";
+    HbcTransformMeta meta;
+    CHECK(!ParseHbcTransformMeta(many, &meta));
+  }
+  // 负向:单段 deltaFields 超过 8 个
+  {
+    std::string many = R"({"v":1,"hbcVersion":96,"layout":{"counts":19,"sections":[[5,64,[)";
+    for (int i = 0; i < 9; ++i) {
+      if (i) many += ',';
+      many += "[0,0,8]";
+    }
+    many += "]]]}}";
+    HbcTransformMeta meta;
+    CHECK(!ParseHbcTransformMeta(many, &meta));
+  }
 }
 
 } // namespace
@@ -210,6 +364,7 @@ int main(int argc, char** argv) {
   TestGoldenPair(fixturesDir, "v98.hbc", "v98.t.hbc", kLayoutV98);
   TestGoldenPair(fixturesDir, "v98b.hbc", "v98b.t.hbc", kLayoutV98Late);
   TestRejections(fixturesDir);
+  TestWireParser(fixturesDir);
 
   // 变体互斥:19 槽布局作用于 20 槽文件(或反之)必须被结构校验拒绝
   {

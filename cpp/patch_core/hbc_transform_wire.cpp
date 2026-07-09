@@ -151,6 +151,12 @@ bool ParseDeltaField(Cursor* c, HbcDeltaField* out) {
       !ParseUInt(c, &out->bits)) {
     return false;
   }
+  // 语义范围在解析层就拒绝(与 TransformHbcInPlace 的校验双保险):
+  // 位域必须落在一个 32 位字内,bit>31 的值没有任何合法用途。
+  if (out->bits < 1 || out->bits > 32 || out->bit > 31 ||
+      out->bit + out->bits > 32) {
+    return false;
+  }
   return Consume(c, ']');
 }
 
