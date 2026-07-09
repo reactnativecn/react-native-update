@@ -45,9 +45,12 @@ completionHandler:(void (^)(NSString *path, NSError *error))completionHandler
 
     NSURLSessionConfiguration *sessionConfig = [NSURLSessionConfiguration defaultSessionConfiguration];
     // Avoid hanging forever on a stalled connection (default resource timeout
-    // is 7 days). These are generous enough for large bundles on slow networks.
+    // is 7 days). The 30s idle timeout matches Android's readTimeout and is
+    // what actually catches a stalled transfer; the total-duration cap matches
+    // Android's 10min callTimeout — 300s made a 30MB full package on a slow
+    // (<100KB/s) network fail on iOS while succeeding on Android.
     sessionConfig.timeoutIntervalForRequest = 30;
-    sessionConfig.timeoutIntervalForResource = 300;
+    sessionConfig.timeoutIntervalForResource = 600;
     self.session = [NSURLSession sessionWithConfiguration:sessionConfig
                                                  delegate:self
                                             delegateQueue:nil];

@@ -395,8 +395,15 @@ export class DownloadTask {
             resolve();
           })
           .catch(async error => {
-            await closeWriter();
+            // reject 必须先于 closeWriter：此时 watchdog 已清除，若 close
+            // 也失败（同一磁盘故障的常见连锁）而 reject 未执行，下载 Promise
+            // 将永久挂起——正是 HM-2 要消灭的症状。
             reject(error);
+            try {
+              await closeWriter();
+            } catch (closeErr: any) {
+              console.error('closeWriter failed after write error:', closeErr);
+            }
           });
       });
     });
