@@ -11,6 +11,7 @@ export interface Spec extends TurboModule {
     uuid: string;
     isUsingBundleUrl: boolean;
     currentVersionInfo: string;
+    supportedDiffVersion: number;
   };
   setLocalHashInfo(hash: string, info: string): Promise<void>;
   getLocalHashInfo(hash: string): Promise<string>;
