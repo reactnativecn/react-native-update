@@ -14,13 +14,21 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-
 import { PushyModule } from 'react-native-update/src/core';
-import {
-  LOCAL_UPDATE_FILES,
-  LOCAL_UPDATE_HASHES,
-  LOCAL_UPDATE_PORT,
-} from '../e2e/localUpdateConfig';
+
+const LOCAL_UPDATE_PORT = 65535;
+const LOCAL_UPDATE_HASHES = {
+  base: '00000000000000000000000000000000',
+  full: '11111111111111111111111111111111',
+  ppkDiff: '22222222222222222222222222222222',
+  packageDiff: '33333333333333333333333333333333',
+};
+const LOCAL_UPDATE_FILES = {
+  full: 'v1.ppk',
+  ppkDiff: 'v1_v2.patch',
+  packageDiff: 'v1_v3.apk.patch',
+  apk: 'v3.apk',
+};
 
 const UUID = '00000000-0000-0000-0000-000000000000';
 
