@@ -26,7 +26,6 @@ import { Pushy, UpdateProvider, useUpdate } from 'react-native-update';
 import _updateConfig from '../update.json';
 import TestConsole from './TestConsole';
 
-const { LOCAL_UPDATE_LABELS } = require('../e2e/localUpdateConfig');
 const nativePlatform = Platform.OS === 'ios' ? 'ios' : 'android';
 const { appKey } = _updateConfig[nativePlatform];
 
@@ -78,7 +77,7 @@ function App() {
   const lastParsedCode = useRef('');
   const bundleLabel =
     (globalThis as unknown as Record<string, string>).__RNU_E2E_BUNDLE_LABEL ||
-    LOCAL_UPDATE_LABELS.base;
+    'base';
 
   return (
     <View style={styles.container}>
