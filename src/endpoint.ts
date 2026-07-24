@@ -28,7 +28,7 @@ const normalizeError = (error: unknown) => {
 };
 
 export const dedupeEndpoints = (
-  endpoints: Array<string | null | undefined>,
+  endpoints: Array<string | null | undefined>
 ): string[] => {
   const result: string[] = [];
   const visited = new Set<string>();
@@ -46,7 +46,7 @@ export const dedupeEndpoints = (
 
 export const pickRandomEndpoint = (
   endpoints: string[],
-  random: () => number = Math.random,
+  random: () => number = Math.random
 ) => {
   if (!endpoints.length) {
     throw new UpdateError('No endpoints configured', 'NO_ENDPOINTS');
@@ -57,13 +57,13 @@ export const pickRandomEndpoint = (
 export async function selectFastestSuccessfulEndpoint<T>(
   endpoints: string[],
   tryEndpoint: (endpoint: string) => Promise<T>,
-  now: () => number = Date.now,
+  now: () => number = Date.now
 ): Promise<{
   successes: EndpointAttemptSuccess<T>[];
   failures: EndpointAttemptFailure[];
 }> {
   const attempts = await Promise.all(
-    endpoints.map(async endpoint => {
+    endpoints.map(async (endpoint) => {
       const start = now();
       try {
         const value = await tryEndpoint(endpoint);
@@ -80,7 +80,7 @@ export async function selectFastestSuccessfulEndpoint<T>(
           error: normalizeError(error),
         };
       }
-    }),
+    })
   );
 
   const successes: EndpointAttemptSuccess<T>[] = [];
@@ -147,7 +147,7 @@ export async function executeEndpointFallback<T>({
         ? await getRemoteEndpoints().catch(() => [])
         : [];
       candidates = dedupeEndpoints([...candidates, ...remoteEndpoints]).filter(
-        endpoint => !excludedEndpoints.has(endpoint),
+        (endpoint) => !excludedEndpoints.has(endpoint)
       );
 
       if (!candidates.length) {
@@ -157,7 +157,7 @@ export async function executeEndpointFallback<T>({
       const { successes, failures } = await selectFastestSuccessfulEndpoint(
         candidates,
         tryEndpoint,
-        now,
+        now
       );
 
       if (successes.length) {

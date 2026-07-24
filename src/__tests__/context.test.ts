@@ -1,4 +1,4 @@
-import { describe, expect, test, afterAll } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
 import React from 'react';
 import TestRenderer from 'react-test-renderer';
 
@@ -9,7 +9,7 @@ const _origDEV = (globalThis as any).__DEV__;
 const { useUpdate, UpdateContext } = await import('../context');
 const { default: i18n } = await import('../i18n');
 
-const renderHook = <T,>(hook: () => T) => {
+const renderHook = <T>(hook: () => T) => {
   const result: { current?: T } = {};
   const Probe = () => {
     result.current = hook();
@@ -28,7 +28,7 @@ describe('context', () => {
 
   test('useUpdate throws error when used outside UpdateProvider in __DEV__', () => {
     expect(() => renderHook(() => useUpdate())).toThrow(
-      i18n.t('error_use_update_outside_provider'),
+      i18n.t('error_use_update_outside_provider')
     );
   });
 
@@ -44,8 +44,8 @@ describe('context', () => {
         React.createElement(
           UpdateContext.Provider,
           { value: { client } as any },
-          React.createElement(Probe),
-        ),
+          React.createElement(Probe)
+        )
       );
     });
     expect(probed.current?.client).toBe(client);

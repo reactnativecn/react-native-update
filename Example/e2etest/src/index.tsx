@@ -1,10 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
-import { UpdateProvider, Pushy, useUpdate } from 'react-native-update';
+import { Pushy, UpdateProvider, useUpdate } from 'react-native-update';
 import {
+  getLocalUpdateEndpoint,
   LOCAL_UPDATE_APP_KEYS,
   LOCAL_UPDATE_LABELS,
-  getLocalUpdateEndpoint,
 } from '../e2e/localUpdateConfig.ts';
 
 let eventListener:
@@ -52,7 +52,7 @@ function App() {
       const message = JSON.stringify(data ?? {});
       setLastEventData(message || '(empty)');
       setLastEventVersion(
-        typeof data?.newVersion === 'string' ? data.newVersion : '(none)',
+        typeof data?.newVersion === 'string' ? data.newVersion : '(none)'
       );
     };
     const checkListener = (state: {
@@ -62,7 +62,7 @@ function App() {
     }) => {
       setLastCheckStatus(state.status);
       setLastCheckResult(
-        state.hash ? `${state.resultKind}:${state.hash}` : state.resultKind,
+        state.hash ? `${state.resultKind}:${state.hash}` : state.resultKind
       );
     };
     eventListener = listener;
@@ -212,24 +212,24 @@ const updateClient = new Pushy({
   updateStrategy: 'silentAndNow',
   checkStrategy: null,
   autoMarkSuccess: true,
-  afterCheckUpdate: state => {
+  afterCheckUpdate: (state: any) => {
     const result = state.result;
     const resultKind = result?.update
       ? 'update'
       : result?.upToDate
-      ? 'upToDate'
-      : result?.expired
-      ? 'expired'
-      : result?.paused
-      ? `paused:${result.paused}`
-      : '(none)';
+        ? 'upToDate'
+        : result?.expired
+          ? 'expired'
+          : result?.paused
+            ? `paused:${result.paused}`
+            : '(none)';
     checkStateListener?.({
       status: state.status,
       resultKind,
       hash: result?.hash,
     });
   },
-  logger: ({ type, data }) => {
+  logger: ({ type, data }: { type: string; data: any }) => {
     eventListener?.(type, data);
   },
 });

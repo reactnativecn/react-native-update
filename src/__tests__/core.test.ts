@@ -1,4 +1,4 @@
-import { describe, expect, test, mock, spyOn } from 'bun:test';
+import { describe, expect, mock, spyOn, test } from 'bun:test';
 
 // In Bun, top-level imports are cached.
 // We can use mock.module to change the implementation of a module,
@@ -75,7 +75,10 @@ describe('core info parsing', () => {
       },
       NativeModules: {
         Pushy: {
-          currentVersionInfo: JSON.stringify({ name: 'v1', debugChannel: true }),
+          currentVersionInfo: JSON.stringify({
+            name: 'v1',
+            debugChannel: true,
+          }),
           downloadRootDir: '/tmp',
           packageVersion: '1.0.0',
           currentVersion: 'hash1',

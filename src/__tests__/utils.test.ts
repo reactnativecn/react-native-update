@@ -1,4 +1,4 @@
-import { describe, expect, test, mock, afterEach } from 'bun:test';
+import { afterEach, describe, expect, mock, test } from 'bun:test';
 
 mock.module('react-native', () => {
   return {
@@ -17,10 +17,10 @@ mock.module('../i18n', () => {
 });
 
 import {
-  joinUrls,
   computeProgress,
-  fetchWithTimeout,
   enhancedFetch,
+  fetchWithTimeout,
+  joinUrls,
   promiseAny,
 } from '../utils';
 
@@ -49,9 +49,12 @@ describe('joinUrls', () => {
   test('preserves absolute urls and trims trailing slashes', () => {
     expect(
       joinUrls(
-        ['http://127.0.0.1:31337/artifacts/ios/', 'https://cdn.example.com/base'],
-        'file.txt',
-      ),
+        [
+          'http://127.0.0.1:31337/artifacts/ios/',
+          'https://cdn.example.com/base',
+        ],
+        'file.txt'
+      )
     ).toEqual([
       'http://127.0.0.1:31337/artifacts/ios/file.txt',
       'https://cdn.example.com/base/file.txt',
@@ -63,21 +66,21 @@ describe('joinUrls', () => {
   });
 
   test('trims multiple trailing slashes', () => {
-    expect(joinUrls(['example.com///', 'http://example.com///'], 'file.txt')).toEqual([
-      'https://example.com/file.txt',
-      'http://example.com/file.txt',
-    ]);
+    expect(
+      joinUrls(['example.com///', 'http://example.com///'], 'file.txt')
+    ).toEqual(['https://example.com/file.txt', 'http://example.com/file.txt']);
   });
 
   test('preserves custom protocols', () => {
-    expect(joinUrls(['ftp://example.com', 'myapp://some/path'], 'file.txt')).toEqual([
-      'ftp://example.com/file.txt',
-      'myapp://some/path/file.txt',
-    ]);
+    expect(
+      joinUrls(['ftp://example.com', 'myapp://some/path'], 'file.txt')
+    ).toEqual(['ftp://example.com/file.txt', 'myapp://some/path/file.txt']);
   });
 
   test('prepends https:// to IP addresses with ports', () => {
-    expect(joinUrls(['192.168.1.1:8080', '10.0.0.1:3000/api'], 'file.txt')).toEqual([
+    expect(
+      joinUrls(['192.168.1.1:8080', '10.0.0.1:3000/api'], 'file.txt')
+    ).toEqual([
       'https://192.168.1.1:8080/file.txt',
       'https://10.0.0.1:3000/api/file.txt',
     ]);
@@ -127,13 +130,13 @@ describe('fetchWithTimeout', () => {
       // Never settles on its own; only the abort signal can end it.
       return new Promise((_, reject) => {
         params?.signal?.addEventListener('abort', () =>
-          reject(new Error('Aborted')),
+          reject(new Error('Aborted'))
         );
       });
     });
 
     await expect(
-      fetchWithTimeout('https://example.com/slow', {}, 20),
+      fetchWithTimeout('https://example.com/slow', {}, 20)
     ).rejects.toThrow('error_ping_timeout');
     expect(capturedSignal?.aborted).toBe(true);
   });
@@ -143,7 +146,7 @@ describe('fetchWithTimeout', () => {
     (globalThis as any).fetch = mock(async () => response);
 
     expect(await fetchWithTimeout('https://example.com/fast', {}, 1000)).toBe(
-      response,
+      response
     );
   });
 
@@ -155,7 +158,7 @@ describe('fetchWithTimeout', () => {
 
     try {
       await expect(
-        fetchWithTimeout('https://example.com/slow', {}, 20),
+        fetchWithTimeout('https://example.com/slow', {}, 20)
       ).rejects.toThrow('error_ping_timeout');
       // Legacy path must not pass a signal the runtime does not understand.
       expect((fetchMock.mock.calls[0] as any[])[1]?.signal).toBeUndefined();
@@ -171,9 +174,9 @@ describe('fetchWithTimeout', () => {
     (globalThis as any).fetch = mock(async () => response);
 
     try {
-      expect(
-        await fetchWithTimeout('https://example.com/fast', {}, 1000),
-      ).toBe(response);
+      expect(await fetchWithTimeout('https://example.com/fast', {}, 1000)).toBe(
+        response
+      );
     } finally {
       (globalThis as any).AbortController = originalAbortController;
     }
@@ -195,7 +198,7 @@ describe('enhancedFetch http fallback', () => {
     // Path contains the substring "https" on purpose: a non-anchored replace
     // would corrupt the path instead of the scheme.
     expect(
-      await enhancedFetch('https://example.com/dl/https-bundle.ppk', {}),
+      await enhancedFetch('https://example.com/dl/https-bundle.ppk', {})
     ).toBe(response);
     expect(calls).toEqual([
       'https://example.com/dl/https-bundle.ppk',
@@ -210,7 +213,7 @@ describe('enhancedFetch http fallback', () => {
     (globalThis as any).fetch = fetchMock;
 
     await expect(
-      enhancedFetch('https://example.com/api', { method: 'POST', body: '{}' }),
+      enhancedFetch('https://example.com/api', { method: 'POST', body: '{}' })
     ).rejects.toThrow('tls blocked');
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
@@ -222,7 +225,7 @@ describe('enhancedFetch http fallback', () => {
     (globalThis as any).fetch = fetchMock;
 
     await expect(enhancedFetch('http://example.com/api', {})).rejects.toThrow(
-      'offline',
+      'offline'
     );
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
@@ -238,7 +241,7 @@ describe('promiseAny', () => {
       await promiseAny([
         Promise.reject(new Error('a')),
         Promise.resolve('winner'),
-      ]),
+      ])
     ).toBe('winner');
   });
 });

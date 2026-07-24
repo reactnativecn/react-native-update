@@ -1,8 +1,12 @@
 {
   "extends": "@react-native/typescript-config",
   "compilerOptions": {
-    "types": ["jest", "node"]
+    "moduleResolution": "bundler",
+    "types": ["jest", "node"],
+    "paths": {
+      "react-native-update": ["../../src/index.ts"]
+    }
   },
   "include": ["**/*.ts", "**/*.tsx"],
-  "exclude": ["**/node_modules", "**/Pods"]
+  "exclude": ["**/node_modules", "**/Pods", "**/.e2e-artifacts", "**/artifacts"]
 }

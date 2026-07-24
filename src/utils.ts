@@ -28,7 +28,7 @@ export function promiseAny<T>(promises: Promise<T>[]) {
     }
     let count = 0;
 
-    promises.forEach(promise => {
+    promises.forEach((promise) => {
       Promise.resolve(promise)
         .then(resolve)
         .catch(() => {
@@ -44,25 +44,26 @@ export function promiseAny<T>(promises: Promise<T>[]) {
 export const emptyObj = {};
 export const noop = () => {};
 const emptyModuleTarget: Record<string, typeof noop> = {};
-export const emptyModule = new Proxy(
-  emptyModuleTarget,
-  {
-    get(_target, _prop) {
-      return noop;
-    },
+export const emptyModule = new Proxy(emptyModuleTarget, {
+  get(_target, _prop) {
+    return noop;
   },
-);
+});
 
 const ping = isWeb
   ? Promise.resolve
   : async (url: string) => {
       try {
-        const { status, statusText, url: finalUrl } = await fetchWithTimeout(
+        const {
+          status,
+          statusText,
+          url: finalUrl,
+        } = await fetchWithTimeout(
           url,
           {
             method: 'HEAD',
           },
-          DEFAULT_FETCH_TIMEOUT_MS,
+          DEFAULT_FETCH_TIMEOUT_MS
         );
         if (status === 200) {
           return finalUrl;
@@ -77,7 +78,7 @@ const ping = isWeb
 
 export function joinUrls(paths: string[], fileName?: string) {
   if (fileName) {
-    return paths.map(path => {
+    return paths.map((path) => {
       const normalizedPath = path.replace(/\/+$/, '');
       // Keep explicit http(s) URLs for local/self-hosted update sources.
       const baseUrl = /^[a-z][a-z0-9+.-]*:\/\//i.test(normalizedPath)
@@ -120,7 +121,7 @@ export const computeProgress = (received: number, total: number): number =>
 export const fetchWithTimeout = (
   url: string,
   params: Parameters<typeof fetch>[1],
-  timeoutMs = DEFAULT_FETCH_TIMEOUT_MS,
+  timeoutMs = DEFAULT_FETCH_TIMEOUT_MS
 ): Promise<Response> => {
   // AbortController landed in the RN fetch polyfill around 0.60; we support
   // older peers, so fall back to a plain timer race when it is unavailable
@@ -151,7 +152,7 @@ export const fetchWithTimeout = (
     controller.abort();
   }, timeoutMs);
 
-  return enhancedFetch(url, { ...params, signal: controller.signal })
+  return enhancedFetch(url, { ...params, signal: controller.signal as any })
     .catch((e: any) => {
       if (controller.signal.aborted) {
         throw Error(i18n.t('error_ping_timeout'));
@@ -171,22 +172,21 @@ const isIdempotentRequest = (params: Parameters<typeof fetch>[1]) => {
 export const enhancedFetch = async (
   url: string,
   params: Parameters<typeof fetch>[1],
-  isRetry = false,
+  isRetry = false
 ): Promise<Response> => {
-  return fetch(url, params)
-    .catch(e => {
-      log('fetch error', url, e);
-      if (
-        isRetry ||
-        (params as any)?.signal?.aborted ||
-        !url.startsWith('https:') ||
-        // Never replay non-idempotent requests (e.g. the checkUpdate POST)
-        // over plaintext http: the server may have processed the original.
-        !isIdempotentRequest(params)
-      ) {
-        throw e;
-      }
-      log('trying fallback to http');
-      return enhancedFetch(url.replace(/^https:/, 'http:'), params, true);
-    });
+  return fetch(url, params).catch((e) => {
+    log('fetch error', url, e);
+    if (
+      isRetry ||
+      (params as any)?.signal?.aborted ||
+      !url.startsWith('https:') ||
+      // Never replay non-idempotent requests (e.g. the checkUpdate POST)
+      // over plaintext http: the server may have processed the original.
+      !isIdempotentRequest(params)
+    ) {
+      throw e;
+    }
+    log('trying fallback to http');
+    return enhancedFetch(url.replace(/^https:/, 'http:'), params, true);
+  });
 };

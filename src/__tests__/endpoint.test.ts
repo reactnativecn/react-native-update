@@ -1,14 +1,16 @@
 import { describe, expect, mock, test } from 'bun:test';
-import { executeEndpointFallback, dedupeEndpoints } from '../endpoint';
+import { dedupeEndpoints, executeEndpointFallback } from '../endpoint';
 
 const delay = (ms: number) =>
-  new Promise<void>(resolve => {
+  new Promise<void>((resolve) => {
     setTimeout(resolve, ms);
   });
 
 describe('executeEndpointFallback', () => {
   test('uses a random configured endpoint first and stops after success', async () => {
-    const tryEndpoint = mock(async (endpoint: string) => endpoint.toUpperCase());
+    const tryEndpoint = mock(async (endpoint: string) =>
+      endpoint.toUpperCase()
+    );
     const getRemoteEndpoints = mock(async () => ['remote']);
 
     const result = await executeEndpointFallback({
@@ -52,7 +54,7 @@ describe('executeEndpointFallback', () => {
     expect(result.endpoint).toBe('c');
     expect(result.value).toBe('c-ok');
     expect(getRemoteEndpoints).toHaveBeenCalledTimes(1);
-    expect(tryEndpoint.mock.calls.map(call => call[0])).toEqual([
+    expect(tryEndpoint.mock.calls.map((call) => call[0])).toEqual([
       'a',
       'b',
       'c',
@@ -87,7 +89,11 @@ describe('executeEndpointFallback', () => {
     expect(result.endpoint).toBe('c');
     expect(result.value).toBe('c-ok');
     expect(getRemoteEndpoints).toHaveBeenCalledTimes(2);
-    expect(tryEndpoint.mock.calls.map(call => call[0])).toEqual(['a', 'b', 'c']);
+    expect(tryEndpoint.mock.calls.map((call) => call[0])).toEqual([
+      'a',
+      'b',
+      'c',
+    ]);
   });
 });
 

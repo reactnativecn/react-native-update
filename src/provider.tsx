@@ -1,5 +1,6 @@
+// biome-ignore lint/correctness/noUnusedImports: preserve React import for compatibility with older React versions
 import React, {
-  ReactNode,
+  type ReactNode,
   useCallback,
   useEffect,
   useMemo,
@@ -8,26 +9,22 @@ import React, {
 } from 'react';
 import {
   Alert,
-  NativeEventSubscription,
   AppState,
-  Platform,
   Linking,
+  type NativeEventSubscription,
+  Platform,
 } from 'react-native';
-import { Pushy, Cresc, sharedState } from './client';
+import { URL } from 'react-native-url-polyfill';
+import { type Cresc, type Pushy, sharedState } from './client';
+import { ProgressContext, UpdateContext } from './context';
 import {
   currentVersion,
-  packageVersion,
-  getCurrentVersionInfo,
   currentVersionInfo,
+  getCurrentVersionInfo,
+  packageVersion,
 } from './core';
-import {
-  CheckResult,
-  ProgressData,
-  UpdateTestPayload,
-} from './type';
-import { ProgressContext, UpdateContext } from './context';
-import { URL } from 'react-native-url-polyfill';
 import { resolveCheckResult } from './resolveCheckResult';
+import type { CheckResult, ProgressData, UpdateTestPayload } from './type';
 import { assertWeb, log, noop } from './utils';
 
 export const UpdateProvider = ({
@@ -59,7 +56,7 @@ export const UpdateProvider = ({
         Alert.alert(...args);
       }
     },
-    [options.updateStrategy],
+    [options.updateStrategy]
   );
 
   const alertError = useCallback(
@@ -68,7 +65,7 @@ export const UpdateProvider = ({
         Alert.alert(...args);
       }
     },
-    [options.updateStrategy],
+    [options.updateStrategy]
   );
 
   // All client errors flow through this single subscription (regardless of
@@ -82,35 +79,35 @@ export const UpdateProvider = ({
           client.t(
             eventType === 'errorChecking'
               ? 'error_update_check_failed'
-              : 'update_failed',
+              : 'update_failed'
           ),
-          e.message,
+          e.message
         );
       }),
-    [client, alertError],
+    [client, alertError]
   );
 
   const switchVersion = useCallback(
     async (info: CheckResult | undefined = updateInfoRef.current) => {
-      if (info && info.hash) {
+      if (info?.hash) {
         return client.switchVersion(info.hash);
       }
     },
-    [client],
+    [client]
   );
 
   const switchVersionLater = useCallback(
     async (info: CheckResult | undefined = updateInfoRef.current) => {
-      if (info && info.hash) {
+      if (info?.hash) {
         return client.switchVersionLater(info.hash);
       }
     },
-    [client],
+    [client]
   );
 
   const downloadUpdate = useCallback(
     async (info: CheckResult | undefined = updateInfoRef.current) => {
-      if (!info || !info.update) {
+      if (!info?.update) {
         return false;
       }
       try {
@@ -167,7 +164,7 @@ export const UpdateProvider = ({
         return false;
       }
     },
-    [client, options, alertUpdate, alertError],
+    [client, options, alertUpdate, alertError]
   );
 
   const downloadAndInstallApk = useCallback(
@@ -176,7 +173,7 @@ export const UpdateProvider = ({
         await client.downloadAndInstallApk(downloadUrl, setProgress);
       }
     },
-    [client],
+    [client]
   );
 
   const checkUpdate = useCallback(
@@ -229,25 +226,18 @@ export const UpdateProvider = ({
             }
             return info;
           }
-          alertUpdate(
-            client.t('alert_title'),
-            client.t('alert_app_updated'),
-            [
-              {
-                text: client.t('alert_update_button'),
-                onPress: () => {
-                  if (
-                    Platform.OS === 'android' &&
-                    downloadUrl.endsWith('.apk')
-                  ) {
-                    downloadAndInstallApk(downloadUrl).catch(noop);
-                  } else {
-                    Linking.openURL(downloadUrl);
-                  }
-                },
+          alertUpdate(client.t('alert_title'), client.t('alert_app_updated'), [
+            {
+              text: client.t('alert_update_button'),
+              onPress: () => {
+                if (Platform.OS === 'android' && downloadUrl.endsWith('.apk')) {
+                  downloadAndInstallApk(downloadUrl).catch(noop);
+                } else {
+                  Linking.openURL(downloadUrl);
+                }
               },
-            ],
-          );
+            },
+          ]);
         }
       } else if (info.update) {
         if (
@@ -272,7 +262,7 @@ export const UpdateProvider = ({
                 downloadUpdate().catch(noop);
               },
             },
-          ],
+          ]
         );
       }
       return info;
@@ -284,7 +274,7 @@ export const UpdateProvider = ({
       alertError,
       downloadAndInstallApk,
       downloadUpdate,
-    ],
+    ]
   );
 
   const markSuccess = client.markSuccess;
@@ -307,11 +297,11 @@ export const UpdateProvider = ({
     if (checkStrategy === 'both' || checkStrategy === 'onAppResume') {
       stateListener.current = AppState.addEventListener(
         'change',
-        nextAppState => {
+        (nextAppState) => {
           if (nextAppState === 'active') {
             checkUpdate().catch(noop);
           }
-        },
+        }
       );
     }
     if (checkStrategy === 'both' || checkStrategy === 'onAppStart') {
@@ -321,9 +311,9 @@ export const UpdateProvider = ({
       if (markSuccessTimer) {
         clearTimeout(markSuccessTimer);
       }
-      stateListener.current && stateListener.current.remove();
+      stateListener.current?.remove();
     };
-  }, [checkUpdate, options, dismissError, markSuccess, client]);
+  }, [checkUpdate, options, markSuccess, client]);
 
   useEffect(() => {
     const { dismissErrorAfter } = options;
@@ -343,7 +333,7 @@ export const UpdateProvider = ({
 
   const parseTestPayload = useCallback(
     (payload: UpdateTestPayload) => {
-      if (payload && payload.type && payload.type.startsWith('__rnPushy')) {
+      if (payload?.type?.startsWith('__rnPushy')) {
         const logger = options.logger || (() => {});
         options.logger = ({ type, data }) => {
           logger({ type, data });
@@ -354,10 +344,10 @@ export const UpdateProvider = ({
           sharedState.toHash = toHash;
           checkUpdate({ extra: { toHash } })
             .then(() => {
-              if (updateInfoRef.current && updateInfoRef.current.upToDate) {
+              if (updateInfoRef.current?.upToDate) {
                 Alert.alert(
                   client.t('alert_info'),
-                  client.t('alert_no_update_wait'),
+                  client.t('alert_no_update_wait')
                 );
               }
             })
@@ -370,7 +360,7 @@ export const UpdateProvider = ({
       }
       return false;
     },
-    [checkUpdate, options, client],
+    [checkUpdate, options, client]
   );
 
   const parseTestQrCode = useCallback(
@@ -383,7 +373,7 @@ export const UpdateProvider = ({
         return false;
       }
     },
-    [parseTestPayload],
+    [parseTestPayload]
   );
 
   const restartApp = useCallback(async () => {
@@ -394,7 +384,7 @@ export const UpdateProvider = ({
     async (resetOptions?: { restart?: boolean }) => {
       return client.resetToPackagedBundle(resetOptions);
     },
-    [client],
+    [client]
   );
 
   useEffect(() => {
@@ -469,7 +459,7 @@ export const UpdateProvider = ({
       parseTestQrCode,
       restartApp,
       resetToPackagedBundle,
-    ],
+    ]
   );
 
   return (

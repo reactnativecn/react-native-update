@@ -3,7 +3,6 @@
  */
 
 import 'react-native';
-import React from 'react';
 import renderer, { act } from 'react-test-renderer';
 import App from '../src';
 
@@ -18,11 +17,11 @@ jest.mock('react-native-svg/css', () => ({
 jest.mock('../src/TestConsole', () => 'TestConsole');
 
 jest.mock('react-native-paper', () => {
-  const React = require('react');
+  const _React = require('react');
   const { Text, TouchableOpacity, View } = require('react-native');
 
   return {
-    Icon: props => <View {...props} />,
+    Icon: (props) => <View {...props} />,
     PaperProvider: ({ children }) => <>{children}</>,
     Snackbar: ({ children }) => <View>{children}</View>,
     Banner: ({ children }) => <View>{children}</View>,
@@ -31,13 +30,14 @@ jest.mock('react-native-paper', () => {
         <Text>{children ?? title}</Text>
       </TouchableOpacity>
     ),
-    Modal: ({ children, visible }) => (visible ? <View>{children}</View> : null),
+    Modal: ({ children, visible }) =>
+      visible ? <View>{children}</View> : null,
     Portal: ({ children }) => <>{children}</>,
   };
 });
 
 jest.mock('react-native-update', () => {
-  const React = require('react');
+  const _React = require('react');
 
   return {
     Pushy: function Pushy() {

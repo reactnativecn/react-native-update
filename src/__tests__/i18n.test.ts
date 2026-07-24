@@ -38,12 +38,12 @@ describe('I18n', () => {
 
     // Fallback logic
     // Add translation only to 'zh', check if 'en' falls back to 'zh'
-    i18n.addTranslations('zh', { 'only_in_zh': '中文专属' });
+    i18n.addTranslations('zh', { only_in_zh: '中文专属' });
     i18n.setLocale('en');
     expect(i18n.t('only_in_zh' as any)).toBe('中文专属');
 
     // Add translation only to 'en', check if 'zh' falls back to 'en'
-    i18n.addTranslations('en', { 'only_in_en': 'English Only' });
+    i18n.addTranslations('en', { only_in_en: 'English Only' });
     i18n.setLocale('zh');
     expect(i18n.t('only_in_en' as any)).toBe('English Only');
 
@@ -58,24 +58,32 @@ describe('I18n', () => {
     i18n.setLocale('en');
 
     // Normal interpolation
-    expect(i18n.t('download_progress', { progress: 50 })).toBe('Download progress: 50%');
+    expect(i18n.t('download_progress', { progress: 50 })).toBe(
+      'Download progress: 50%'
+    );
 
     // Multiple interpolations
-    expect(i18n.t('retry_count', { count: 1, max: 3 })).toBe('Retry attempt: 1/3');
+    expect(i18n.t('retry_count', { count: 1, max: 3 })).toBe(
+      'Retry attempt: 1/3'
+    );
 
     // Interpolation with missing values (should leave placeholder as is)
-    expect(i18n.t('download_progress')).toBe('Download progress: {{progress}}%');
+    expect(i18n.t('download_progress')).toBe(
+      'Download progress: {{progress}}%'
+    );
 
     // Invalid interpolation syntax (spaces) are ignored
-    i18n.addTranslations('en', { 'invalid_syntax': 'Test {{ key }} here' });
-    expect(i18n.t('invalid_syntax' as any, { key: 'value' })).toBe('Test {{ key }} here');
+    i18n.addTranslations('en', { invalid_syntax: 'Test {{ key }} here' });
+    expect(i18n.t('invalid_syntax' as any, { key: 'value' })).toBe(
+      'Test {{ key }} here'
+    );
   });
 
   test('addTranslations', async () => {
     const { I18n } = await getRealI18n();
     const i18n = new I18n();
 
-    i18n.addTranslations('en', { 'new_key': 'New Value' });
+    i18n.addTranslations('en', { new_key: 'New Value' });
     i18n.setLocale('en');
 
     expect(i18n.t('new_key' as any)).toBe('New Value');

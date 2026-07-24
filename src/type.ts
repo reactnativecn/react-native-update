@@ -126,8 +126,8 @@ export interface ClientOptions {
   beforeDownloadUpdate?: (info: CheckResult) => Promise<boolean> | boolean;
   afterDownloadUpdate?: (info: CheckResult) => Promise<boolean> | boolean;
   beforeReload?: (
-    context: BeforeReloadContext,
-  ) => Promise<boolean | void> | boolean | void;
+    context: BeforeReloadContext
+  ) => Promise<boolean | undefined> | boolean | undefined;
   onPackageExpired?: (info: CheckResult) => Promise<boolean> | boolean;
   overridePackageVersion?: string;
   /** Maximum number of retry attempts for failed downloads (default: 3) */

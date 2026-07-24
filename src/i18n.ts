@@ -1,5 +1,5 @@
-import zhTranslations from './locales/zh';
 import enTranslations from './locales/en';
+import zhTranslations from './locales/zh';
 
 type TranslationKey = keyof typeof zhTranslations | keyof typeof enTranslations;
 type TranslationValues = Record<string, string | number>;
@@ -92,7 +92,7 @@ class I18n {
 const i18n = new I18n();
 
 // Export both the instance and the class for flexibility
-export { i18n, I18n };
+export { I18n, i18n };
 export default i18n;
 
 /**

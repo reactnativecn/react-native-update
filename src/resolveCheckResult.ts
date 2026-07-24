@@ -1,6 +1,6 @@
 import { currentVersion, packageVersion } from './core';
 import { isInRollout } from './isInRollout';
-import { CheckResult } from './type';
+import type { CheckResult } from './type';
 import { log } from './utils';
 
 export function resolveCheckResult(rootInfo: CheckResult): CheckResult {

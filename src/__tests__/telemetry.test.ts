@@ -13,7 +13,7 @@ describe('resolveServerEventType', () => {
     expect(resolveServerEventType('rollback')).toBe('rollback');
     expect(resolveServerEventType('errorSwitchVersion')).toBe('patch_fail');
     expect(
-      resolveServerEventType('errorSwitchVersion', 'SWITCH_VERSION_FAILED'),
+      resolveServerEventType('errorSwitchVersion', 'SWITCH_VERSION_FAILED')
     ).toBe('patch_fail');
   });
 
@@ -22,20 +22,20 @@ describe('resolveServerEventType', () => {
     // not a patch-quality signal and must stay out of the server-side stats
     // that drive the rollback safety net.
     expect(
-      resolveServerEventType('errorSwitchVersion', 'USER_HOOK_ERROR'),
+      resolveServerEventType('errorSwitchVersion', 'USER_HOOK_ERROR')
     ).toBeUndefined();
     expect(
-      resolveServerEventType('errorSwitchVersion', 'RESTART_FAILED'),
+      resolveServerEventType('errorSwitchVersion', 'RESTART_FAILED')
     ).toBeUndefined();
   });
 
   test('splits errorUpdate by underlying native code', () => {
     expect(resolveServerEventType('errorUpdate', 'DOWNLOAD_FAILED')).toBe(
-      'download_fail',
+      'download_fail'
     );
     expect(resolveServerEventType('errorUpdate')).toBe('download_fail');
     expect(resolveServerEventType('errorUpdate', 'PATCH_FAILED')).toBe(
-      'patch_fail',
+      'patch_fail'
     );
   });
 
@@ -55,7 +55,7 @@ describe('resolveServerEventHash', () => {
         serverType: 'rollback',
         data: { rolledBackVersion: 'abc' },
         currentVersion: 'cur',
-      }),
+      })
     ).toBe('abc');
   });
 
@@ -65,7 +65,7 @@ describe('resolveServerEventHash', () => {
         serverType: 'mark_success',
         data: {},
         currentVersion: 'cur',
-      }),
+      })
     ).toBe('cur');
   });
 
@@ -75,14 +75,14 @@ describe('resolveServerEventHash', () => {
         serverType: 'download_fail',
         data: { newVersion: 'xyz' },
         currentVersion: 'cur',
-      }),
+      })
     ).toBe('xyz');
     expect(
       resolveServerEventHash({
         serverType: 'download_fail',
         data: {},
         currentVersion: 'cur',
-      }),
+      })
     ).toBe('');
   });
 });

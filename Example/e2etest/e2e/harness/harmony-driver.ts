@@ -73,7 +73,7 @@ export class HarmonyDriver {
   constructor(
     readonly bundleName: string,
     readonly abilityName = 'EntryAbility',
-    readonly target = process.env.HDC_TARGET || '',
+    readonly target = process.env.HDC_TARGET || ''
   ) {}
 
   async hdc(...args: string[]): Promise<string> {
@@ -96,13 +96,13 @@ export class HarmonyDriver {
     const { stdout } = await execFileAsync(HDC, ['list', 'targets']);
     return stdout
       .split('\n')
-      .map(line => line.trim())
-      .filter(line => line && line !== '[Empty]');
+      .map((line) => line.trim())
+      .filter((line) => line && line !== '[Empty]');
   }
 
   async launch(): Promise<void> {
     const output = await this.shell(
-      `aa start -b ${this.bundleName} -a ${this.abilityName}`,
+      `aa start -b ${this.bundleName} -a ${this.abilityName}`
     );
     if (!output.includes('successfully')) {
       throw new Error(`Failed to launch ${this.bundleName}: ${output.trim()}`);
@@ -139,7 +139,7 @@ export class HarmonyDriver {
     const output = await this.hdc(
       'rport',
       `tcp:${devicePort}`,
-      `tcp:${hostPort}`,
+      `tcp:${hostPort}`
     );
     // "listen failed" means the device side is already bound, i.e. the
     // mapping is effectively in place.
@@ -153,7 +153,7 @@ export class HarmonyDriver {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const dumpOutput = await this.shell(
-          `uitest dumpLayout -p ${DEVICE_LAYOUT_PATH}`,
+          `uitest dumpLayout -p ${DEVICE_LAYOUT_PATH}`
         );
         if (!dumpOutput.includes('DumpLayout saved')) {
           throw new Error(`uitest dumpLayout failed: ${dumpOutput.trim()}`);
@@ -171,22 +171,28 @@ export class HarmonyDriver {
   // testID get an auto-assigned numeric tag instead.
   async findById(testID: string): Promise<UiNode | undefined> {
     const nodes = await this.dumpLayout();
-    return nodes.filter(node => node.id === testID).sort((a, b) => area(a) - area(b))[0];
+    return nodes
+      .filter((node) => node.id === testID)
+      .sort((a, b) => area(a) - area(b))[0];
   }
 
   async findByText(matcher: string | RegExp): Promise<UiNode | undefined> {
     const nodes = await this.dumpLayout();
-    const matches = nodes.filter(node =>
+    const matches = nodes.filter((node) =>
       typeof matcher === 'string'
         ? node.text.includes(matcher)
-        : matcher.test(node.text),
+        : matcher.test(node.text)
     );
     return matches.sort((a, b) => area(a) - area(b))[0];
   }
 
   async waitFor<T>(
     probe: () => Promise<T | undefined>,
-    { timeout = DEFAULT_TIMEOUT, interval = DEFAULT_INTERVAL, description = 'condition' }: WaitOptions = {},
+    {
+      timeout = DEFAULT_TIMEOUT,
+      interval = DEFAULT_INTERVAL,
+      description = 'condition',
+    }: WaitOptions = {}
   ): Promise<T> {
     const deadline = Date.now() + timeout;
     let lastError: unknown;
@@ -202,10 +208,10 @@ export class HarmonyDriver {
       if (Date.now() >= deadline) {
         throw new Error(
           `Timed out after ${timeout}ms waiting for ${description}` +
-            (lastError ? ` (last error: ${lastError})` : ''),
+            (lastError ? ` (last error: ${lastError})` : '')
         );
       }
-      await new Promise(resolve => setTimeout(resolve, interval));
+      await new Promise((resolve) => setTimeout(resolve, interval));
     }
   }
 
@@ -218,7 +224,7 @@ export class HarmonyDriver {
 
   waitForByText(
     matcher: string | RegExp,
-    options: WaitOptions = {},
+    options: WaitOptions = {}
   ): Promise<UiNode> {
     return this.waitFor(() => this.findByText(matcher), {
       description: `element with text ${matcher}`,
@@ -231,7 +237,7 @@ export class HarmonyDriver {
       throw new Error(`Node ${node.id || node.text} has no tappable bounds`);
     }
     const output = await this.shell(
-      `uitest uiInput click ${node.center.x} ${node.center.y}`,
+      `uitest uiInput click ${node.center.x} ${node.center.y}`
     );
     // uitest prints "No Error" on success.
     if (!/no error/i.test(output) && /error|fail/i.test(output)) {
@@ -245,7 +251,7 @@ export class HarmonyDriver {
 
   async tapByText(
     matcher: string | RegExp,
-    options: WaitOptions = {},
+    options: WaitOptions = {}
   ): Promise<void> {
     await this.tapNode(await this.waitForByText(matcher, options));
   }

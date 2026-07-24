@@ -25,7 +25,7 @@ async function killExistingServer() {
         } catch {
           return; // process is gone
         }
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await new Promise((resolve) => setTimeout(resolve, 100));
       }
     }
   } catch {
@@ -36,7 +36,7 @@ async function killExistingServer() {
 function runPrepareScript() {
   const prepareScript = path.join(
     projectRoot,
-    'scripts/run-prepare-local-update-artifacts.js',
+    'scripts/run-prepare-local-update-artifacts.js'
   );
   const result = spawnSync(process.execPath, [prepareScript], {
     cwd: projectRoot,
@@ -45,7 +45,7 @@ function runPrepareScript() {
   });
   if (result.status !== 0) {
     throw new Error(
-      `Failed to prepare harmony update artifacts, exit code: ${result.status}`,
+      `Failed to prepare harmony update artifacts, exit code: ${result.status}`
     );
   }
 }
@@ -55,7 +55,10 @@ function startServer() {
   fs.mkdirSync(artifactsRoot, { recursive: true });
   // Keep server output diagnosable: a silently dying server (e.g.
   // EADDRINUSE) otherwise only surfaces as an unexplained ready-timeout.
-  const logFd = fs.openSync(path.join(artifactsRoot, 'server.harmony.log'), 'a');
+  const logFd = fs.openSync(
+    path.join(artifactsRoot, 'server.harmony.log'),
+    'a'
+  );
   const child = spawn('bun', [serverScript], {
     cwd: projectRoot,
     detached: true,
@@ -72,7 +75,7 @@ function waitForServer(timeoutMs = 30000) {
   const url = `http://127.0.0.1:${PORT}/health`;
   return new Promise((resolve, reject) => {
     const poll = () => {
-      const req = http.get(url, res => {
+      const req = http.get(url, (res) => {
         if (res.statusCode === 200) {
           resolve();
           return;

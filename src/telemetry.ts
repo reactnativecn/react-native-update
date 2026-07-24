@@ -35,7 +35,7 @@ export interface ServerReportPayload {
  */
 export const resolveServerEventType = (
   type: EventType,
-  code?: UpdateErrorCode,
+  code?: UpdateErrorCode
 ): ServerEventType | undefined => {
   switch (type) {
     case 'downloadSuccess':

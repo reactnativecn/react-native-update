@@ -3,7 +3,7 @@ const path = require('node:path');
 
 const pidFile = path.resolve(
   __dirname,
-  '../../.e2e-artifacts/.server.harmony.pid',
+  '../../.e2e-artifacts/.server.harmony.pid'
 );
 
 module.exports = async function globalTeardown() {

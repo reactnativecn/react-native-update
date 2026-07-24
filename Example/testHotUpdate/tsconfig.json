@@ -1,6 +1,7 @@
 {
   "extends": "@react-native/typescript-config",
   "compilerOptions": {
+    "moduleResolution": "bundler",
     "types": ["jest"]
   },
   "include": ["**/*.ts", "**/*.tsx"],

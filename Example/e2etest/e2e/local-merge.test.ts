@@ -41,7 +41,7 @@ async function tapCheckUpdate() {
 
 async function waitForBundleLabel(
   expectedLabel: string,
-  timeoutMs = RELOAD_TIMEOUT,
+  timeoutMs = RELOAD_TIMEOUT
 ) {
   await waitFor(element(by.id('bundle-label')))
     .toHaveText(`bundleLabel: ${expectedLabel}`)
@@ -59,7 +59,7 @@ async function tapCheckUpdateAndWaitForBundleLabel(expectedLabel: string) {
         expectedLabel,
         attempt < MAX_CHECK_UPDATE_ATTEMPTS
           ? RETRYABLE_RELOAD_TIMEOUT
-          : RELOAD_TIMEOUT,
+          : RELOAD_TIMEOUT
       );
       return;
     } catch (error) {
@@ -87,7 +87,7 @@ async function waitForMarkSuccess() {
   await waitFor(element(by.id('last-event')))
     .toHaveText('lastEvent: markSuccess')
     .withTimeout(MARK_SUCCESS_TIMEOUT);
-  await new Promise(resolve => setTimeout(resolve, MARK_SUCCESS_SETTLE_MS));
+  await new Promise((resolve) => setTimeout(resolve, MARK_SUCCESS_SETTLE_MS));
 }
 
 async function waitForDownloadSuccess(expectedHash: string) {
@@ -107,7 +107,7 @@ async function waitForReady() {
 
 async function waitForCheckState(
   expectedStatus: string,
-  expectedResult: string,
+  expectedResult: string
 ) {
   await waitFor(element(by.id('last-check-status')))
     .toHaveText(`lastCheckStatus: ${expectedStatus}`)
@@ -118,7 +118,7 @@ async function waitForCheckState(
 }
 
 async function waitForStrategy(
-  expectedStrategy: 'silentAndNow' | 'silentAndLater',
+  expectedStrategy: 'silentAndNow' | 'silentAndLater'
 ) {
   await waitFor(element(by.id('update-strategy')))
     .toHaveText(`updateStrategy: ${expectedStrategy}`)
@@ -126,7 +126,7 @@ async function waitForStrategy(
 }
 
 async function selectStrategy(
-  testId: 'strategy-silent-now' | 'strategy-silent-later',
+  testId: 'strategy-silent-now' | 'strategy-silent-later'
 ) {
   await waitFor(element(by.id(testId)))
     .toBeVisible()
@@ -148,7 +148,7 @@ async function runDeferredUpdate(
   previousLabel: string,
   previousHash: string,
   nextLabel: string,
-  nextHash: string,
+  nextHash: string
 ) {
   await selectStrategy('strategy-silent-later');
   await waitForStrategy('silentAndLater');
@@ -220,7 +220,7 @@ describe('Local Update Merge E2E', () => {
 
     if (device.getPlatform() === 'android') {
       await tapCheckUpdateAndWaitForBundleLabel(
-        LOCAL_UPDATE_LABELS.packagePatch,
+        LOCAL_UPDATE_LABELS.packagePatch
       );
       await waitForHash(LOCAL_UPDATE_HASHES.packagePatch);
       await waitForMarkSuccess();
@@ -269,7 +269,7 @@ describe('Local Update Merge E2E', () => {
       LOCAL_UPDATE_LABELS.full,
       LOCAL_UPDATE_HASHES.full,
       LOCAL_UPDATE_LABELS.ppkPatch,
-      LOCAL_UPDATE_HASHES.ppkPatch,
+      LOCAL_UPDATE_HASHES.ppkPatch
     );
 
     if (device.getPlatform() === 'android') {
@@ -278,7 +278,7 @@ describe('Local Update Merge E2E', () => {
         LOCAL_UPDATE_LABELS.ppkPatch,
         LOCAL_UPDATE_HASHES.ppkPatch,
         LOCAL_UPDATE_LABELS.packagePatch,
-        LOCAL_UPDATE_HASHES.packagePatch,
+        LOCAL_UPDATE_HASHES.packagePatch
       );
     }
 
@@ -298,7 +298,7 @@ describe('Local Update Merge E2E', () => {
         previousState.label,
         previousState.hash,
         LOCAL_UPDATE_LABELS.v2Track,
-        LOCAL_UPDATE_HASHES.v2Track,
+        LOCAL_UPDATE_HASHES.v2Track
       );
     }
 

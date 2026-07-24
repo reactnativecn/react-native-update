@@ -1,5 +1,5 @@
-const path = require('path');
-const { spawnSync } = require('child_process');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 
 const projectRoot = path.resolve(__dirname, '..');
 const buildRoot = path.join(projectRoot, '.e2e-artifacts/.ts-build');
@@ -14,11 +14,13 @@ function compileNodeTs() {
       cwd: projectRoot,
       stdio: 'inherit',
       env: process.env,
-    },
+    }
   );
 
   if (result.status !== 0) {
-    throw new Error(`Failed to compile Node-side TS files, exit code: ${result.status}`);
+    throw new Error(
+      `Failed to compile Node-side TS files, exit code: ${result.status}`
+    );
   }
 
   return buildRoot;

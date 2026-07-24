@@ -110,7 +110,7 @@ const setupClientMocks = ({
 };
 
 const setupAndroidApkMocks = (
-  downloadAndInstallApk: ReturnType<typeof mock>,
+  downloadAndInstallApk: ReturnType<typeof mock>
 ) => {
   (globalThis as any).__DEV__ = false;
 
@@ -188,7 +188,7 @@ describe('Pushy server config', () => {
         'https://edge-a.example.com',
         'https://update.reactnative.cn/api',
         'https://edge-b.example.com',
-      ]),
+      ])
     );
 
     const { Pushy } = await importFreshClient('remote-main-array');
@@ -235,7 +235,7 @@ describe('Pushy server config', () => {
     await reportPromise;
 
     expect(logger).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'markSuccess' }),
+      expect.objectContaining({ type: 'markSuccess' })
     );
   });
 
@@ -266,7 +266,9 @@ describe('Pushy server config', () => {
       hash: 'next-hash',
       description: 'bugfix',
     };
-    (globalThis as any).fetch = mock(async () => createJsonResponse(checkResult));
+    (globalThis as any).fetch = mock(async () =>
+      createJsonResponse(checkResult)
+    );
 
     const { Pushy } = await importFreshClient('after-check-update-completed');
     const client = new Pushy({
@@ -326,7 +328,7 @@ describe('Pushy server config', () => {
         hash: 'hash',
         full: 'hash',
         paths: ['cdn.example.com'],
-      }),
+      })
     ).resolves.toBeUndefined();
 
     expect(downloadPatchFromPpk).not.toHaveBeenCalled();
@@ -335,7 +337,7 @@ describe('Pushy server config', () => {
     expect(logger).not.toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'downloading',
-      }),
+      })
     );
   });
 
@@ -343,9 +345,9 @@ describe('Pushy server config', () => {
     let resolveNativeMarkSuccess = () => {};
     const nativeMarkSuccess = mock(
       () =>
-        new Promise<void>(resolve => {
+        new Promise<void>((resolve) => {
           resolveNativeMarkSuccess = resolve;
-        }),
+        })
     );
     const logger = mock(() => {});
     setupClientMocks({
@@ -353,7 +355,9 @@ describe('Pushy server config', () => {
       markSuccess: nativeMarkSuccess,
     });
 
-    const { Pushy, sharedState } = await importFreshClient('mark-success-awaits-native');
+    const { Pushy, sharedState } = await importFreshClient(
+      'mark-success-awaits-native'
+    );
     const client = new Pushy({
       appKey: 'demo-app',
       logger,
@@ -371,7 +375,7 @@ describe('Pushy server config', () => {
     expect(logger).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'markSuccess',
-      }),
+      })
     );
   });
 
@@ -390,7 +394,9 @@ describe('Pushy server config', () => {
     });
     setupClientMocks({ reloadUpdate });
 
-    const { Pushy, sharedState } = await importFreshClient('before-reload-switch-version');
+    const { Pushy, sharedState } = await importFreshClient(
+      'before-reload-switch-version'
+    );
     sharedState.downloadedHash = 'next-hash';
     const client = new Pushy({
       appKey: 'demo-app',
@@ -409,7 +415,9 @@ describe('Pushy server config', () => {
     const beforeReload = mock(() => false);
     setupClientMocks({ reloadUpdate });
 
-    const { Pushy, sharedState } = await importFreshClient('before-reload-skip-switch');
+    const { Pushy, sharedState } = await importFreshClient(
+      'before-reload-skip-switch'
+    );
     sharedState.downloadedHash = 'next-hash';
     const client = new Pushy({
       appKey: 'demo-app',
@@ -476,7 +484,7 @@ describe('error pipeline (onError + stable codes, EH-1/EH-2/EH-3)', () => {
       expect.objectContaining({
         type: 'errorChecking',
         data: expect.objectContaining({ code: 'CHECK_FAILED' }),
-      }),
+      })
     );
   });
 
@@ -502,7 +510,7 @@ describe('error pipeline (onError + stable codes, EH-1/EH-2/EH-3)', () => {
     setupClientMocks({ reloadUpdate });
 
     const { Pushy, sharedState } = await importFreshClient(
-      'pipeline-switch-version-failed',
+      'pipeline-switch-version-failed'
     );
     sharedState.downloadedHash = 'next-hash';
     sharedState.applyingUpdate = false;
@@ -513,7 +521,7 @@ describe('error pipeline (onError + stable codes, EH-1/EH-2/EH-3)', () => {
     });
 
     await expect(client.switchVersion('next-hash')).rejects.toThrow(
-      'bundle missing',
+      'bundle missing'
     );
 
     expect(sharedState.applyingUpdate).toBe(false);
@@ -527,7 +535,7 @@ describe('error pipeline (onError + stable codes, EH-1/EH-2/EH-3)', () => {
           code: 'SWITCH_VERSION_FAILED',
           newVersion: 'next-hash',
         }),
-      }),
+      })
     );
   });
 
@@ -541,7 +549,7 @@ describe('error pipeline (onError + stable codes, EH-1/EH-2/EH-3)', () => {
     setupClientMocks({ reloadUpdate });
 
     const { Pushy, sharedState } = await importFreshClient(
-      'pipeline-native-code-preserved',
+      'pipeline-native-code-preserved'
     );
     sharedState.downloadedHash = 'next-hash';
     sharedState.applyingUpdate = false;
@@ -552,7 +560,7 @@ describe('error pipeline (onError + stable codes, EH-1/EH-2/EH-3)', () => {
     });
 
     await expect(client.switchVersion('next-hash')).rejects.toThrow(
-      'empty hash',
+      'empty hash'
     );
 
     expect(seen).toHaveLength(1);
@@ -562,7 +570,7 @@ describe('error pipeline (onError + stable codes, EH-1/EH-2/EH-3)', () => {
   test('a beforeReload hook throw gets USER_HOOK_ERROR, distinct from pipeline failures (JS2-3)', async () => {
     setupClientMocks();
     const { Pushy, sharedState } = await importFreshClient(
-      'pipeline-user-hook-error',
+      'pipeline-user-hook-error'
     );
     sharedState.downloadedHash = 'next-hash';
     sharedState.applyingUpdate = false;
@@ -578,7 +586,7 @@ describe('error pipeline (onError + stable codes, EH-1/EH-2/EH-3)', () => {
     });
 
     await expect(client.switchVersion('next-hash')).rejects.toThrow(
-      'hook exploded',
+      'hook exploded'
     );
 
     expect(seen).toHaveLength(1);
@@ -613,19 +621,18 @@ describe('error pipeline (onError + stable codes, EH-1/EH-2/EH-3)', () => {
 
     // "Every check ends with a notification" — both calls, both as errors.
     expect(states).toHaveLength(2);
-    expect(states.every(s => s.status === 'error')).toBe(true);
+    expect(states.every((s) => s.status === 'error')).toBe(true);
   });
 
   test('apk download failure keeps the native error and reports its message (EH-4)', async () => {
     const downloadAndInstallApk = mock(() =>
-      Promise.reject(Error('disk full')),
+      Promise.reject(Error('disk full'))
     );
     const logger = mock(() => {});
     setupAndroidApkMocks(downloadAndInstallApk);
 
-    const { Pushy, sharedState } = await importFreshClient(
-      'pipeline-apk-cause',
-    );
+    const { Pushy, sharedState } =
+      await importFreshClient('pipeline-apk-cause');
     sharedState.apkStatus = null;
     const client = new Pushy({ appKey: 'demo-app', logger });
     const seen: any[] = [];
@@ -647,7 +654,7 @@ describe('error pipeline (onError + stable codes, EH-1/EH-2/EH-3)', () => {
           code: 'APK_DOWNLOAD_FAILED',
           message: 'disk full',
         }),
-      }),
+      })
     );
   });
 });
@@ -694,15 +701,18 @@ describe('downloadUpdate fallback chain', () => {
       fetchWithTimeout: mock(() => Promise.resolve()),
       info: mock(() => {}),
       joinUrls: (paths: string[], fileName?: string) =>
-        fileName ? paths.map(p => `${p}/${fileName}`) : undefined,
+        fileName ? paths.map((p) => `${p}/${fileName}`) : undefined,
       log: mock(() => {}),
       noop: () => {},
       promiseAny: mock(() => Promise.resolve()),
-      testUrls: (urls?: string[]) =>
-        Promise.resolve(urls?.[0] || null),
+      testUrls: (urls?: string[]) => Promise.resolve(urls?.[0] || null),
     }));
 
-    return { downloadPatchFromPpk, downloadPatchFromPackage, downloadFullUpdate };
+    return {
+      downloadPatchFromPpk,
+      downloadPatchFromPackage,
+      downloadFullUpdate,
+    };
   };
 
   const updateInfo = {
@@ -730,17 +740,13 @@ describe('downloadUpdate fallback chain', () => {
 
   test('adds computed progress to download progress callbacks', async () => {
     let progressListener:
-      | ((data: {
-          hash: string;
-          received: number;
-          total: number;
-        }) => void)
+      | ((data: { hash: string; received: number; total: number }) => void)
       | undefined;
     const addProgressListener = mock(
       (_event: string, listener: typeof progressListener) => {
         progressListener = listener;
         return { remove: mock(() => {}) };
-      },
+      }
     );
     const onDownloadProgress = mock(() => {});
     setupDownloadMocks({
@@ -784,13 +790,14 @@ describe('downloadUpdate fallback chain', () => {
   });
 
   test('falls back to full when diff and pdiff fail', async () => {
-    const { downloadPatchFromPpk, downloadPatchFromPackage, downloadFullUpdate } =
-      setupDownloadMocks({
-        downloadPatchFromPpk: mock(() => Promise.reject(Error('diff fail'))),
-        downloadPatchFromPackage: mock(() =>
-          Promise.reject(Error('pdiff fail')),
-        ),
-      });
+    const {
+      downloadPatchFromPpk,
+      downloadPatchFromPackage,
+      downloadFullUpdate,
+    } = setupDownloadMocks({
+      downloadPatchFromPpk: mock(() => Promise.reject(Error('diff fail'))),
+      downloadPatchFromPackage: mock(() => Promise.reject(Error('pdiff fail'))),
+    });
     const { Pushy, sharedState } = await importFreshClient('dl-fallback-full');
     sharedState.downloadedHash = undefined;
     const client = new Pushy({ appKey: 'demo-app' });
@@ -814,7 +821,7 @@ describe('downloadUpdate fallback chain', () => {
     const client = new Pushy({ appKey: 'demo-app', maxRetries: 0 });
 
     await expect(client.downloadUpdate(updateInfo)).rejects.toThrow(
-      'error_full_patch_failed',
+      'error_full_patch_failed'
     );
   });
 
@@ -824,12 +831,14 @@ describe('downloadUpdate fallback chain', () => {
       downloadPatchFromPackage: mock(() => Promise.reject(Error('pdiff fail'))),
       downloadFullUpdate: mock(() => Promise.reject(Error('full fail'))),
     });
-    const { Pushy, sharedState } = await importFreshClient('dl-negative-retries');
+    const { Pushy, sharedState } = await importFreshClient(
+      'dl-negative-retries'
+    );
     sharedState.downloadedHash = undefined;
     const client = new Pushy({ appKey: 'demo-app', maxRetries: -1 });
 
     await expect(client.downloadUpdate(updateInfo)).rejects.toThrow(
-      'error_full_patch_failed',
+      'error_full_patch_failed'
     );
     expect(downloadFullUpdate).toHaveBeenCalledTimes(1);
   });
@@ -863,7 +872,8 @@ describe('downloadUpdate fallback chain', () => {
       downloadPatchFromPackage: mock(() => Promise.reject(Error('pdiff fail'))),
       downloadFullUpdate: mock(() => Promise.reject(Error('full fail'))),
     });
-    const { Pushy, sharedState } = await importFreshClient('dl-default-retries');
+    const { Pushy, sharedState } =
+      await importFreshClient('dl-default-retries');
     sharedState.downloadedHash = undefined;
     const client = new Pushy({ appKey: 'demo-app' });
 
@@ -883,7 +893,7 @@ describe('downloadUpdate fallback chain', () => {
     const client = new Pushy({ appKey: 'demo-app', maxRetries: 2 });
 
     await expect(client.downloadUpdate(updateInfo)).rejects.toThrow(
-      'error_full_patch_failed',
+      'error_full_patch_failed'
     );
   });
 
@@ -923,7 +933,7 @@ describe('downloadUpdate fallback chain', () => {
       downloadFullUpdate: mock(() => Promise.reject(patchError)),
     });
     const { Pushy, sharedState } = await importFreshClient(
-      'dl-patch-failed-code',
+      'dl-patch-failed-code'
     );
     sharedState.downloadedHash = undefined;
     const client = new Pushy({ appKey: 'demo-app', maxRetries: 0 });
@@ -948,12 +958,14 @@ describe('downloadUpdate fallback chain', () => {
     let resolveDownload: (() => void) | undefined;
     const downloadFullUpdate = mock(
       () =>
-        new Promise<void>(resolve => {
+        new Promise<void>((resolve) => {
           resolveDownload = resolve;
-        }),
+        })
     );
     setupDownloadMocks({ downloadFullUpdate });
-    const { Pushy, sharedState } = await importFreshClient('dl-concurrent-dedup');
+    const { Pushy, sharedState } = await importFreshClient(
+      'dl-concurrent-dedup'
+    );
     sharedState.downloadedHash = undefined;
     // Only a full URL so the full strategy is the one exercised.
     const fullOnlyInfo = {
@@ -971,7 +983,7 @@ describe('downloadUpdate fallback chain', () => {
     const first = client.downloadUpdate(fullOnlyInfo);
     const second = client.downloadUpdate(fullOnlyInfo);
     // Let both calls reach the (single) native download, then let it finish.
-    await new Promise(r => setTimeout(r, 10));
+    await new Promise((r) => setTimeout(r, 10));
     resolveDownload?.();
     const [firstHash, secondHash] = await Promise.all([first, second]);
 
@@ -1054,9 +1066,7 @@ describe('Cresc class', () => {
     expect(client.getConfiguredCheckEndpoints()).toEqual([
       'https://custom.example.com',
     ]);
-    expect(client.options.server?.queryUrls).toEqual([
-      'https://q.example.com',
-    ]);
+    expect(client.options.server?.queryUrls).toEqual(['https://q.example.com']);
   });
 });
 
@@ -1121,7 +1131,7 @@ describe('resetToPackagedBundle', () => {
 
   test('resolves false on native failure and keeps state', async () => {
     const resetToPackagedBundle = mock(() =>
-      Promise.reject(Error('disk full')),
+      Promise.reject(Error('disk full'))
     );
     setupClientMocks({ resetToPackagedBundle });
     const { Pushy, sharedState } = await importFreshClient('reset-native-fail');

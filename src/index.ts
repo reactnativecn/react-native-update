@@ -1,7 +1,5 @@
-export { Pushy, Cresc } from './client';
 export type { UpdateErrorListener } from './client';
-export { UpdateError } from './error';
-export type { UpdateErrorCode } from './error';
+export { Cresc, Pushy } from './client';
 export {
   ProgressContext,
   UpdateContext,
@@ -9,5 +7,7 @@ export {
   useUpdate,
   useUpdateProgress,
 } from './context';
-export { PushyProvider, UpdateProvider } from './provider';
 export { PushyModule, UpdateModule } from './core';
+export type { UpdateErrorCode } from './error';
+export { UpdateError } from './error';
+export { PushyProvider, UpdateProvider } from './provider';

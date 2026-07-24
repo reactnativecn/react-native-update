@@ -1,13 +1,12 @@
 /* eslint-disable react/no-unstable-nested-components */
 /* eslint-disable react-native/no-inline-styles */
-import React, {useState} from 'react';
-import {StyleSheet, Text, View, TouchableOpacity, Image} from 'react-native';
-
+import { useState } from 'react';
+import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Pushy, PushyProvider, usePushy } from 'react-native-update';
 import TestConsole from './TestConsole';
-
 import _updateConfig from './update.json';
-import {PushyProvider, Pushy, usePushy} from 'react-native-update';
-const {appKey} = _updateConfig.android;
+
+const { appKey } = _updateConfig.android;
 
 function Home() {
   const {
@@ -19,7 +18,7 @@ function Home() {
     updateInfo,
     packageVersion,
     currentHash,
-    progress: {received, total} = {},
+    progress: { received, total } = {},
   } = usePushy();
   const [useDefaultAlert, setUseDefaultAlert] = useState(false);
   const [showTestConsole, setShowTestConsole] = useState(false);
@@ -43,7 +42,7 @@ function Home() {
       <Text style={styles.welcome}>欢迎使用Pushy热更新服务</Text>
       {/* <Text style={styles.welcome}>😁hdiffFromAPP更新成功！！！</Text> */}
       {/* <Text style={styles.welcome}>😁hdiffFromPPk更新成功！！！</Text> */}
-      <View style={{flexDirection: 'row'}}>
+      <View style={{ flexDirection: 'row' }}>
         <TouchableOpacity
           onPress={() => {
             client?.setOptions({
@@ -55,7 +54,8 @@ function Home() {
           style={{
             flexDirection: 'row',
             alignItems: 'center',
-          }}>
+          }}
+        >
           <View
             style={{
               width: 20,
@@ -65,10 +65,11 @@ function Home() {
               backgroundColor: useDefaultAlert ? 'blue' : 'white',
               justifyContent: 'center',
               alignItems: 'center',
-            }}>
-            {useDefaultAlert && <Text style={{color: 'white'}}>✓</Text>}
+            }}
+          >
+            {useDefaultAlert && <Text style={{ color: 'white' }}>✓</Text>}
           </View>
-          <Text style={{marginLeft: 8}}>
+          <Text style={{ marginLeft: 8 }}>
             {' '}
             {useDefaultAlert ? '当前使用' : '当前不使用'}默认的alert更新提示
           </Text>
@@ -93,16 +94,18 @@ function Home() {
         onPress={() => {
           checkUpdate();
           setShowUpdateSnackbar(true);
-        }}>
+        }}
+      >
         <Text style={styles.instructions}>点击这里检查更新</Text>
       </TouchableOpacity>
 
       <TouchableOpacity
         testID="testcase"
-        style={{marginTop: 15}}
+        style={{ marginTop: 15 }}
         onPress={() => {
           setShowTestConsole(true);
-        }}>
+        }}
+      >
         <Text style={styles.instructions}>
           react-native-update版本：{client?.version}
         </Text>
@@ -117,23 +120,26 @@ function Home() {
               flexDirection: 'row',
               justifyContent: 'space-between',
               alignItems: 'center',
-            }}>
-            <Text style={{color: 'white'}}>
+            }}
+          >
+            <Text style={{ color: 'white' }}>
               有新版本({updateInfo.name})可用，是否更新？
             </Text>
-            <View style={{flexDirection: 'row'}}>
+            <View style={{ flexDirection: 'row' }}>
               <TouchableOpacity
                 onPress={() => setShowUpdateSnackbar(false)}
-                style={{marginRight: 10}}>
-                <Text style={{color: 'white'}}>取消</Text>
+                style={{ marginRight: 10 }}
+              >
+                <Text style={{ color: 'white' }}>取消</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={async () => {
                   setShowUpdateSnackbar(false);
                   await downloadUpdate();
                   setShowUpdateBanner(true);
-                }}>
-                <Text style={{color: '#2196F3'}}>更新</Text>
+                }}
+              >
+                <Text style={{ color: '#2196F3' }}>更新</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -148,8 +154,9 @@ function Home() {
               padding: 16,
               borderBottomWidth: 1,
               borderBottomColor: '#eee',
-            }}>
-            <View style={{flexDirection: 'row', alignItems: 'center'}}>
+            }}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               <Text>更新已完成，是否立即重启？</Text>
             </View>
             <View
@@ -157,17 +164,19 @@ function Home() {
                 flexDirection: 'row',
                 justifyContent: 'flex-end',
                 marginTop: 10,
-              }}>
+              }}
+            >
               <TouchableOpacity
                 onPress={() => {
                   switchVersionLater();
                   setShowUpdateBanner(false);
                 }}
-                style={{marginRight: 20}}>
-                <Text style={{color: '#2196F3'}}>下次再说</Text>
+                style={{ marginRight: 20 }}
+              >
+                <Text style={{ color: '#2196F3' }}>下次再说</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={switchVersion}>
-                <Text style={{color: '#2196F3'}}>立即重启</Text>
+                <Text style={{ color: '#2196F3' }}>立即重启</Text>
               </TouchableOpacity>
             </View>
           </View>

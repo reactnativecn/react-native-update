@@ -62,7 +62,7 @@ const KNOWN_CODES = new Set<string>([
  * else is treated as absent so it never leaks into telemetry aggregation.
  */
 export const asUpdateErrorCode = (
-  code: unknown,
+  code: unknown
 ): UpdateErrorCode | undefined =>
   typeof code === 'string' && KNOWN_CODES.has(code)
     ? (code as UpdateErrorCode)
@@ -76,7 +76,7 @@ export class UpdateError extends Error {
   constructor(
     message: string,
     code: UpdateErrorCode,
-    options?: { cause?: unknown; extra?: Record<string, string | number> },
+    options?: { cause?: unknown; extra?: Record<string, string | number> }
   ) {
     super(message);
     this.name = 'UpdateError';
@@ -96,7 +96,7 @@ export class UpdateError extends Error {
  */
 export const toUpdateError = (
   e: unknown,
-  code: UpdateErrorCode,
+  code: UpdateErrorCode
 ): UpdateError => {
   if (e instanceof Error) {
     const err = e as UpdateError;

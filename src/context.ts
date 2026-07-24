@@ -1,10 +1,10 @@
 import { createContext, useContext, useMemo } from 'react';
-import { CheckResult, ProgressData } from './type';
-import { Pushy, Cresc } from './client';
+import type { Cresc, Pushy } from './client';
 import i18n from './i18n';
+import type { CheckResult, ProgressData } from './type';
 
 const noop = () => {};
-const asyncNoop = () => Promise.resolve();
+const asyncNoop = () => Promise.resolve(undefined);
 
 export const defaultContext = {
   checkUpdate: asyncNoop,
@@ -24,12 +24,12 @@ export const defaultContext = {
 };
 
 export const UpdateContext = createContext<{
-  checkUpdate: () => Promise<void | CheckResult>;
+  checkUpdate: () => Promise<undefined | CheckResult>;
   switchVersion: () => Promise<void>;
   switchVersionLater: () => Promise<void>;
   markSuccess: () => void;
   dismissError: () => void;
-  downloadUpdate: () => Promise<boolean | void>;
+  downloadUpdate: () => Promise<boolean | undefined>;
   downloadAndInstallApk: (url: string) => Promise<void>;
   // @deprecated use currentVersionInfo instead
   getCurrentVersionInfo: () => Promise<{
@@ -46,7 +46,7 @@ export const UpdateContext = createContext<{
   restartApp: () => Promise<void>;
   resetToPackagedBundle: (options?: {
     restart?: boolean;
-  }) => Promise<boolean | void>;
+  }) => Promise<boolean | undefined>;
   currentHash: string;
   packageVersion: string;
   client?: Pushy | Cresc;
@@ -58,7 +58,7 @@ export const UpdateContext = createContext<{
 // otherwise every tick would re-render all useUpdate() consumers even when
 // they never read progress.
 export const ProgressContext = createContext<ProgressData | undefined>(
-  undefined,
+  undefined
 );
 
 /**

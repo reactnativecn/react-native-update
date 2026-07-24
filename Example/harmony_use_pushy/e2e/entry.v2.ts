@@ -1,4 +1,4 @@
-import {LOCAL_UPDATE_LABELS} from './localUpdateConfig';
+import { LOCAL_UPDATE_LABELS } from './localUpdateConfig';
 
 const bundleLabelGlobal = globalThis as typeof globalThis & {
   __RNU_E2E_BUNDLE_LABEL?: string;

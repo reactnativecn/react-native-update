@@ -15,7 +15,7 @@ beforeAll(async () => {
   const targets = await HarmonyDriver.listTargets();
   if (targets.length === 0) {
     throw new Error(
-      'No HarmonyOS device/emulator connected (hdc list targets is empty)',
+      'No HarmonyOS device/emulator connected (hdc list targets is empty)'
     );
   }
 }, 30000);

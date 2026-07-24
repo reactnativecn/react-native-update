@@ -12,7 +12,9 @@ import { mock } from 'bun:test';
 export const mockAlert = mock(() => {});
 const appStateListeners = new Set<(state: string) => void>();
 export const emitAppStateChange = (state: string) => {
-  appStateListeners.forEach(handler => handler(state));
+  appStateListeners.forEach((handler) => {
+    handler(state);
+  });
 };
 
 mock.module('react-native', () => {
@@ -68,7 +70,8 @@ mock.module('react-native', () => {
 mock.module('../i18n', () => {
   return {
     default: {
-      t: (key: string, params?: any) => `${key}${params ? JSON.stringify(params) : ''}`,
+      t: (key: string, params?: any) =>
+        `${key}${params ? JSON.stringify(params) : ''}`,
     },
   };
 });

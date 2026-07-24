@@ -1,29 +1,31 @@
 /* eslint-disable react-native/no-inline-styles */
 /* eslint-disable react/react-in-jsx-scope */
-import {useCallback, useMemo, useState} from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  TextInput,
   Button,
-  StyleSheet,
   SafeAreaView,
+  StyleSheet,
   Text,
-  View,
+  TextInput,
   TouchableOpacity,
+  View,
 } from 'react-native';
 
-import {PushyModule} from 'react-native-update';
+import { PushyModule } from 'react-native-update';
+
 const Hash = '9D5CE6EBA420717BE7E7D308B11F8207681B066C951D68F3994D19828F342474';
 const UUID = '00000000-0000-0000-0000-000000000000';
 const DownloadUrl = 'https://localhost:3000/diff.ppk-patch';
-const AppPatchDownloadUrl = 'https://github.com/bozaigao/test_pushy_server/raw/refs/heads/main/hdiff.app-patch';
+const AppPatchDownloadUrl =
+  'https://github.com/bozaigao/test_pushy_server/raw/refs/heads/main/hdiff.app-patch';
 const AppPatchHash = 'f5ba92c7c04250d4b8a446c8267ef459';
-const PPKDownloadUrl = 'https://github.com/bozaigao/test_pushy_server/raw/refs/heads/main/hdiff.ppk-patch';
+const PPKDownloadUrl =
+  'https://github.com/bozaigao/test_pushy_server/raw/refs/heads/main/hdiff.ppk-patch';
 const PPKPatchHash = '6b3d26b7d868d1f67aedadb7f0b342d9';
 const OriginHash = 'f5ba92c7c04250d4b8a446c8267ef459';
 
-
-const CustomDialog = ({title, visible, onConfirm}) => {
+const CustomDialog = ({ title, visible, onConfirm }) => {
   if (!visible) {
     return null;
   }
@@ -35,14 +37,15 @@ const CustomDialog = ({title, visible, onConfirm}) => {
         <TouchableOpacity
           testID="done"
           style={styles.button}
-          onPress={onConfirm}>
+          onPress={onConfirm}
+        >
           <Text style={styles.buttonText}>确认</Text>
         </TouchableOpacity>
       </View>
     </View>
   );
 };
-export default function TestConsole({visible, onClose}) {
+export default function TestConsole({ visible, onClose }) {
   const [text, setText] = useState('');
   const [running, setRunning] = useState(false);
   const [options, setOptions] = useState();
@@ -54,7 +57,7 @@ export default function TestConsole({visible, onClose}) {
         name: 'setLocalHashInfo',
         invoke: () => {
           setText(
-            `setLocalHashInfo\n${Hash}\n{\"version\":\"1.0.0\",\"size\":\"19M\"}`,
+            `setLocalHashInfo\n${Hash}\n{"version":"1.0.0","size":"19M"}`
           );
         },
       },
@@ -74,21 +77,21 @@ export default function TestConsole({visible, onClose}) {
         name: 'reloadUpdate',
         invoke: () => {
           setText('reloadUpdate');
-          setOptions({hash: Hash});
+          setOptions({ hash: Hash });
         },
       },
       {
         name: 'setNeedUpdateForApp',
         invoke: () => {
           setText('setNeedUpdate');
-          setOptions({hash: AppPatchHash});
+          setOptions({ hash: AppPatchHash });
         },
       },
       {
         name: 'setNeedUpdateForPPK',
         invoke: () => {
           setText('setNeedUpdate');
-          setOptions({hash: PPKPatchHash});
+          setOptions({ hash: PPKPatchHash });
         },
       },
       {
@@ -102,28 +105,32 @@ export default function TestConsole({visible, onClose}) {
         name: 'downloadPatchFromPpk',
         invoke: () => {
           setText('downloadPatchFromPpk');
-          setOptions({updateUrl: PPKDownloadUrl, hash: PPKPatchHash, originHash: OriginHash});
+          setOptions({
+            updateUrl: PPKDownloadUrl,
+            hash: PPKPatchHash,
+            originHash: OriginHash,
+          });
         },
       },
       {
         name: 'downloadPatchFromPackage',
         invoke: () => {
           setText('downloadPatchFromPackage');
-          setOptions({updateUrl: AppPatchDownloadUrl, hash: AppPatchHash});
+          setOptions({ updateUrl: AppPatchDownloadUrl, hash: AppPatchHash });
         },
       },
       {
         name: 'downloadFullUpdate',
         invoke: () => {
           setText('downloadFullUpdate');
-          setOptions({updateUrl: DownloadUrl, hash: Hash});
+          setOptions({ updateUrl: DownloadUrl, hash: Hash });
         },
       },
       {
         name: 'downloadAndInstallApk',
         invoke: () => {
           setText('downloadAndInstallApk');
-          setOptions({url: DownloadUrl, target: Hash, hash: Hash});
+          setOptions({ url: DownloadUrl, target: Hash, hash: Hash });
         },
       },
     ];
@@ -138,9 +145,10 @@ export default function TestConsole({visible, onClose}) {
           testID={NativeTestMethod[i].name}
           onPress={() => {
             NativeTestMethod[i].invoke();
-          }}>
+          }}
+        >
           <Text>{NativeTestMethod[i].name}</Text>
-        </TouchableOpacity>,
+        </TouchableOpacity>
       );
     }
     return <View>{views}</View>;
@@ -150,14 +158,15 @@ export default function TestConsole({visible, onClose}) {
   }
 
   return (
-    <SafeAreaView style={{flex: 1, padding: 10}}>
+    <SafeAreaView style={{ flex: 1, padding: 10 }}>
       <View
         style={{
           flexDirection: 'row',
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: 10,
-        }}>
+        }}
+      >
         <Text>调试Pushy方法（方法名，参数，值换行）</Text>
         <Button title="关闭" onPress={() => onClose()} />
       </View>
@@ -206,7 +215,7 @@ export default function TestConsole({visible, onClose}) {
                 params = [inputs[1]];
               } else {
                 params = [inputs[1], inputs[2]];
-                console.log({inputs, params});
+                console.log({ inputs, params });
               }
               await PushyModule[methodName](...params);
             }
@@ -217,8 +226,9 @@ export default function TestConsole({visible, onClose}) {
             setAlertMsg(e.message);
           }
           setRunning(false);
-        }}>
-        <Text style={{color: 'white'}}>执行</Text>
+        }}
+      >
+        <Text style={{ color: 'white' }}>执行</Text>
       </TouchableOpacity>
       <Button title="重置" onPress={() => setText('')} />
       {renderTestView()}

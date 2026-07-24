@@ -72,7 +72,7 @@ function toArrayBufferSlice(
   offset: number,
   length: number,
 ): ArrayBuffer {
-  return payload.buffer.slice(
+  return (payload.buffer as ArrayBuffer).slice(
     payload.byteOffset + offset,
     payload.byteOffset + offset + length,
   );
@@ -560,7 +560,7 @@ export class DownloadTask {
       'bundle.harmony.js',
     );
     await this.applyBundlePatchFromFileSource(
-      originContent,
+      originContent.buffer as ArrayBuffer,
       params.unzipDirectory,
       bundlePatchPath,
       `${params.unzipDirectory}/bundle.harmony.js`,

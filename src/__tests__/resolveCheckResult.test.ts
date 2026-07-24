@@ -3,7 +3,9 @@ import { currentVersion, packageVersion } from '../core';
 import { resolveCheckResult } from '../resolveCheckResult';
 import type { CheckResult } from '../type';
 
-const createRootResult = (overrides: Partial<CheckResult> = {}): CheckResult => ({
+const createRootResult = (
+  overrides: Partial<CheckResult> = {}
+): CheckResult => ({
   update: true,
   hash: 'full-hash',
   name: 'full-version',
@@ -31,7 +33,7 @@ describe('resolveCheckResult', () => {
             },
           },
         },
-      }),
+      })
     );
 
     expect(result).toEqual({ upToDate: true });
@@ -51,7 +53,7 @@ describe('resolveCheckResult', () => {
             },
           },
         },
-      }),
+      })
     );
 
     expect(result).toEqual({
@@ -83,7 +85,7 @@ describe('resolveCheckResult', () => {
             },
           },
         },
-      }),
+      })
     );
 
     expect(result).toEqual(createRootResult());
@@ -91,7 +93,7 @@ describe('resolveCheckResult', () => {
 
   test('returns upToDate when root target is already current', () => {
     const result = resolveCheckResult(
-      createRootResult({ hash: currentVersion }),
+      createRootResult({ hash: currentVersion })
     );
 
     expect(result).toEqual({ upToDate: true });

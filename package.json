@@ -9,7 +9,7 @@
     "publish:local": "SKIP_NATIVE_BUILD=1 npm publish",
     "postinstall": "node scripts/check-expo-version.js",
     "prepack": "bun submodule && bun lint",
-    "lint": "eslint \"src/*.@(ts|tsx|js|jsx)\" && tsc --noEmit && node scripts/check-harmony-types.js",
+    "lint": "biome check src && tsc --noEmit && node scripts/check-harmony-types.js",
     "lint:harmony": "node scripts/check-harmony-types.js",
     "submodule": "git submodule update --init --recursive",
     "test": "bun test src/__tests__",
@@ -64,8 +64,8 @@
   },
   "devDependencies": {
     "@babel/core": "^7.25.8",
+    "@biomejs/biome": "^2.5.5",
     "@react-native/babel-preset": "^0.73.21",
-    "@react-native/eslint-config": "0.84.1",
     "@react-native/typescript-config": "0.84.1",
     "@types/bun": "^1.3.11",
     "@types/jest": "^30.0.0",
@@ -73,15 +73,13 @@
     "@types/react": "^19.2.14",
     "@types/react-test-renderer": "18.0.7",
     "detox": "^20.50.1",
-    "eslint": "^8.57.0",
     "firebase-tools": "^15.11.0",
     "jest": "^30.3.0",
     "pod-install": "^1.0.14",
-    "prettier": "^2",
     "react": "18.2.0",
     "react-native": "0.73",
     "react-test-renderer": "18.2.0",
     "ts-jest": "^29.4.6",
-    "typescript": "^5.6.3"
+    "typescript": "^7.0.2"
   }
 }

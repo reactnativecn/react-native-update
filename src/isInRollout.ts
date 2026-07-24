@@ -4,7 +4,14 @@ import { cInfo } from './core';
 
 /* eslint-disable no-bitwise */
 export function murmurhash3_32_gc(key: string, seed = 0) {
-  let remainder, bytes, h1, h1b, c1, c2, k1, i;
+  let remainder: number,
+    bytes: number,
+    h1: number,
+    h1b: number,
+    c1: number,
+    c2: number,
+    k1: number,
+    i: number;
 
   remainder = key.length & 3; // key.length % 4
   bytes = key.length - remainder;
@@ -36,8 +43,10 @@ export function murmurhash3_32_gc(key: string, seed = 0) {
   k1 = 0;
 
   switch (remainder) {
+    // biome-ignore lint/suspicious/noFallthroughSwitchClause: MurmurHash fallthrough
     case 3:
       k1 ^= (key.charCodeAt(i + 2) & 0xff) << 16;
+    // biome-ignore lint/suspicious/noFallthroughSwitchClause: MurmurHash fallthrough
     case 2:
       k1 ^= (key.charCodeAt(i + 1) & 0xff) << 8;
     case 1:

@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 
+import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { spawnSync } from 'node:child_process';
 import {
-  LOCAL_UPDATE_HASHES,
   LOCAL_UPDATE_FILES,
+  LOCAL_UPDATE_HASHES,
   LOCAL_UPDATE_LABELS,
 } from '../e2e/localUpdateConfig';
 
@@ -40,12 +40,12 @@ type HdiffModule = {
   diffStream?: (
     oldFile: string,
     newFile: string,
-    patchFile: string,
+    patchFile: string
   ) => Promise<void>;
   patchStream?: (
     oldFile: string,
     patchFile: string,
-    newFile: string,
+    newFile: string
   ) => Promise<void>;
 } & ((oldSource?: Buffer, newSource?: Buffer) => Buffer);
 
@@ -81,21 +81,21 @@ function resolveCliRoot() {
   }
 
   throw new Error(
-    `react-native-update-cli not found. Tried: ${candidates.join(', ')}`,
+    `react-native-update-cli not found. Tried: ${candidates.join(', ')}`
   );
 }
 
 const cliRoot = resolveCliRoot();
 const cliPkg = JSON.parse(
-  fs.readFileSync(path.join(cliRoot, 'package.json'), 'utf8'),
+  fs.readFileSync(path.join(cliRoot, 'package.json'), 'utf8')
 );
 const binRelative =
   typeof cliPkg.bin === 'string'
     ? cliPkg.bin
-    : cliPkg.bin?.pushy ?? Object.values(cliPkg.bin ?? {})[0];
+    : (cliPkg.bin?.pushy ?? Object.values(cliPkg.bin ?? {})[0]);
 if (!binRelative) {
   throw new Error(
-    `react-native-update-cli package.json has no bin entry. Tried: ${cliRoot}`,
+    `react-native-update-cli package.json has no bin entry. Tried: ${cliRoot}`
   );
 }
 const cliEntry = path.join(cliRoot, binRelative);
@@ -143,7 +143,7 @@ function runPushy(args: string[], cwd: string) {
   }
   if (result.status !== 0) {
     throw new Error(
-      `pushy ${args.join(' ')} failed with exit code ${result.status}`,
+      `pushy ${args.join(' ')} failed with exit code ${result.status}`
     );
   }
 }
@@ -157,7 +157,7 @@ function installHdiffModule() {
       stdio: 'inherit',
       env: process.env,
       timeout: 120_000,
-    },
+    }
   );
   if (bunResult.status === 0) {
     return;
@@ -177,14 +177,14 @@ function installHdiffModule() {
       stdio: 'inherit',
       env: process.env,
       timeout: 120_000,
-    },
+    }
   );
   if (npmResult.error) {
     throw npmResult.error;
   }
   if (npmResult.status !== 0) {
     throw new Error(
-      `npm install node-hdiffpatch failed with exit code ${npmResult.status}`,
+      `npm install node-hdiffpatch failed with exit code ${npmResult.status}`
     );
   }
 }
@@ -202,12 +202,12 @@ function ensureHdiffModule(): HdiffModuleInfo {
   const customDiff = hdiffModule.diff || hdiffModule;
   if (typeof customDiff !== 'function') {
     throw new Error(
-      `node-hdiffpatch did not expose a diff function: ${modulePath}`,
+      `node-hdiffpatch did not expose a diff function: ${modulePath}`
     );
   }
   customDiff(
     Buffer.from('rnu-hdiff-smoke-old'),
-    Buffer.from('rnu-hdiff-smoke-new'),
+    Buffer.from('rnu-hdiff-smoke-new')
   );
   return { modulePath, hdiffModule, customDiff };
 }
@@ -234,7 +234,7 @@ function bundleTo(entryFile: string, outputFile: string) {
       outputFile,
       '--no-interactive',
     ],
-    bundleProjectRoot,
+    bundleProjectRoot
   );
   verifyGeneratedFile(`bundle ${entryFile}`, outputFile);
 }
@@ -244,7 +244,7 @@ function verifyGeneratedFile(label: string, filePath: string) {
     throw new Error(`${label} file not found after generation: ${filePath}`);
   }
   console.log(
-    `Verified ${label}: ${filePath} (${fs.statSync(filePath).size} bytes)`,
+    `Verified ${label}: ${filePath} (${fs.statSync(filePath).size} bytes)`
   );
 }
 
@@ -255,7 +255,7 @@ function writeFallbackPatch(label: string, filePath: string) {
       `Invalid ${label} placeholder.`,
       'The local e2e server advertises a full package fallback for this artifact.',
       '',
-    ].join('\n'),
+    ].join('\n')
   );
   verifyGeneratedFile(`${label} fallback`, filePath);
 }
@@ -263,7 +263,7 @@ function writeFallbackPatch(label: string, filePath: string) {
 async function keepProcessAlive<T>(
   label: string,
   promise: Promise<T>,
-  timeoutMs = diffTimeoutMs,
+  timeoutMs = diffTimeoutMs
 ) {
   const timer = setInterval(() => {}, 1000);
   let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -286,12 +286,12 @@ async function generatePpkDiff(
   origin: string,
   next: string,
   output: string,
-  customDiff: (oldSource?: Buffer, newSource?: Buffer) => Buffer,
+  customDiff: (oldSource?: Buffer, newSource?: Buffer) => Buffer
 ) {
   console.log(
     `Running hdiff ppk: ${origin} -> ${next} (${fs.statSync(origin).size} -> ${
       fs.statSync(next).size
-    } bytes)`,
+    } bytes)`
   );
   await keepProcessAlive(
     'ppk diff',
@@ -302,7 +302,7 @@ async function generatePpkDiff(
         customDiff,
         'no-interactive': true,
       },
-    }),
+    })
   );
   verifyGeneratedFile('ppk diff', output);
 }
@@ -311,17 +311,17 @@ async function generateV2TrackPpkDiff(
   origin: string,
   next: string,
   output: string,
-  hdiff: HdiffModuleInfo,
+  hdiff: HdiffModuleInfo
 ) {
   const pkg = JSON.parse(
-    fs.readFileSync(path.join(hdiff.modulePath, 'package.json'), 'utf8'),
+    fs.readFileSync(path.join(hdiff.modulePath, 'package.json'), 'utf8')
   ) as { version?: string };
   const patch = hdiff.hdiffModule.patch;
   const diffStream = hdiff.hdiffModule.diffStream;
   const patchStream = hdiff.hdiffModule.patchStream;
   if (!patch || !diffStream || !patchStream) {
     throw new Error(
-      'node-hdiffpatch must expose patch, diffStream, and patchStream for v2-track diff',
+      'node-hdiffpatch must expose patch, diffStream, and patchStream for v2-track diff'
     );
   }
 
@@ -330,7 +330,7 @@ async function generateV2TrackPpkDiff(
       pkg.version ?? 'unknown'
     }: ${origin} -> ${next} (${fs.statSync(origin).size} -> ${
       fs.statSync(next).size
-    } bytes)`,
+    } bytes)`
   );
   await keepProcessAlive(
     'v2-track ppk diff',
@@ -348,7 +348,7 @@ async function generateV2TrackPpkDiff(
           patchStream,
         },
       },
-    }),
+    })
   );
   verifyGeneratedFile('v2-track ppk diff', output);
 }
@@ -357,12 +357,12 @@ async function generateAndroidPackageDiff(
   apkPath: string,
   next: string,
   output: string,
-  customDiff: (oldSource?: Buffer, newSource?: Buffer) => Buffer,
+  customDiff: (oldSource?: Buffer, newSource?: Buffer) => Buffer
 ) {
   console.log(
     `Running hdiffFromApk: ${apkPath} -> ${next} (${
       fs.statSync(apkPath).size
-    } -> ${fs.statSync(next).size} bytes)`,
+    } -> ${fs.statSync(next).size} bytes)`
   );
   await keepProcessAlive(
     'package diff',
@@ -373,7 +373,7 @@ async function generateAndroidPackageDiff(
         customDiff,
         'no-interactive': true,
       },
-    }),
+    })
   );
   verifyGeneratedFile('package diff', output);
 }
@@ -386,10 +386,7 @@ async function main() {
   const v3 = path.join(artifactsDir, LOCAL_UPDATE_FILES.packageFull);
   const v4 = path.join(artifactsDir, LOCAL_UPDATE_FILES.v2TrackFull);
   const ppkDiff = path.join(artifactsDir, LOCAL_UPDATE_FILES.ppkDiff);
-  const v2TrackDiff = path.join(
-    artifactsDir,
-    LOCAL_UPDATE_FILES.v2TrackDiff,
-  );
+  const v2TrackDiff = path.join(artifactsDir, LOCAL_UPDATE_FILES.v2TrackDiff);
 
   bundleTo('e2e/entry.v1.ts', v1);
   bundleTo('e2e/entry.v2.ts', v2);
@@ -401,19 +398,19 @@ async function main() {
   if (platform === 'android') {
     const apkPath = path.join(
       projectRoot,
-      'android/app/build/outputs/apk/release/app-release.apk',
+      'android/app/build/outputs/apk/release/app-release.apk'
     );
 
     if (!fs.existsSync(apkPath)) {
       throw new Error(
-        `Android release apk not found: ${apkPath}. Run detox build android.emu.release first.`,
+        `Android release apk not found: ${apkPath}. Run detox build android.emu.release first.`
       );
     }
 
     fs.copyFileSync(apkPath, path.join(artifactsDir, LOCAL_UPDATE_FILES.apk));
     const packageDiffPath = path.join(
       artifactsDir,
-      LOCAL_UPDATE_FILES.packageDiff,
+      LOCAL_UPDATE_FILES.packageDiff
     );
 
     let androidHdiff: HdiffModuleInfo | null = null;
@@ -430,7 +427,7 @@ async function main() {
         console.warn(
           `node-hdiffpatch unavailable (${
             error instanceof Error ? error.message : String(error)
-          }), falling back to full package artifacts.`,
+          }), falling back to full package artifacts.`
         );
         useFullFallbackArtifacts = true;
       }
@@ -451,7 +448,7 @@ async function main() {
         apkPath,
         v3,
         packageDiffPath,
-        customDiff,
+        customDiff
       );
 
       console.log('Generating v2-track ppk diff...');
@@ -485,8 +482,8 @@ async function main() {
         fullFallback: useFullFallbackArtifacts,
       },
       null,
-      2,
-    ),
+      2
+    )
   );
   console.log(`Manifest written to ${manifestPath}`);
 }
@@ -495,7 +492,7 @@ main()
   .then(() => {
     console.log('prepare-local-update-artifacts completed successfully.');
   })
-  .catch(error => {
+  .catch((error) => {
     console.error('prepare-local-update-artifacts failed:');
     console.error(error);
     process.exit(1);

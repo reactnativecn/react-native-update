@@ -69,14 +69,13 @@ const config = {
   compilerOptions: {
     target: 'ES2021',
     module: 'ESNext',
-    moduleResolution: 'Node',
+    moduleResolution: 'bundler',
     lib: ['ES2021'],
     types: [],
     noEmit: true,
     skipLibCheck: true,
     strict: true,
     forceConsistentCasingInFileNames: true,
-    baseUrl: '.',
     paths: {
       // @rnoh and librnupdate.so are stubbed in types/ (see comments there);
       // @ohos/@kit resolve to the real SDK declarations.
@@ -89,7 +88,7 @@ const config = {
 
 fs.writeFileSync(generatedConfigPath, JSON.stringify(config, null, 2));
 
-const tscBin = require.resolve('typescript/bin/tsc', { paths: [repoRoot] });
+const tscBin = path.join(path.dirname(require.resolve('typescript/package.json', { paths: [repoRoot] })), 'bin/tsc');
 const result = spawnSync(process.execPath, [tscBin, '-p', generatedConfigPath], {
   stdio: 'inherit',
 });

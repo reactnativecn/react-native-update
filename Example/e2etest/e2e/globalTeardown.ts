@@ -1,8 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-const detoxGlobalTeardown: () => Promise<void> = require(
-  'detox/runners/jest/globalTeardown.js',
-);
+
+const detoxGlobalTeardown: () => Promise<void> = require('detox/runners/jest/globalTeardown.js');
 
 function findProjectRoot(...startDirs: string[]) {
   for (const startDir of startDirs) {
@@ -10,7 +9,9 @@ function findProjectRoot(...startDirs: string[]) {
     while (true) {
       const hasMarkers =
         fs.existsSync(path.join(currentDir, 'package.json')) &&
-        fs.existsSync(path.join(currentDir, 'scripts/run-prepare-local-update-artifacts.js')) &&
+        fs.existsSync(
+          path.join(currentDir, 'scripts/run-prepare-local-update-artifacts.js')
+        ) &&
         fs.existsSync(path.join(currentDir, 'scripts/local-e2e-server.ts'));
 
       if (hasMarkers) {

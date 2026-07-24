@@ -1,24 +1,37 @@
 import {
   DeviceEventEmitter,
-  EmitterSubscription,
+  type EmitterSubscription,
   Platform,
 } from 'react-native';
 import {
-  PushyModule,
   buildTime,
   cInfo,
   currentVersion,
   currentVersionInfo,
-  supportedDiffVersion,
   isFirstTime,
   isRolledBack,
+  PushyModule,
   packageVersion,
   pushyNativeEventEmitter,
   rolledBackVersion,
   setLocalHashInfo,
+  supportedDiffVersion,
 } from './core';
+import { dedupeEndpoints, executeEndpointFallback } from './endpoint';
+import {
+  asUpdateErrorCode,
+  toUpdateError,
+  UpdateError,
+  type UpdateErrorCode,
+} from './error';
+import i18n from './i18n';
 import { PermissionsAndroid } from './permissions';
 import {
+  resolveServerEventHash,
+  resolveServerEventType,
+  truncateDetail,
+} from './telemetry';
+import type {
   BeforeReloadContext,
   CheckResult,
   ClientOptions,
@@ -39,19 +52,6 @@ import {
   promiseAny,
   testUrls,
 } from './utils';
-import i18n from './i18n';
-import {
-  asUpdateErrorCode,
-  toUpdateError,
-  UpdateError,
-  UpdateErrorCode,
-} from './error';
-import { dedupeEndpoints, executeEndpointFallback } from './endpoint';
-import {
-  resolveServerEventHash,
-  resolveServerEventType,
-  truncateDetail,
-} from './telemetry';
 
 /**
  * Receives every error the client reports, alongside the report event type.
@@ -60,13 +60,16 @@ import {
  */
 export type UpdateErrorListener = (
   error: UpdateError,
-  eventType: EventType,
+  eventType: EventType
 ) => void;
 
 const SERVER_PRESETS = {
   // cn
   Pushy: {
-    main: ['https://update.react-native.cn/api', 'https://update.reactnative.cn/api'],
+    main: [
+      'https://update.react-native.cn/api',
+      'https://update.reactnative.cn/api',
+    ],
     queryUrls: [
       'https://gitee.com/sunnylqm/react-native-pushy/raw/master/endpoints.json',
       'https://cdn.jsdelivr.net/gh/reactnativecn/react-native-update@master/endpoints.json',
@@ -88,10 +91,10 @@ const cloneServerConfig = (server: UpdateServerConfig): UpdateServerConfig => ({
 
 const excludeConfiguredEndpoints = (
   endpoints: string[],
-  configuredEndpoints: string[],
+  configuredEndpoints: string[]
 ) => {
   const configured = new Set(configuredEndpoints);
-  return endpoints.filter(endpoint => !configured.has(endpoint));
+  return endpoints.filter((endpoint) => !configured.has(endpoint));
 };
 
 assertWeb();
@@ -153,7 +156,7 @@ export class Pushy {
   version = cInfo.rnu;
   loggerPromise = (() => {
     let resolve: (value?: unknown) => void = () => {};
-    const promise = new Promise(res => {
+    const promise = new Promise((res) => {
       resolve = res;
     });
     return {
@@ -167,14 +170,14 @@ export class Pushy {
     this.options.server = cloneServerConfig(SERVER_PRESETS[this.clientType]);
 
     i18n.setLocale(
-      options.locale ?? (this.clientType === 'Pushy' ? 'zh' : 'en'),
+      options.locale ?? (this.clientType === 'Pushy' ? 'zh' : 'en')
     );
 
     if (Platform.OS === 'ios' || Platform.OS === 'android') {
       if (!options.appKey) {
         throw new UpdateError(
           i18n.t('error_appkey_required'),
-          'APPKEY_REQUIRED',
+          'APPKEY_REQUIRED'
         );
       }
     }
@@ -235,7 +238,7 @@ export class Pushy {
       // no logger is ever provided.
       await Promise.race([
         this.loggerPromise.promise,
-        new Promise(resolve => setTimeout(resolve, 10 * 1000)),
+        new Promise((resolve) => setTimeout(resolve, 10 * 1000)),
       ]);
     }
     const { logger = noop, appKey } = this.options;
@@ -314,7 +317,7 @@ export class Pushy {
               detail: truncateDetail(detail),
             }),
           },
-          DEFAULT_FETCH_TIMEOUT_MS,
+          DEFAULT_FETCH_TIMEOUT_MS
         ).catch((e: any) => {
           log('telemetry report failed:', e?.message || e);
         });
@@ -366,7 +369,7 @@ export class Pushy {
     {
       message = error.message,
       data,
-    }: { message?: string; data?: Record<string, string | number> } = {},
+    }: { message?: string; data?: Record<string, string | number> } = {}
   ) => {
     this.emittedErrors.add(error);
     this.report({
@@ -424,20 +427,20 @@ export class Pushy {
     }
     try {
       const resp = await promiseAny(
-        server.queryUrls.map(queryUrl =>
-          fetchWithTimeout(queryUrl, {}, DEFAULT_FETCH_TIMEOUT_MS),
-        ),
+        server.queryUrls.map((queryUrl) =>
+          fetchWithTimeout(queryUrl, {}, DEFAULT_FETCH_TIMEOUT_MS)
+        )
       );
       const remoteEndpoints = await resp.json();
       log('fetch endpoints:', remoteEndpoints);
       if (Array.isArray(remoteEndpoints)) {
         return excludeConfiguredEndpoints(
           dedupeEndpoints(
-          remoteEndpoints.filter(
-            (endpoint): endpoint is string => typeof endpoint === 'string',
+            remoteEndpoints.filter(
+              (endpoint): endpoint is string => typeof endpoint === 'string'
+            )
           ),
-          ),
-          this.getConfiguredCheckEndpoints(),
+          this.getConfiguredCheckEndpoints()
         );
       }
     } catch (e) {
@@ -447,12 +450,12 @@ export class Pushy {
   };
   requestCheckResult = async (
     endpoint: string,
-    fetchPayload: Parameters<typeof fetch>[1],
+    fetchPayload: Parameters<typeof fetch>[1]
   ) => {
     const resp = await fetchWithTimeout(
       this.getCheckUrl(endpoint),
       fetchPayload,
-      DEFAULT_FETCH_TIMEOUT_MS,
+      DEFAULT_FETCH_TIMEOUT_MS
     );
 
     if (!resp.ok) {
@@ -463,7 +466,7 @@ export class Pushy {
           statusText: respText,
         }),
         'HTTP_STATUS',
-        { extra: { status: resp.status } },
+        { extra: { status: resp.status } }
       );
     }
 
@@ -473,7 +476,7 @@ export class Pushy {
     const { endpoint, value } = await executeEndpointFallback<CheckResult>({
       configuredEndpoints: this.getConfiguredCheckEndpoints(),
       getRemoteEndpoints: this.getRemoteEndpoints,
-      tryEndpoint: async currentEndpoint => {
+      tryEndpoint: async (currentEndpoint) => {
         try {
           return await this.requestCheckResult(currentEndpoint, fetchPayload);
         } catch (e) {
@@ -666,7 +669,7 @@ export class Pushy {
   };
   downloadUpdate = async (
     updateInfo: CheckResult,
-    onDownloadProgress?: (data: ProgressData) => void,
+    onDownloadProgress?: (data: ProgressData) => void
   ) => {
     const { hash } = updateInfo;
     if (
@@ -713,7 +716,7 @@ export class Pushy {
   };
   private performDownload = async (
     updateInfo: CheckResult,
-    onDownloadProgress?: (data: ProgressData) => void,
+    onDownloadProgress?: (data: ProgressData) => void
   ) => {
     const {
       hash,
@@ -746,7 +749,9 @@ export class Pushy {
         ...data,
         progress: computeProgress(data.received, data.total),
       };
-      callbacks.forEach(callback => callback(payload));
+      callbacks.forEach((callback) => {
+        callback(payload);
+      });
     };
     const onNativeProgress = (progressData: ProgressData) => {
       if (progressData.hash === hash) {
@@ -757,12 +762,12 @@ export class Pushy {
     if (Platform.OS === 'harmony') {
       sharedState.progressHandlers[hash] = DeviceEventEmitter.addListener(
         'RCTPushyDownloadProgress',
-        onNativeProgress,
+        onNativeProgress
       );
     } else {
       sharedState.progressHandlers[hash] = pushyNativeEventEmitter.addListener(
         'RCTPushyDownloadProgress',
-        onNativeProgress,
+        onNativeProgress
       );
     }
     const maxRetries = Math.max(0, Math.floor(this.options.maxRetries ?? 3));
@@ -778,7 +783,10 @@ export class Pushy {
     type DownloadStrategy = {
       name: string;
       candidate: string | undefined;
-      errorKey: 'error_diff_failed' | 'error_pdiff_failed' | 'error_full_patch_failed';
+      errorKey:
+        | 'error_diff_failed'
+        | 'error_pdiff_failed'
+        | 'error_full_patch_failed';
       skipInDev: boolean;
       devNoopWhenNoUrl: boolean;
       run: (url: string) => Promise<void>;
@@ -790,7 +798,7 @@ export class Pushy {
         errorKey: 'error_diff_failed',
         skipInDev: true,
         devNoopWhenNoUrl: false,
-        run: url =>
+        run: (url) =>
           PushyModule.downloadPatchFromPpk({
             updateUrl: url,
             hash,
@@ -803,7 +811,7 @@ export class Pushy {
         errorKey: 'error_pdiff_failed',
         skipInDev: true,
         devNoopWhenNoUrl: false,
-        run: url =>
+        run: (url) =>
           PushyModule.downloadPatchFromPackage({
             updateUrl: url,
             hash,
@@ -815,7 +823,7 @@ export class Pushy {
         errorKey: 'error_full_patch_failed',
         skipInDev: false,
         devNoopWhenNoUrl: true,
-        run: url =>
+        run: (url) =>
           PushyModule.downloadFullUpdate({
             updateUrl: url,
             hash,
@@ -827,7 +835,7 @@ export class Pushy {
       if (attempt > 0) {
         const backoffMs = Math.min(1000 * 2 ** (attempt - 1), 10000);
         log(`retry attempt ${attempt}/${maxRetries}, waiting ${backoffMs}ms`);
-        await new Promise(r => setTimeout(r, backoffMs));
+        await new Promise((r) => setTimeout(r, backoffMs));
         errorMessages.length = 0;
         lastError = undefined;
         succeeded = '';
@@ -860,7 +868,7 @@ export class Pushy {
             lastError = new UpdateError(
               errorMessage,
               asUpdateErrorCode(e?.code) ?? 'DOWNLOAD_FAILED',
-              { cause: e },
+              { cause: e }
             );
             log(errorMessage);
           }
@@ -926,7 +934,7 @@ export class Pushy {
   };
   downloadAndInstallApk = async (
     url: string,
-    onDownloadProgress?: (data: ProgressData) => void,
+    onDownloadProgress?: (data: ProgressData) => void
   ) => {
     if (Platform.OS !== 'android') {
       return;
@@ -937,7 +945,7 @@ export class Pushy {
     if (sharedState.apkStatus === 'downloaded') {
       const err = new UpdateError(
         this.t('error_apk_pending_install'),
-        'APK_INSTALL_PENDING',
+        'APK_INSTALL_PENDING'
       );
       this.emitError(err, 'errorInstallApk');
       this.throwIfEnabled(err);
@@ -946,12 +954,12 @@ export class Pushy {
     if (Platform.Version <= 23) {
       try {
         const granted = await PermissionsAndroid.request(
-          PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
+          PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE
         );
         if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
           const err = new UpdateError(
             this.t('error_storage_permission_rejected'),
-            'STORAGE_PERMISSION_REJECTED',
+            'STORAGE_PERMISSION_REJECTED'
           );
           this.emitError(err, 'rejectStoragePermission');
           this.throwIfEnabled(err);
@@ -978,7 +986,7 @@ export class Pushy {
             if (progressData.hash === progressKey) {
               onDownloadProgress(progressData);
             }
-          },
+          }
         );
     }
     try {
@@ -1045,7 +1053,7 @@ export class Pushy {
       // native module predates this method.
       const err = new UpdateError(
         this.t('error_reset_not_supported'),
-        'RESET_FAILED',
+        'RESET_FAILED'
       );
       this.emitError(err, 'errorReset');
       this.throwIfEnabled(err);

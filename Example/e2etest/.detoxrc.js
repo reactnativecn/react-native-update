@@ -19,12 +19,12 @@ function detectAndroidAvdName() {
     }).toString();
     const avds = output
       .split('\n')
-      .map(line => line.trim())
+      .map((line) => line.trim())
       .filter(Boolean);
 
     const preferredPatterns = [/^api34$/i, /\bapi[_-]?34\b/i, /\b34\b/];
     for (const pattern of preferredPatterns) {
-      const preferredAvd = avds.find(item => pattern.test(item));
+      const preferredAvd = avds.find((item) => pattern.test(item));
       if (preferredAvd) {
         return preferredAvd;
       }

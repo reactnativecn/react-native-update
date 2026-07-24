@@ -1,10 +1,9 @@
-import React from 'react';
-import {Pressable, StyleSheet, Text, View} from 'react-native';
-import {UpdateProvider, Pushy, useUpdate} from 'react-native-update';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pushy, UpdateProvider, useUpdate } from 'react-native-update';
 import {
+  getLocalUpdateEndpoint,
   LOCAL_UPDATE_APP_KEY,
   LOCAL_UPDATE_LABELS,
-  getLocalUpdateEndpoint,
 } from './localUpdateConfig';
 
 function App() {
@@ -14,7 +13,7 @@ function App() {
     currentHash,
     lastError,
     client,
-    progress: {received, total} = {},
+    progress: { received, total } = {},
   } = useUpdate();
   const bundleLabelGlobal = globalThis as typeof globalThis & {
     __RNU_E2E_BUNDLE_LABEL?: string;
@@ -33,7 +32,8 @@ function App() {
         style={styles.button}
         onPress={() => {
           checkUpdate();
-        }}>
+        }}
+      >
         <Text style={styles.buttonText}>Check Update</Text>
       </Pressable>
 

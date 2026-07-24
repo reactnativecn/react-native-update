@@ -19,7 +19,7 @@ const appKeyToPlatform = Object.fromEntries(
   Object.entries(LOCAL_UPDATE_APP_KEYS).map(([platform, appKey]) => [
     appKey,
     platform,
-  ]),
+  ])
 );
 
 const contentTypes: Record<string, string> = {
@@ -67,7 +67,7 @@ function buildUpdateResponse(
   platform: string,
   currentHash: string,
   diffV: number,
-  origin: string,
+  origin: string
 ) {
   const assetBasePath = `${origin}/artifacts/${platform}`;
   const fullFallback = usesFullFallback(platform);
@@ -113,7 +113,7 @@ function buildUpdateResponse(
   const v2TrackDiffPath = path.join(
     artifactsRoot,
     platform,
-    LOCAL_UPDATE_FILES.v2TrackDiff,
+    LOCAL_UPDATE_FILES.v2TrackDiff
   );
   const v2TrackPrevHash =
     platform === 'android'
@@ -189,7 +189,7 @@ const server = Bun.serve({
       const diffV = typeof payload.diffV === 'number' ? payload.diffV : 0;
 
       return json(
-        buildUpdateResponse(platform, currentHash, diffV, url.origin),
+        buildUpdateResponse(platform, currentHash, diffV, url.origin)
       );
     }
 

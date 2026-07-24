@@ -1,10 +1,10 @@
-const path = require('path');
-const { spawnSync } = require('child_process');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 
 const { buildRoot, compileNodeTs, projectRoot } = require('./compile-node-ts');
 const compiledEntry = path.join(
   buildRoot,
-  'scripts/prepare-local-update-artifacts.js',
+  'scripts/prepare-local-update-artifacts.js'
 );
 
 function run(args) {

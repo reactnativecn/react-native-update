@@ -1,7 +1,8 @@
-import { describe, expect, test, beforeEach, afterAll } from 'bun:test';
-import React, { useContext } from 'react';
+import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
+import type React from 'react';
+import { useContext } from 'react';
 import TestRenderer from 'react-test-renderer';
-import { mockAlert, emitAppStateChange } from './setup';
+import { emitAppStateChange, mockAlert } from './setup';
 
 // Render tests exercise the release code paths (assertDebug allows checks).
 const _origDEV = (globalThis as any).__DEV__;
@@ -35,7 +36,7 @@ const createClient = (options: Record<string, any> = {}) => {
     },
     assertDebug: () => true,
     checkUpdate: mock(
-      async (): Promise<CheckResult | undefined> => ({ ...updateResult }),
+      async (): Promise<CheckResult | undefined> => ({ ...updateResult })
     ),
     notifyAfterCheckUpdate: mock(() => {}),
     markSuccess: mock(() => {}),
@@ -45,7 +46,7 @@ const createClient = (options: Record<string, any> = {}) => {
       async (_info: CheckResult, onProgress?: (data: ProgressData) => void) => {
         progressCallback = onProgress;
         return 'next-hash';
-      },
+      }
     ),
     downloadAndInstallApk: mock(async () => {}),
     restartApp: mock(async () => {}),
@@ -62,7 +63,9 @@ const createClient = (options: Record<string, any> = {}) => {
     // pipeline (the provider uses it to avoid double-surfacing).
     emitError: (e: Error, eventType = 'errorChecking') => {
       emittedErrors.add(e);
-      errorListeners.forEach(listener => listener(e, eventType));
+      errorListeners.forEach((listener) => {
+        listener(e, eventType);
+      });
     },
     wasEmitted: (e: unknown) => e instanceof Error && emittedErrors.has(e),
     emitProgress: (data: ProgressData) => progressCallback?.(data),
@@ -70,18 +73,18 @@ const createClient = (options: Record<string, any> = {}) => {
   return client;
 };
 
-const flush = () => new Promise(resolve => setTimeout(resolve, 0));
+const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 const renderProvider = async (
   client: ReturnType<typeof createClient>,
-  children?: React.ReactElement,
+  children?: React.ReactElement
 ) => {
   let renderer: TestRenderer.ReactTestRenderer;
   await TestRenderer.act(async () => {
     renderer = TestRenderer.create(
       <UpdateProvider client={client as any}>
         {children ?? <></>}
-      </UpdateProvider>,
+      </UpdateProvider>
     );
     await flush();
   });
@@ -163,7 +166,7 @@ describe('UpdateProvider rendering', () => {
     expect(captured.current.lastError).toBe(checkError);
     expect(mockAlert).toHaveBeenCalledTimes(1);
     expect((mockAlert.mock.calls[0] as any[])[0]).toBe(
-      'error_update_check_failed',
+      'error_update_check_failed'
     );
   });
 
@@ -189,7 +192,9 @@ describe('UpdateProvider rendering', () => {
   });
 
   test('alertUpdateAndIgnoreError suppresses the error alert but keeps lastError', async () => {
-    const client = createClient({ updateStrategy: 'alertUpdateAndIgnoreError' });
+    const client = createClient({
+      updateStrategy: 'alertUpdateAndIgnoreError',
+    });
     const checkError = new Error('offline');
     client.checkUpdate.mockImplementation(async () => {
       client.emitError(checkError, 'errorChecking');
@@ -226,7 +231,7 @@ describe('UpdateProvider rendering', () => {
     expect(captured.current.lastError).toBeTruthy();
 
     await TestRenderer.act(async () => {
-      await new Promise(resolve => setTimeout(resolve, 60));
+      await new Promise((resolve) => setTimeout(resolve, 60));
     });
     expect(captured.current.lastError).toBeUndefined();
   });
@@ -269,7 +274,7 @@ describe('UpdateProvider rendering', () => {
       <>
         <StaticProbe />
         <ProgressProbe />
-      </>,
+      </>
     );
     // Download has started (silentAndLater) and captured the progress callback.
     expect(client.downloadUpdate).toHaveBeenCalledTimes(1);
@@ -284,7 +289,7 @@ describe('UpdateProvider rendering', () => {
       await flush();
     });
 
-    expect(progressSeen.map(p => p.received)).toEqual([1, 5]);
+    expect(progressSeen.map((p) => p.received)).toEqual([1, 5]);
     expect(staticRenders).toBe(staticRendersBefore);
   });
 });

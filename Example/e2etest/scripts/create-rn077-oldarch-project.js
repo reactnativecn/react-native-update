@@ -12,7 +12,7 @@ const baseE2eDir = path.resolve(scriptDir, '..');
 const repoRoot = path.resolve(baseE2eDir, '../..');
 const workspaceRoot = path.resolve(
   process.env.RNU_RN077_OLDARCH_ROOT ||
-    path.join(repoRoot, '.e2e-rn077-oldarch'),
+    path.join(repoRoot, '.e2e-rn077-oldarch')
 );
 const projectRoot = path.join(workspaceRoot, appName);
 
@@ -25,16 +25,20 @@ function run(command, args, options = {}) {
 
   if (result.status !== 0) {
     throw new Error(
-      `${command} ${args.join(' ')} failed with exit code ${result.status}`,
+      `${command} ${args.join(' ')} failed with exit code ${result.status}`
     );
   }
 }
 
 function copyFromBase(relativePath) {
-  fs.cpSync(path.join(baseE2eDir, relativePath), path.join(projectRoot, relativePath), {
-    recursive: true,
-    force: true,
-  });
+  fs.cpSync(
+    path.join(baseE2eDir, relativePath),
+    path.join(projectRoot, relativePath),
+    {
+      recursive: true,
+      force: true,
+    }
+  );
 }
 
 function readText(relativePath) {
@@ -59,7 +63,7 @@ function createReactNativeProject() {
       RN_VERSION,
       '--skip-install',
     ],
-    { cwd: workspaceRoot },
+    { cwd: workspaceRoot }
   );
 
   fs.rmSync(path.join(projectRoot, '.git'), { recursive: true, force: true });
@@ -84,7 +88,7 @@ function copyE2eHarness() {
 
   writeText(
     'babel.config.js',
-    "module.exports = {\n  presets: ['module:@react-native/babel-preset'],\n};\n",
+    "module.exports = {\n  presets: ['module:@react-native/babel-preset'],\n};\n"
   );
 }
 
@@ -129,7 +133,7 @@ function configureAndroidOldArchitecture() {
   let gradleProperties = readText('android/gradle.properties');
   gradleProperties = gradleProperties.replace(
     /^newArchEnabled=.*$/m,
-    'newArchEnabled=false',
+    'newArchEnabled=false'
   );
   writeText('android/gradle.properties', gradleProperties);
 
@@ -140,15 +144,15 @@ function configureAndroidOldArchitecture() {
       'versionName "1.0"',
       "        testBuildType System.getProperty('testBuildType', 'debug')",
       '        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"',
-    ].join('\n'),
+    ].join('\n')
   );
   appBuildGradle = appBuildGradle.replace(
     /release \{\n\s+\/\/ Caution!/,
-    'release {\n            crunchPngs false\n            // Caution!',
+    'release {\n            crunchPngs false\n            // Caution!'
   );
   appBuildGradle = appBuildGradle.replace(
     /dependencies \{\n/,
-    [
+    `${[
       'def detoxVersion = new groovy.json.JsonSlurper().parse(file("$rootDir/../node_modules/detox/package.json")).version',
       '',
       'repositories {',
@@ -158,7 +162,7 @@ function configureAndroidOldArchitecture() {
       '}',
       '',
       'dependencies {',
-    ].join('\n') + '\n',
+    ].join('\n')}\n`
   );
   appBuildGradle = appBuildGradle.replace(
     /implementation\("com\.facebook\.react:react-android"\)\n/,
@@ -171,11 +175,13 @@ function configureAndroidOldArchitecture() {
       '    androidTestImplementation("androidx.test:rules:1.6.1")',
       '    androidTestImplementation("androidx.test.ext:junit:1.2.1")',
       '',
-    ].join('\n'),
+    ].join('\n')
   );
   writeText('android/app/build.gradle', appBuildGradle);
 
-  copyFromBase('android/app/src/androidTest/java/com/awesomeproject/DetoxTest.java');
+  copyFromBase(
+    'android/app/src/androidTest/java/com/awesomeproject/DetoxTest.java'
+  );
   copyFromBase('android/app/src/main/res/xml/network_security_config.xml');
 
   let manifest = readText('android/app/src/main/AndroidManifest.xml');
@@ -184,12 +190,12 @@ function configureAndroidOldArchitecture() {
     [
       'android:theme="@style/AppTheme"',
       '      android:networkSecurityConfig="@xml/network_security_config"',
-    ].join('\n'),
+    ].join('\n')
   );
   writeText('android/app/src/main/AndroidManifest.xml', manifest);
 
   let mainApplication = readText(
-    'android/app/src/main/java/com/awesomeproject/MainApplication.kt',
+    'android/app/src/main/java/com/awesomeproject/MainApplication.kt'
   );
   mainApplication = mainApplication.replace(
     'import com.facebook.soloader.SoLoader\n',
@@ -197,7 +203,7 @@ function configureAndroidOldArchitecture() {
       'import com.facebook.soloader.SoLoader',
       'import cn.reactnative.modules.update.UpdateContext',
       '',
-    ].join('\n'),
+    ].join('\n')
   );
   mainApplication = mainApplication.replace(
     '        override fun getJSMainModuleName(): String = "index"\n',
@@ -206,11 +212,11 @@ function configureAndroidOldArchitecture() {
       '',
       '        override fun getJSBundleFile(): String? = UpdateContext.getBundleUrl(this@MainApplication)',
       '',
-    ].join('\n'),
+    ].join('\n')
   );
   writeText(
     'android/app/src/main/java/com/awesomeproject/MainApplication.kt',
-    mainApplication,
+    mainApplication
   );
 }
 
@@ -219,7 +225,9 @@ function main() {
   copyE2eHarness();
   writePackageJson();
   configureAndroidOldArchitecture();
-  console.log(`Created RN ${RN_VERSION} old architecture e2e project: ${projectRoot}`);
+  console.log(
+    `Created RN ${RN_VERSION} old architecture e2e project: ${projectRoot}`
+  );
 }
 
 main();

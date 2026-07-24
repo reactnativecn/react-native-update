@@ -35,7 +35,7 @@ async function waitForBundleLabel(expectedLabel: string, timeout: number) {
       const node = await driver.findById('bundle-label');
       return node?.text === expectedText ? node : undefined;
     },
-    { timeout, description: `bundle-label "${expectedText}"` },
+    { timeout, description: `bundle-label "${expectedText}"` }
   );
 }
 
@@ -48,7 +48,7 @@ async function tapCheckUpdateAndWaitForBundleLabel(expectedLabel: string) {
         expectedLabel,
         attempt < MAX_CHECK_UPDATE_ATTEMPTS
           ? RETRYABLE_RELOAD_TIMEOUT
-          : RELOAD_TIMEOUT,
+          : RELOAD_TIMEOUT
       );
       return;
     } catch (error) {
@@ -65,7 +65,7 @@ beforeAll(async () => {
   const targets = await HarmonyDriver.listTargets();
   if (targets.length === 0) {
     throw new Error(
-      'No HarmonyOS device/emulator connected (hdc list targets is empty)',
+      'No HarmonyOS device/emulator connected (hdc list targets is empty)'
     );
   }
   await driver.rport(LOCAL_UPDATE_PORT, LOCAL_UPDATE_PORT);
@@ -102,7 +102,7 @@ describe('harmony local update flow', () => {
     await driver.tapById('check-update', { timeout: READY_TIMEOUT });
     // Give a would-be update time to download and restart, then confirm the
     // label is unchanged.
-    await new Promise(resolve => setTimeout(resolve, 8000));
+    await new Promise((resolve) => setTimeout(resolve, 8000));
     await waitForBundleLabel(LABELS.v2Track, READY_TIMEOUT);
   });
 });

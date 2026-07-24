@@ -19,26 +19,33 @@ function detectIosSimulatorType() {
 
     const lines = output
       .split('\n')
-      .map(line => line.trim())
+      .map((line) => line.trim())
       .filter(Boolean);
 
     // Strip the trailing "(UDID) (State)" instead of cutting at the first
     // " (" — device names can themselves contain parentheses, e.g.
     // "iPhone SE (3rd generation)".
-    const extractName = line =>
+    const extractName = (line) =>
       line.replace(/\s*\([0-9A-Fa-f-]{36}\).*$/, '').trim();
 
-    const preferredPrefixes = ['iPhone 17', 'iPhone 16', 'iPhone 15', 'iPhone 14'];
+    const preferredPrefixes = [
+      'iPhone 17',
+      'iPhone 16',
+      'iPhone 15',
+      'iPhone 14',
+    ];
 
     for (const prefix of preferredPrefixes) {
-      const line = lines.find(item => item.startsWith(prefix) && item.includes('('));
+      const line = lines.find(
+        (item) => item.startsWith(prefix) && item.includes('(')
+      );
       if (line) {
         return extractName(line);
       }
     }
 
     const fallbackLine = lines.find(
-      item => item.startsWith('iPhone ') && item.includes('('),
+      (item) => item.startsWith('iPhone ') && item.includes('(')
     );
     if (fallbackLine) {
       return extractName(fallbackLine);
@@ -58,14 +65,14 @@ function detectBootTargetUdid() {
     const json = JSON.parse(
       execSync('xcrun simctl list devices available --json', {
         stdio: ['ignore', 'pipe', 'ignore'],
-      }).toString(),
+      }).toString()
     );
     // runtime key 形如 com.apple.CoreSimulator.SimRuntime.iOS-26-5,
     // 取版本号最大的 runtime 里第一台同名可用设备
     const runtimes = Object.keys(json.devices)
-      .filter(key => /SimRuntime\.iOS-/.test(key))
+      .filter((key) => /SimRuntime\.iOS-/.test(key))
       .sort((a, b) => {
-        const ver = key =>
+        const ver = (key) =>
           key
             .replace(/^.*iOS-/, '')
             .split('-')
@@ -76,7 +83,7 @@ function detectBootTargetUdid() {
       });
     for (const runtime of runtimes) {
       const device = json.devices[runtime].find(
-        item => item.name === name && item.isAvailable,
+        (item) => item.name === name && item.isAvailable
       );
       if (device) {
         return device.udid;
@@ -94,6 +101,6 @@ if (require.main === module) {
   process.stdout.write(
     process.argv.includes('--udid')
       ? detectBootTargetUdid()
-      : detectIosSimulatorType(),
+      : detectIosSimulatorType()
   );
 }

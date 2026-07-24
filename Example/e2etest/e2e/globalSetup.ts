@@ -1,7 +1,7 @@
+import { spawn, spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as http from 'node:http';
 import * as path from 'node:path';
-import { spawn, spawnSync } from 'node:child_process';
 import {
   LOCAL_UPDATE_APP_KEYS,
   LOCAL_UPDATE_FILES,
@@ -17,10 +17,7 @@ function findProjectRoot(...startDirs: string[]) {
       const hasMarkers =
         fs.existsSync(path.join(currentDir, 'package.json')) &&
         fs.existsSync(
-          path.join(
-            currentDir,
-            'scripts/run-prepare-local-update-artifacts.js',
-          ),
+          path.join(currentDir, 'scripts/run-prepare-local-update-artifacts.js')
         ) &&
         fs.existsSync(path.join(currentDir, 'scripts/local-e2e-server.ts'));
 
@@ -41,7 +38,7 @@ function findProjectRoot(...startDirs: string[]) {
 
 const projectRoot = findProjectRoot(process.cwd(), __dirname);
 const packageJson = JSON.parse(
-  fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8'),
+  fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8')
 ) as { dependencies?: { 'react-native'?: string } };
 const reactNativeVersion =
   packageJson.dependencies?.['react-native'] || 'unknown';
@@ -67,7 +64,7 @@ async function killExistingServer() {
         } catch {
           return; // process is gone
         }
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await new Promise((resolve) => setTimeout(resolve, 100));
       }
     }
   } catch {
@@ -78,7 +75,7 @@ async function killExistingServer() {
 function runPrepareScript() {
   const prepareScript = path.join(
     projectRoot,
-    'scripts/run-prepare-local-update-artifacts.js',
+    'scripts/run-prepare-local-update-artifacts.js'
   );
 
   const result = spawnSync(process.execPath, [prepareScript], {
@@ -91,7 +88,7 @@ function runPrepareScript() {
 
   if (result.status !== 0) {
     throw new Error(
-      `Failed to prepare local update artifacts, exit code: ${result.status}`,
+      `Failed to prepare local update artifacts, exit code: ${result.status}`
     );
   }
 }
@@ -100,7 +97,7 @@ function ensurePreparedArtifacts(platform: string) {
   const manifestPath = path.join(artifactsRoot, platform, 'manifest.json');
   if (!fs.existsSync(manifestPath)) {
     throw new Error(
-      `RNU_E2E_SKIP_PREPARE is set, but local update artifacts are missing: ${manifestPath}`,
+      `RNU_E2E_SKIP_PREPARE is set, but local update artifacts are missing: ${manifestPath}`
     );
   }
 }
@@ -144,7 +141,7 @@ function waitForServer(timeoutMs = 30000) {
 
   return new Promise<void>((resolve, reject) => {
     const poll = () => {
-      const req = http.get(url, res => {
+      const req = http.get(url, (res) => {
         if (res.statusCode === 200) {
           resolve();
           return;
@@ -161,7 +158,7 @@ function waitForServer(timeoutMs = 30000) {
     const retry = () => {
       if (Date.now() - start > timeoutMs) {
         reject(
-          new Error('Local artifacts server did not become ready in time.'),
+          new Error('Local artifacts server did not become ready in time.')
         );
         return;
       }
@@ -173,14 +170,14 @@ function waitForServer(timeoutMs = 30000) {
 }
 
 function sleep(ms: number) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function waitForRequestReady(
   url: string,
   init: RequestInit,
   label: string,
-  timeoutMs = 30000,
+  timeoutMs = 30000
 ) {
   const start = Date.now();
 
@@ -227,7 +224,7 @@ async function warmServer(platform: 'ios' | 'android') {
       },
       body: payload,
     },
-    'Local artifacts checkUpdate route',
+    'Local artifacts checkUpdate route'
   );
 
   const fullFallback = usesFullFallbackArtifacts(platform);
@@ -251,7 +248,7 @@ async function warmServer(platform: 'ios' | 'android') {
       {
         method: 'HEAD',
       },
-      `Local artifact ${platform}/${fileName}`,
+      `Local artifact ${platform}/${fileName}`
     );
   }
 }

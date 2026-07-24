@@ -1,3 +1,7 @@
 {
-  "extends": "@tsconfig/react-native/tsconfig.json"
+  "extends": "@tsconfig/react-native/tsconfig.json",
+  "compilerOptions": {
+    "moduleResolution": "bundler"
+  },
+  "exclude": ["**/node_modules", "**/harmony", "**/android", "**/ios"]
 }
