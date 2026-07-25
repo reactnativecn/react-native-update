@@ -1,4 +1,16 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test';
+import { installBaseMocks } from './setup';
+
+// Captured before this file installs its stubs so the real implementations can
+// be put back afterwards. mock.module() is process-global and outlives the file
+// that registered it, so without this the stubs below are what later test files
+// import — silently, as wrong values (utils.test.ts) or as a link failure that
+// skips a whole file (provider.render.test.tsx never sees core's full exports).
+const realModules: Record<string, Record<string, unknown>> = {
+  '../core': { ...(await import('../core')) },
+  '../permissions': { ...(await import('../permissions')) },
+  '../utils': { ...(await import('../utils')) },
+};
 
 const importFreshClient = (cacheKey: string) => import(`../client?${cacheKey}`);
 
@@ -6,6 +18,12 @@ const originalDev = (globalThis as any).__DEV__;
 
 afterEach(() => {
   mock.restore();
+  // mock.restore() drops the preload's module mocks too, so re-arm them and
+  // undo this file's own module mocks; both otherwise leak across files.
+  installBaseMocks();
+  for (const [specifier, exports] of Object.entries(realModules)) {
+    mock.module(specifier, () => exports);
+  }
   (globalThis as any).__DEV__ = originalDev;
 });
 
