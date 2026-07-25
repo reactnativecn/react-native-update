@@ -1,18 +1,23 @@
-import { describe, expect, it, mock } from 'bun:test';
+import { beforeEach, describe, expect, it, mock } from 'bun:test';
 
 // Use the preload setup file instead of inline mocks since bun resolves
 // dynamic imports relative to the test runner's context and caching.
 import './setup';
 
 let mockUuid = '';
-mock.module('../core', () => {
-  return {
-    cInfo: {
-      get uuid() {
-        return mockUuid;
+// Installed per test: setup.ts hands every module back to its real
+// implementation after each test, so a file-scope mock would only survive the
+// first one.
+beforeEach(() => {
+  mock.module('../core', () => {
+    return {
+      cInfo: {
+        get uuid() {
+          return mockUuid;
+        },
       },
-    },
-  };
+    };
+  });
 });
 
 // Use a monotonic counter instead of Date.now() to avoid cache collisions
