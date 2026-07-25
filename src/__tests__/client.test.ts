@@ -30,6 +30,8 @@ const setupClientMocks = ({
   // null simulates an older native module without the method (undefined would
   // just re-trigger this default).
   resetToPackagedBundle = mock(() => Promise.resolve()),
+  // 原生上报的可消费 diff 轨道版本;0 模拟旧原生(不上报 diffV)
+  supportedDiffVersion = 2,
 }: {
   isFirstTime?: boolean;
   markSuccess?: ReturnType<typeof mock>;
@@ -41,6 +43,7 @@ const setupClientMocks = ({
   addProgressListener?: ReturnType<typeof mock>;
   restartApp?: ReturnType<typeof mock>;
   resetToPackagedBundle?: ReturnType<typeof mock> | null;
+  supportedDiffVersion?: number;
 } = {}) => {
   (globalThis as any).__DEV__ = false;
 
@@ -87,6 +90,7 @@ const setupClientMocks = ({
     },
     rolledBackVersion: '',
     setLocalHashInfo: mock(() => {}),
+    supportedDiffVersion,
   }));
 
   mock.module('../permissions', () => ({
@@ -151,6 +155,7 @@ const setupAndroidApkMocks = (
     },
     rolledBackVersion: '',
     setLocalHashInfo: mock(() => {}),
+    supportedDiffVersion: 2,
   }));
 
   mock.module('../permissions', () => ({
@@ -281,6 +286,30 @@ describe('Pushy server config', () => {
       status: 'completed',
       result: checkResult,
     });
+  });
+
+  test('reports the native diff track version as diffV in the check body', async () => {
+    setupClientMocks({ supportedDiffVersion: 2 });
+    const fetchMock = mock(async () => createJsonResponse({ update: false }));
+    (globalThis as any).fetch = fetchMock;
+
+    const { Pushy } = await importFreshClient('check-body-diffv');
+    await new Pushy({ appKey: 'demo-app' }).checkUpdate();
+
+    const body = JSON.parse((fetchMock.mock.calls[0] as any[])[1].body);
+    expect(body.diffV).toBe(2);
+  });
+
+  test('omits diffV when the native module reports no diff track support', async () => {
+    setupClientMocks({ supportedDiffVersion: 0 });
+    const fetchMock = mock(async () => createJsonResponse({ update: false }));
+    (globalThis as any).fetch = fetchMock;
+
+    const { Pushy } = await importFreshClient('check-body-no-diffv');
+    await new Pushy({ appKey: 'demo-app' }).checkUpdate();
+
+    const body = JSON.parse((fetchMock.mock.calls[0] as any[])[1].body);
+    expect(body).not.toHaveProperty('diffV');
   });
 
   test('calls afterCheckUpdate with error before rethrowing when throwError is enabled', async () => {
