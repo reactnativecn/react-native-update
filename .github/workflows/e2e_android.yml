@@ -139,7 +139,7 @@ jobs:
       - name: Upload Detox artifacts
         # cancelled() 覆盖 job 超时被杀的场景,否则超时时拿不到现场
         if: failure() || cancelled()
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-android-detox-artifacts
           path: Example/e2etest/artifacts
@@ -246,7 +246,7 @@ jobs:
       - name: Upload Detox artifacts
         # cancelled() 覆盖 job 超时被杀的场景,否则超时时拿不到现场
         if: failure() || cancelled()
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-android-debug-smoke-detox-artifacts
           path: |
@@ -357,7 +357,7 @@ jobs:
       - name: Upload Detox artifacts
         # cancelled() 覆盖 job 超时被杀的场景,否则超时时拿不到现场
         if: failure() || cancelled()
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-android-rn077-oldarch-detox-artifacts
           path: .e2e-rn077-oldarch/AwesomeProject/artifacts

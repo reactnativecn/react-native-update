@@ -94,7 +94,7 @@ jobs:
       - name: Upload failure diagnostics
         # cancelled() 覆盖 job 超时被杀的场景,否则超时时拿不到现场
         if: failure() || cancelled()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: harmony-e2e-diagnostics
           path: harmony-diagnostics/

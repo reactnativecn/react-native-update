@@ -61,7 +61,7 @@ jobs:
         # resolution order — force the pinned one so published .so files don't
         # drift with runner image upgrades.
         run: ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$NDK_VERSION" bash scripts/build-android-so.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: android-so
           path: android/lib/
