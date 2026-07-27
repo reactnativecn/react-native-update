@@ -6,6 +6,7 @@ import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.modules.core.DeviceEventManagerModule;
 import com.facebook.react.bridge.WritableMap;
 import java.lang.ref.WeakReference;
+import java.lang.reflect.Method;
 
 final class UpdateEventEmitter {
     private static WeakReference<ReactApplicationContext> reactContextRef =
@@ -45,12 +46,20 @@ final class UpdateEventEmitter {
     @SuppressWarnings("deprecation")
     private static boolean hasActiveInstance(ReactApplicationContext reactContext) {
         try {
-            // hasActiveCatalystInstance() is always false in bridgeless mode, which
-            // silently drops every progress event on the new architecture.
-            return reactContext.hasActiveReactInstance();
-        } catch (NoSuchMethodError e) {
+            // Use reflection for hasActiveReactInstance() because older RN versions (<0.68)
+            // don't have this method in the class signature at compile time.
+            Method method = reactContext.getClass().getMethod("hasActiveReactInstance");
+            Object result = method.invoke(reactContext);
+            if (result instanceof Boolean) {
+                return (Boolean) result;
+            }
+        } catch (Throwable ignored) {
             // RN < 0.68 has no hasActiveReactInstance(); fall back for old peers.
+        }
+        try {
             return reactContext.hasActiveCatalystInstance();
+        } catch (Throwable ignored) {
+            return false;
         }
     }
 }
