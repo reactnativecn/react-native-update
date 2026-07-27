@@ -17,14 +17,29 @@ export interface VersionInfo {
 }
 
 interface RootResult {
-  upToDate?: true;
-  expired?: true;
+  upToDate?: boolean;
+  expired?: boolean;
   downloadUrl?: string;
-  update?: true;
+  update?: boolean;
   paused?: 'app' | 'package';
   message?: string;
   paths?: string[];
 }
+
+export type UpToDateCheckResult = RootResult & {
+  upToDate: true;
+};
+
+export type UpdateAvailableCheckResult = RootResult &
+  Partial<VersionInfo> & {
+    update: true;
+    expVersion?: VersionInfo;
+  };
+
+export type ExpiredCheckResult = RootResult & {
+  expired: true;
+  downloadUrl: string;
+};
 
 export type CheckResult = RootResult &
   Partial<VersionInfo> & {

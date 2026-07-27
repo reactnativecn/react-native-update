@@ -99,7 +99,7 @@ const excludeConfiguredEndpoints = (
 
 assertWeb();
 
-const defaultClientOptions: ClientOptions = {
+const createDefaultClientOptions = (): ClientOptions => ({
   appKey: '',
   autoMarkSuccess: true,
   updateStrategy: __DEV__ ? 'alwaysAlert' : 'alertUpdateAndIgnoreError',
@@ -107,7 +107,7 @@ const defaultClientOptions: ClientOptions = {
   logger: noop,
   debug: false,
   throwError: false,
-};
+});
 
 export const sharedState: {
   progressHandlers: Record<string, EmitterSubscription>;
@@ -145,7 +145,7 @@ const assertHash = (hash: string) => {
 
 // for China users
 export class Pushy {
-  options = { ...defaultClientOptions };
+  options: ClientOptions = createDefaultClientOptions();
   clientType: 'Pushy' | 'Cresc' = 'Pushy';
   lastChecking?: number;
   lastRespJson?: Promise<CheckResult>;

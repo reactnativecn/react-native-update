@@ -1206,3 +1206,22 @@ describe('downloadAndInstallApk apkStatus (JS-3)', () => {
     expect(sharedState.apkStatus).toBe('downloaded');
   });
 });
+
+describe('options isolation across instances', () => {
+  test('mutating options on one instance does not affect another instance', async () => {
+    setupClientMocks();
+    const { Pushy } = await importFreshClient('options-isolation');
+    const client1 = new Pushy({ appKey: 'app-1', debug: true });
+    const client2 = new Pushy({ appKey: 'app-2', debug: false });
+
+    client1.setOptions({ updateStrategy: 'alwaysAlert' });
+
+    expect(client1.options.appKey).toBe('app-1');
+    expect(client1.options.debug).toBe(true);
+    expect(client1.options.updateStrategy).toBe('alwaysAlert');
+
+    expect(client2.options.appKey).toBe('app-2');
+    expect(client2.options.debug).toBe(false);
+    expect(client2.options.updateStrategy).not.toBe('alwaysAlert');
+  });
+});
