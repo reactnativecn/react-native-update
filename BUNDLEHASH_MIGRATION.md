@@ -1,6 +1,10 @@
 # bundleHash 迁移执行方案
 
-> 状态：**Phase 0（客户端）、Phase 1（CLI）、Phase 2 核心（服务端）已实现**，均未提交；Phase 2 遗留控制台聚合/digests 下发（见 §4.5），Phase 3 待 Phase 2 稳定
+> 状态：**Phase 0/1/2 已实现、已提交；两台服务端已完成生产迁移与部署（2026-07-29）**
+> - DB：pushy 北京 RDS 与 cresc Cloud SQL 均已加 `packages.bundleHash` 列（幂等 runner 在 `scripts/migrate-add-package-bundle-hash.ts`；cresc 经一次性 Cloud Run Job 进 VPC 执行）
+> - 服务：pushy `p`/`s1` @ `2026.7.29-a2ecac26`，cresc api/worker/dailyjob @ `2026.7.29-3aabff91`，线上带 `bundleHash` 冒烟均通过
+> - **`bundleHashJudge.enabled` 仍为关**——待 CLI/客户端发版、覆盖率起来后再开
+> - 客户端与 CLI 已提交**未发版**（npm 发布是独立决策）；Phase 2 遗留见 §4.5，Phase 3 待观察期后
 > 依据：`BUNDLEHASH_DESIGN.md`（设计定稿）。本文只讲**怎么落地**，不重复论证为什么。
 > 下游：`NATIVE_CHECKUPDATE_DESIGN.md` 的协议下沉必须等本迁移完成，否则协议下沉后再改协议要返工。
 
