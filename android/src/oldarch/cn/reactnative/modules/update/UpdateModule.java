@@ -76,6 +76,11 @@ public class UpdateModule extends ReactContextBaseJavaModule {
     }
 
     @ReactMethod
+    public void getBundleHash(Promise promise) {
+        UpdateModuleImpl.getBundleHash(updateContext, promise);
+    }
+
+    @ReactMethod
     public void resetToPackagedBundle(Promise promise) {
         UpdateModuleImpl.resetToPackagedBundle(updateContext, promise);
     }

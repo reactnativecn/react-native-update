@@ -32,6 +32,8 @@ const setupClientMocks = ({
   resetToPackagedBundle = mock(() => Promise.resolve()),
   // 原生上报的可消费 diff 轨道版本;0 模拟旧原生(不上报 diffV)
   supportedDiffVersion = 2,
+  // 内嵌 bundle 的 sha256(core 层同步读预取值);'' 模拟未知
+  getBundleHash = mock(() => ''),
 }: {
   isFirstTime?: boolean;
   markSuccess?: ReturnType<typeof mock>;
@@ -44,6 +46,7 @@ const setupClientMocks = ({
   restartApp?: ReturnType<typeof mock>;
   resetToPackagedBundle?: ReturnType<typeof mock> | null;
   supportedDiffVersion?: number;
+  getBundleHash?: ReturnType<typeof mock>;
 } = {}) => {
   (globalThis as any).__DEV__ = false;
 
@@ -91,6 +94,7 @@ const setupClientMocks = ({
     rolledBackVersion: '',
     setLocalHashInfo: mock(() => {}),
     supportedDiffVersion,
+    getBundleHash,
   }));
 
   mock.module('../permissions', () => ({
@@ -156,6 +160,7 @@ const setupAndroidApkMocks = (
     rolledBackVersion: '',
     setLocalHashInfo: mock(() => {}),
     supportedDiffVersion: 2,
+    getBundleHash: mock(() => ''),
   }));
 
   mock.module('../permissions', () => ({
@@ -310,6 +315,70 @@ describe('Pushy server config', () => {
 
     const body = JSON.parse((fetchMock.mock.calls[0] as any[])[1].body);
     expect(body).not.toHaveProperty('diffV');
+  });
+
+  test('reports the embedded bundle hash as bundleHash in the check body', async () => {
+    setupClientMocks({ getBundleHash: mock(() => 'a'.repeat(64)) });
+    const fetchMock = mock(async () => createJsonResponse({ update: false }));
+    (globalThis as any).fetch = fetchMock;
+
+    const { Pushy } = await importFreshClient('check-body-bundlehash');
+    await new Pushy({ appKey: 'demo-app' }).checkUpdate();
+
+    const body = JSON.parse((fetchMock.mock.calls[0] as any[])[1].body);
+    expect(body.bundleHash).toBe('a'.repeat(64));
+  });
+
+  test('omits bundleHash while the hash is unknown', async () => {
+    // '' covers "not computed yet" (first launch), debug builds, older native
+    // modules and missing embedded bundles alike; the check proceeds without
+    // the field and the server falls back to the buildTime heuristic.
+    setupClientMocks({ getBundleHash: mock(() => '') });
+    const fetchMock = mock(async () => createJsonResponse({ update: false }));
+    (globalThis as any).fetch = fetchMock;
+
+    const { Pushy } = await importFreshClient('check-body-no-bundlehash');
+    await new Pushy({ appKey: 'demo-app' }).checkUpdate();
+
+    const body = JSON.parse((fetchMock.mock.calls[0] as any[])[1].body);
+    expect(body).not.toHaveProperty('bundleHash');
+  });
+
+  test('surfaces an unknownBundle verdict through the logger as bundleMismatch', async () => {
+    setupClientMocks({ getBundleHash: mock(() => 'b'.repeat(64)) });
+    (globalThis as any).fetch = mock(async () =>
+      createJsonResponse({ upToDate: true, bundleStatus: 'unknownBundle' })
+    );
+
+    const { Pushy } = await importFreshClient('check-unknown-bundle');
+    const events: any[] = [];
+    const client = new Pushy({
+      appKey: 'demo-app',
+      logger: (event: any) => events.push(event),
+    });
+    const result = await client.checkUpdate();
+
+    expect(result?.bundleStatus).toBe('unknownBundle');
+    const mismatch = events.find((event) => event.type === 'bundleMismatch');
+    expect(mismatch).toBeDefined();
+    expect(mismatch.data.bundleHash).toBe('b'.repeat(64));
+  });
+
+  test('matched bundleStatus stays silent', async () => {
+    setupClientMocks({ getBundleHash: mock(() => 'c'.repeat(64)) });
+    (globalThis as any).fetch = mock(async () =>
+      createJsonResponse({ upToDate: true, bundleStatus: 'matched' })
+    );
+
+    const { Pushy } = await importFreshClient('check-matched-bundle');
+    const events: any[] = [];
+    const client = new Pushy({
+      appKey: 'demo-app',
+      logger: (event: any) => events.push(event),
+    });
+    await client.checkUpdate();
+
+    expect(events.some((event) => event.type === 'bundleMismatch')).toBe(false);
   });
 
   test('calls afterCheckUpdate with error before rethrowing when throwError is enabled', async () => {

@@ -24,6 +24,13 @@ interface RootResult {
   paused?: 'app' | 'package';
   message?: string;
   paths?: string[];
+  /**
+   * Server verdict on the reported bundleHash: 'matched' — the installed
+   * binary is registered; 'rebuiltSameJs' — repackaged binary with identical
+   * JS (no upload needed); 'unknownBundle' — unregistered binary, incremental
+   * updates degraded to full downloads until the package is uploaded.
+   */
+  bundleStatus?: 'matched' | 'rebuiltSameJs' | 'unknownBundle';
 }
 
 export type UpToDateCheckResult = RootResult & {
@@ -72,6 +79,10 @@ export type EventType =
   | 'errorMarkSuccess'
   | 'reset'
   | 'errorReset'
+  // Server reported bundleStatus: unknownBundle — the installed binary is not
+  // registered on the update platform (developer-facing only, local logger;
+  // not a server telemetry event).
+  | 'bundleMismatch'
   | 'errorRestart'
   | 'errorSwitchVersion'
   | 'downloadingApk'

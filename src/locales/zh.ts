@@ -42,6 +42,8 @@ export default {
   // Error messages
   error_appkey_required: '需要提供 appKey',
   error_parse_version_info: '解析 currentVersionInfo 失败: {{info}}',
+  warn_unknown_bundle:
+    '当前二进制内嵌 bundle 未在更新平台注册，增量更新已降级为全量。请使用 pushy uploadIpa / uploadApk / uploadApp 上传对应安装包。',
   error_update_check_failed: '更新检查失败',
   error_cannot_connect_server: '无法连接到更新服务器。请检查网络连接。',
   error_cannot_connect_backup:

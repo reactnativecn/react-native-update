@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "archive_patch_core.h"
+#include "digest.h"
 #include "hbc_transform_wire.h"
 #include "patch_core.h"
 #include "state_core.h"
@@ -890,6 +891,51 @@ bool ExportFunction(
 }  // namespace
 
 
+// sha256(Uint8Array | ArrayBuffer) -> 小写 hex。同步：bundleHash 的输入是
+// rawfile 里的 bundle(已整体读入内存,与 pdiff 的读法一致),哈希本身毫秒级。
+static napi_value Sha256Hex(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value args[1] = {nullptr};
+  if (!GetArgCount(env, info, &argc, args) || argc < 1) {
+    ThrowError(env, "sha256Hex: missing data argument");
+    return nullptr;
+  }
+
+  void* data = nullptr;
+  size_t length = 0;
+  bool is_typedarray = false;
+  napi_is_typedarray(env, args[0], &is_typedarray);
+  if (is_typedarray) {
+    napi_typedarray_type type;
+    napi_value arraybuffer = nullptr;
+    size_t offset = 0;
+    if (napi_get_typedarray_info(
+            env, args[0], &type, &length, &data, &arraybuffer, &offset) !=
+        napi_ok) {
+      ThrowError(env, "sha256Hex: cannot read typed array");
+      return nullptr;
+    }
+  } else {
+    bool is_arraybuffer = false;
+    napi_is_arraybuffer(env, args[0], &is_arraybuffer);
+    if (!is_arraybuffer ||
+        napi_get_arraybuffer_info(env, args[0], &data, &length) != napi_ok) {
+      ThrowError(env, "sha256Hex: expected Uint8Array or ArrayBuffer");
+      return nullptr;
+    }
+  }
+
+  pushy::digest::Sha256 hasher;
+  if (length > 0) {
+    hasher.Update(static_cast<const uint8_t*>(data), length);
+  }
+  const std::string hex = hasher.HexDigest();
+
+  napi_value result = nullptr;
+  napi_create_string_utf8(env, hex.c_str(), hex.size(), &result);
+  return result;
+}
+
 // 原生 patch 内核可消费的 diff 轨道版本(2 = hdiffv2 轨道)
 static napi_value GetSupportedDiffVersion(napi_env env, napi_callback_info) {
   napi_value result = nullptr;
@@ -907,6 +953,7 @@ napi_value Init(napi_env env, napi_value exports) {
       !ExportFunction(env, exports, "buildCopyGroups", BuildCopyGroups) ||
       !ExportFunction(env, exports, "applyPatchFromFileSource", ApplyPatchFromFileSource) ||
       !ExportFunction(env, exports, "cleanupOldEntries", CleanupOldEntries) ||
+      !ExportFunction(env, exports, "sha256Hex", Sha256Hex) ||
       !ExportFunction(env, exports, "getSupportedDiffVersion", GetSupportedDiffVersion)) {
     return nullptr;
   }

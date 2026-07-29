@@ -37,6 +37,7 @@ c++ \
   $COMMON_INCLUDES \
   "$ROOT_DIR/cpp/patch_core/tests/patch_core_test.cpp" \
   "$ROOT_DIR/cpp/patch_core/archive_patch_core.cpp" \
+  "$ROOT_DIR/cpp/patch_core/digest.cpp" \
   "$ROOT_DIR/cpp/patch_core/patch_core.cpp" \
   "$ROOT_DIR/cpp/patch_core/state_core.cpp" \
   "$ROOT_DIR/cpp/patch_core/hbc_transform.cpp" \

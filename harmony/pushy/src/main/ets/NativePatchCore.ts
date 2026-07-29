@@ -80,6 +80,8 @@ interface NativePatchCoreBindings {
     keepPrevious: string,
     maxAgeDays: number,
   ): Promise<void>;
+  /** sha256(小写 hex)。同步:输入是已在内存的 rawfile bundle,哈希毫秒级 */
+  sha256Hex(data: Uint8Array): string;
   /** 原生 patch 内核可消费的 diff 轨道版本(2 = hdiffv2 轨道) */
   getSupportedDiffVersion(): number;
 }

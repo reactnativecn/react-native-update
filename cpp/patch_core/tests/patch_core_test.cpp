@@ -1,4 +1,5 @@
 #include "../archive_patch_core.h"
+#include "../digest.h"
 #include "../patch_core.h"
 #include "../state_core.h"
 
@@ -747,6 +748,72 @@ void TestStateCoreSwitchToSameVersion() {
   Expect(!switched.first_time_ok, "first_time_ok should be false");
 }
 
+// NIST FIPS 180-4 vectors. These anchor the C++ implementation (iOS/Harmony)
+// and, by transitivity, Android's java.security.MessageDigest and the CLI's
+// node:crypto to the same standard — the bundleHash produced on any of them
+// must be byte-identical for the same input.
+void TestSha256KnownVectors() {
+  {
+    pushy::digest::Sha256 hasher;
+    ExpectEq(
+        hasher.HexDigest(),
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "sha256 of empty input");
+  }
+  {
+    pushy::digest::Sha256 hasher;
+    const char* input = "abc";
+    hasher.Update(reinterpret_cast<const uint8_t*>(input), 3);
+    ExpectEq(
+        hasher.HexDigest(),
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        "sha256 of \"abc\"");
+  }
+  {
+    pushy::digest::Sha256 hasher;
+    const std::string input =
+        "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq";
+    hasher.Update(
+        reinterpret_cast<const uint8_t*>(input.data()), input.size());
+    ExpectEq(
+        hasher.HexDigest(),
+        "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1",
+        "sha256 of NIST two-block message");
+  }
+}
+
+void TestSha256StreamingMatchesOneShot() {
+  // One million 'a' (NIST long vector), fed in deliberately awkward chunk
+  // sizes to cross every buffer boundary case in Update.
+  const std::string chunk(4096 + 37, 'a');
+  size_t remaining = 1000000;
+  pushy::digest::Sha256 hasher;
+  while (remaining > 0) {
+    const size_t take = remaining < chunk.size() ? remaining : chunk.size();
+    hasher.Update(reinterpret_cast<const uint8_t*>(chunk.data()), take);
+    remaining -= take;
+  }
+  ExpectEq(
+      hasher.HexDigest(),
+      "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0",
+      "sha256 of one million 'a' fed in odd-sized chunks");
+}
+
+void TestSha256File() {
+  TempDir temp;
+  const std::string dir = temp.path;
+  const std::string path = dir + "/input.bin";
+  WriteFile(path, "abc");
+  ExpectEq(
+      pushy::digest::Sha256File(path),
+      "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+      "Sha256File over a small file");
+  ExpectEq(
+      pushy::digest::Sha256File(dir + "/missing.bin"),
+      "",
+      "Sha256File over a missing file returns empty");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -778,6 +845,9 @@ int main(int argc, char** argv) {
       {"StateCoreRollbackToEmptyVersion", TestStateCoreRollbackToEmptyVersion},
       {"StateCoreResolveLaunchNoCurrentVersion", TestStateCoreResolveLaunchNoCurrentVersion},
       {"StateCoreSwitchToSameVersion", TestStateCoreSwitchToSameVersion},
+      {"Sha256KnownVectors", TestSha256KnownVectors},
+      {"Sha256StreamingMatchesOneShot", TestSha256StreamingMatchesOneShot},
+      {"Sha256File", TestSha256File},
   };
 
   int failures = 0;

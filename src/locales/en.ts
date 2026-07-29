@@ -44,6 +44,8 @@ export default {
   // Error messages
   error_appkey_required: 'appKey is required',
   error_parse_version_info: 'Failed to parse currentVersionInfo: {{info}}',
+  warn_unknown_bundle:
+    'The bundle embedded in this binary is not registered on the update platform; incremental updates are degraded to full downloads. Upload the package with pushy uploadIpa / uploadApk / uploadApp.',
   error_update_check_failed: 'Update check failed',
   error_cannot_connect_server:
     'Can not connect to update server. Please check your network.',

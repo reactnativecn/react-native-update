@@ -111,6 +111,7 @@ Pod::Spec.new do |s|
   s.subspec 'RCTPushy' do |ss|
     ss.source_files = ['ios/RCTPushy/*.{h,m,mm}',
                        'cpp/patch_core/archive_patch_core.{h,cpp}',
+                       'cpp/patch_core/digest.{h,cpp}',
                        'cpp/patch_core/hbc_transform.{h,cpp}',
                        'cpp/patch_core/hbc_transform_wire.{h,cpp}',
                        'cpp/patch_core/patch_core.{h,cpp}',

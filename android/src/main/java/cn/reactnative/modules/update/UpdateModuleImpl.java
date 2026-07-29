@@ -191,6 +191,17 @@ public class UpdateModuleImpl {
         });
     }
 
+    public static void getBundleHash(final UpdateContext updateContext, final Promise promise) {
+        // Threading lives in UpdateContext (download executor); resolve is
+        // thread-safe. Never rejects — empty string means "unknown".
+        updateContext.getBundleHash(new UpdateContext.BundleHashListener() {
+            @Override
+            public void onBundleHash(String hash) {
+                promise.resolve(hash);
+            }
+        });
+    }
+
     public static void resetToPackagedBundle(
         final UpdateContext updateContext,
         final Promise promise

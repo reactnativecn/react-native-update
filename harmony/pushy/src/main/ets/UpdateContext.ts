@@ -632,4 +632,58 @@ export class UpdateContext {
   public getIsUsingBundleUrl(): boolean {
     return UpdateContext.isUsingBundleUrl;
   }
+
+  // bundleHash 缓存:"<packageVersion>|<updateTime>|<sha256hex>"。键标识当前
+  // 安装的二进制,每次(覆盖)安装 updateTime 都会变,每个安装只算一次。
+  private static readonly KEY_BUNDLE_HASH_CACHE = 'bundleHashCache';
+
+  private getBundleUpdateTime(): number {
+    try {
+      const bundleInfo = bundleManager.getBundleInfoForSelfSync(
+        this.getBundleFlags(),
+      );
+      return bundleInfo?.updateTime ?? 0;
+    } catch (error) {
+      console.error('Failed to get bundle update time:', error);
+      return 0;
+    }
+  }
+
+  /**
+   * bundleHash = 二进制内嵌 JS bundle 的 sha256 —— 标识二进制本身,与当前运行
+   * 的热更版本无关。哈希对象与 pdiff 的源读取完全一致:rawfile 的
+   * bundle.harmony.js(DownloadTask.doPatchFromApp 同一读法)。懒计算 + 缓存;
+   * 永不失败——空串表示"未知",服务端回退 buildTime 启发式。
+   */
+  public async getBundleHash(): Promise<string> {
+    if (UpdateContext.DEBUG) {
+      // debug 下 bundle 由 metro 提供,与 dev 删 buildTime 的行为对齐。
+      return '';
+    }
+    const cachePrefix = `${this.getPackageVersion()}|${this.getBundleUpdateTime()}|`;
+    const cached = this.readString(UpdateContext.KEY_BUNDLE_HASH_CACHE);
+    if (cached.startsWith(cachePrefix)) {
+      return cached.slice(cachePrefix.length);
+    }
+    let hash = '';
+    try {
+      // 异步读:TurboModule 跑在 UI 线程,同步读几 MB 会卡主线程一次。C++
+      // 哈希本身毫秒级,同步无妨。
+      const content =
+        await this.context.resourceManager.getRawFileContent('bundle.harmony.js');
+      hash = NativePatchCore.sha256Hex(content);
+    } catch (error) {
+      // rawfile 缺 bundle(未打包 release bundle)是合法的"未知",不是错误。
+      console.info('Cannot hash embedded bundle:', error);
+      return '';
+    }
+    if (hash) {
+      this.preferences.putSync(
+        UpdateContext.KEY_BUNDLE_HASH_CACHE,
+        cachePrefix + hash,
+      );
+      this.flushPreferences('cache bundle hash');
+    }
+    return hash;
+  }
 }

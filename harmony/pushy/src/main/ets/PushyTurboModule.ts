@@ -233,6 +233,17 @@ export class PushyTurboModule extends UITurboModule {
     }
   }
 
+  async getBundleHash(): Promise<string> {
+    logger.debug(TAG, ',call getBundleHash');
+    try {
+      return this.context.getBundleHash();
+    } catch (error) {
+      // 空串 = "未知",服务端回退 buildTime 启发式;该方法永不 reject。
+      logger.error(TAG, `getBundleHash failed: ${getErrorMessage(error)}`);
+      return '';
+    }
+  }
+
   async resetToPackagedBundle(): Promise<void> {
     logger.debug(TAG, ',call resetToPackagedBundle');
     try {

@@ -20,6 +20,12 @@ export interface Spec extends TurboModule {
   restartApp(): Promise<void>;
   setNeedUpdate(options: { hash: string }): Promise<void>;
   markSuccess(): Promise<void>;
+  /**
+   * sha256 of the JS bundle embedded in the binary (the pdiff source), lazily
+   * computed and cached natively. Resolves to an empty string when unknown
+   * (debug build, no embedded bundle, hash failure) — never rejects.
+   */
+  getBundleHash(): Promise<string>;
   resetToPackagedBundle(): Promise<void>;
   downloadPatchFromPpk(options: {
     updateUrl: string;

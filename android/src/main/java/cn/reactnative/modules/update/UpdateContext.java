@@ -9,6 +9,10 @@ import android.os.Environment;
 import android.util.Log;
 import com.facebook.react.ReactInstanceManager;
 import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 
@@ -116,6 +120,91 @@ public class UpdateContext {
 
     public boolean getIsUsingBundleUrl() {
         return isUsingBundleUrl;
+    }
+
+    // bundleHash cache: "<packageVersion>|<lastUpdateTime>|<sha256hex>". The
+    // key identifies the installed binary; every (re)install changes
+    // lastUpdateTime, so the hash is recomputed once per install.
+    private static final String KEY_BUNDLE_HASH_CACHE = "bundleHashCache";
+
+    public interface BundleHashListener {
+        void onBundleHash(String hash);
+    }
+
+    /**
+     * bundleHash = sha256 of the JS bundle embedded in the binary — the
+     * identity of the binary itself, not of whatever hot update is currently
+     * running. Hashes exactly the bytes pdiff patches from: the hardcoded
+     * "index.android.bundle" asset read via AssetManager, same as
+     * DownloadTask.copyBundledAssetToFile. Runs on the download executor;
+     * never fails — an empty string means "unknown" and the server falls back
+     * to the buildTime heuristic.
+     *
+     * Deliberately java.security.MessageDigest instead of the C++
+     * pushy::digest: librnupdate.so is a prebuilt artifact and this must not
+     * force a rebuild. The NIST vectors in the patch_core tests anchor both
+     * implementations to the same standard.
+     */
+    public void getBundleHash(final BundleHashListener listener) {
+        if (DEBUG) {
+            // Metro serves the bundle in debug; mirror the dev buildTime behaviour.
+            listener.onBundleHash("");
+            return;
+        }
+        executor.execute(new Runnable() {
+            @Override
+            public void run() {
+                listener.onBundleHash(computeBundleHash());
+            }
+        });
+    }
+
+    private String computeBundleHash() {
+        String cachePrefix = getPackageVersion() + "|" + getPackageLastUpdateTime() + "|";
+        String cached = sp.getString(KEY_BUNDLE_HASH_CACHE, null);
+        if (cached != null && cached.startsWith(cachePrefix)) {
+            return cached.substring(cachePrefix.length());
+        }
+        String hash = sha256OfBundledAsset("index.android.bundle");
+        if (!hash.isEmpty()) {
+            SharedPreferences.Editor editor = sp.edit();
+            editor.putString(KEY_BUNDLE_HASH_CACHE, cachePrefix + hash);
+            persistEditor(editor, "cache bundle hash");
+        }
+        return hash;
+    }
+
+    private long getPackageLastUpdateTime() {
+        try {
+            PackageInfo pi = context.getPackageManager()
+                .getPackageInfo(context.getPackageName(), 0);
+            return pi.lastUpdateTime;
+        } catch (PackageManager.NameNotFoundException e) {
+            return 0;
+        }
+    }
+
+    private String sha256OfBundledAsset(String assetName) {
+        try (InputStream in = context.getAssets().open(assetName)) {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] buffer = new byte[64 * 1024];
+            int read;
+            while ((read = in.read(buffer)) != -1) {
+                md.update(buffer, 0, read);
+            }
+            byte[] digest = md.digest();
+            StringBuilder hex = new StringBuilder(digest.length * 2);
+            for (byte b : digest) {
+                hex.append(Character.forDigit((b >> 4) & 0xf, 16));
+                hex.append(Character.forDigit(b & 0xf, 16));
+            }
+            return hex.toString();
+        } catch (IOException | NoSuchAlgorithmException e) {
+            // Expected when there is no embedded bundle (custom name, no
+            // release bundle); "unknown" is a valid answer, not an error.
+            Log.i(TAG, "Cannot hash bundled asset " + assetName + ": " + e);
+            return "";
+        }
     }
 
     private void enqueue(DownloadTaskParams params) {

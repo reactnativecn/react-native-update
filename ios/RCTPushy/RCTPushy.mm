@@ -2,6 +2,7 @@
 #import "RCTPushyDownloader.h"
 #import "ZipArchive.h"
 #include "../../cpp/patch_core/archive_patch_core.h"
+#include "../../cpp/patch_core/digest.h"
 #include "../../cpp/patch_core/hbc_transform_wire.h"
 #include "../../cpp/patch_core/error_codes.h"
 #include "../../cpp/patch_core/patch_core.h"
@@ -32,6 +33,10 @@ static NSString *const keyHashInfo = @"REACTNATIVECN_PUSHY_HASH_";
 static NSString *const keyFirstLoadMarked = @"REACTNATIVECN_PUSHY_FIRSTLOADMARKED_KEY";
 static NSString *const keyRolledBackMarked = @"REACTNATIVECN_PUSHY_ROLLEDBACKMARKED_KEY";
 static NSString *const KeyPackageUpdatedMarked = @"REACTNATIVECN_PUSHY_ISPACKAGEUPDATEDMARKED_KEY";
+// bundleHash cache: "<cacheKey>|<sha256hex>" where cacheKey identifies the
+// installed binary (packageVersion + embedded bundle size + mtime). Recomputed
+// only when the key changes, i.e. once per install.
+static NSString *const keyBundleHashCache = @"REACTNATIVECN_PUSHY_BUNDLEHASH_KEY";
 static NSString *const PushyErrorDomain = @"cn.reactnative.pushy";
 
 // file def
@@ -510,6 +515,56 @@ RCT_EXPORT_METHOD(restartApp:(RCTPromiseResolveBlock)resolve
 {
     [self reloadBridgeWithReason:@"pushy restartApp"];
     resolve(@true);
+}
+
+RCT_EXPORT_METHOD(getBundleHash:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+{
+    // bundleHash = sha256 of the bundle embedded in the binary — the identity
+    // of the binary itself, not of whatever hot update is currently running.
+    // It must hash exactly the bytes pdiff patches from (binaryBundleURL, the
+    // pdiff fromBundle). Lazily computed once per install, cached in defaults.
+    // Never rejects: an empty string means "unknown" and the server falls back
+    // to the buildTime heuristic.
+#if DEBUG
+    // Metro serves the bundle in debug; the embedded file (if any) is not what
+    // is running. Mirrors the dev behaviour of buildTime.
+    resolve(@"");
+#else
+    dispatch_async(_fileQueue, ^{
+        NSString *path = [[RCTPushy binaryBundleURL] path];
+        if (path == nil) {
+            resolve(@"");
+            return;
+        }
+        NSDictionary *attributes =
+            [[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil];
+        if (attributes == nil) {
+            resolve(@"");
+            return;
+        }
+        NSString *cacheKey = [NSString stringWithFormat:@"%@|%llu|%.0f",
+            [RCTPushy packageVersion],
+            attributes.fileSize,
+            [attributes.fileModificationDate timeIntervalSince1970]];
+
+        NSUserDefaults *defaults = PushyDefaults();
+        NSString *cached = [defaults stringForKey:keyBundleHashCache];
+        NSString *cachedPrefix = [cacheKey stringByAppendingString:@"|"];
+        if ([cached hasPrefix:cachedPrefix]) {
+            resolve([cached substringFromIndex:cachedPrefix.length]);
+            return;
+        }
+
+        NSString *hash = PushyFromStdString(
+            pushy::digest::Sha256File(PushyToStdString(path))) ?: @"";
+        if (hash.length > 0) {
+            [defaults setObject:[cachedPrefix stringByAppendingString:hash]
+                         forKey:keyBundleHashCache];
+        }
+        resolve(hash);
+    });
+#endif
 }
 
 RCT_EXPORT_METHOD(markSuccess:(RCTPromiseResolveBlock)resolve

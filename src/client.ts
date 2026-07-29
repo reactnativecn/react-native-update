@@ -8,6 +8,7 @@ import {
   cInfo,
   currentVersion,
   currentVersionInfo,
+  getBundleHash,
   isFirstTime,
   isRolledBack,
   PushyModule,
@@ -51,6 +52,7 @@ import {
   noop,
   promiseAny,
   testUrls,
+  warn,
 } from './utils';
 
 /**
@@ -591,6 +593,11 @@ export class Pushy {
       this.notifyAfterCheckUpdate({ status: 'skipped' });
       return;
     }
+    // 内容寻址的二进制身份,服务端据此精确判定 pdiff 适用性(取代 buildTime
+    // 启发式)。同步读 core 里已预取的值:还没算完就省略字段(服务端回退
+    // buildTime 启发式),下一次检查自然带上——绝不为它 await、拖慢或复杂化
+    // 检查流程。
+    const bundleHash = __DEV__ ? '' : getBundleHash();
     const now = Date.now();
     if (
       this.lastRespJson &&
@@ -620,6 +627,7 @@ export class Pushy {
       cInfo,
       // 可消费的 diff 轨道版本(2 = hdiffv2 轨道),服务端据此门控下发
       ...(supportedDiffVersion ? { diffV: supportedDiffVersion } : {}),
+      ...(bundleHash ? { bundleHash } : {}),
       ...extra,
     };
     if (__DEV__) {
@@ -650,6 +658,16 @@ export class Pushy {
       const result: CheckResult = await respJsonPromise;
 
       log('checking result:', result);
+
+      if (result?.bundleStatus === 'unknownBundle') {
+        // 服务端判定当前二进制内嵌 bundle 未注册,增量已被降级为全量。只面向
+        // 开发者(日志 + 遥测,控制台聚合是主渠道);终端用户无感知。
+        warn(this.t('warn_unknown_bundle'));
+        this.report({
+          type: 'bundleMismatch',
+          data: bundleHash ? { bundleHash } : {},
+        });
+      }
 
       this.notifyAfterCheckUpdate({ status: 'completed', result });
       return result;

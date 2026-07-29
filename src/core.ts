@@ -71,6 +71,33 @@ export const supportedDiffVersion: number =
   PushyConstants.supportedDiffVersion || 0;
 let uuid = PushyConstants.uuid;
 
+// bundleHash = sha256 of the JS bundle embedded in the binary (the pdiff
+// source). Content identity for the server's pdiff-applicability check,
+// replacing the buildTime heuristic. Natively lazy-computed and cached;
+// prefetched fire-and-forget at module load so the value is usually settled
+// before the first checkUpdate builds its body. Until then (first install,
+// slow device) getBundleHash returns '' and the field is simply omitted — the
+// server falls back to the buildTime heuristic and the next check carries it.
+// Deliberately synchronous at read time: checkUpdate must not await anything
+// between its dedup window and the fetch, and a hash is never worth delaying
+// a check for.
+let bundleHash = '';
+// The JS layer can arrive via hot update onto an older binary whose native
+// module predates the method, hence the feature detect. On web PushyModule is
+// a noop Proxy and the call settles to ''.
+if (typeof PushyModule.getBundleHash === 'function') {
+  Promise.resolve(PushyModule.getBundleHash())
+    .then((hash: unknown) => {
+      bundleHash = String(hash || '');
+    })
+    .catch((e: any) => {
+      log('getBundleHash failed:', e?.message || e);
+    });
+}
+
+/** '' while unknown (not yet computed, debug build, no embedded bundle, older native). */
+export const getBundleHash = (): string => bundleHash;
+
 async function getLocalHashInfo(hash: string) {
   return JSON.parse(await PushyModule.getLocalHashInfo(hash));
 }

@@ -74,6 +74,11 @@ public class UpdateModule extends NativePushySpec {
     }
 
     @Override
+    public void getBundleHash(Promise promise) {
+        UpdateModuleImpl.getBundleHash(updateContext, promise);
+    }
+
+    @Override
     public void resetToPackagedBundle(Promise promise) {
         UpdateModuleImpl.resetToPackagedBundle(updateContext, promise);
     }
