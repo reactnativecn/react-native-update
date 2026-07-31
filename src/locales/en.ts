@@ -43,6 +43,10 @@ export default {
 
   // Error messages
   error_appkey_required: 'appKey is required',
+  error_client_singleton:
+    'A second update client was created: the SDK is a process-level singleton — create one client and reuse it everywhere (use client.setOptions to change options at runtime)',
+  error_provider_singleton:
+    'A second UpdateProvider was mounted: make sure the app renders exactly one UpdateProvider',
   error_parse_version_info: 'Failed to parse currentVersionInfo: {{info}}',
   warn_unknown_bundle:
     'The bundle embedded in this binary is not registered on the update platform; incremental updates are degraded to full downloads. Upload the package with pushy uploadIpa / uploadApk / uploadApp.',

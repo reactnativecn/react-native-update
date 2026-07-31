@@ -147,6 +147,15 @@ export const fetchWithTimeout = (
   // Promise.race the losing fetch kept running (and kept the connection busy)
   // long after the caller had already moved on.
   const controller = new AbortController();
+  // The timeout controller replaces params.signal on the fetch call, so a
+  // caller-provided signal (e.g. the hedged endpoint race cancelling losers)
+  // must be chained onto it manually.
+  const externalSignal = (params as any)?.signal as AbortSignal | undefined;
+  if (externalSignal?.aborted) {
+    controller.abort();
+  } else if (externalSignal) {
+    externalSignal.addEventListener('abort', () => controller.abort());
+  }
   const timeoutId = setTimeout(() => {
     log('fetch timeout', url);
     controller.abort();
@@ -154,6 +163,10 @@ export const fetchWithTimeout = (
 
   return enhancedFetch(url, { ...params, signal: controller.signal as any })
     .catch((e: any) => {
+      if (externalSignal?.aborted) {
+        // Cancelled by the caller, not timed out; keep the abort semantics.
+        throw e;
+      }
       if (controller.signal.aborted) {
         throw Error(i18n.t('error_ping_timeout'));
       }

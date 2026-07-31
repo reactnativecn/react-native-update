@@ -1,7 +1,28 @@
 import { describe, it, expect } from '@ohos/hypium';
 import { validateHashInfo, getErrorMessage } from '../main/ets/PushyTurboModule';
+import { isSafePathComponent } from '../main/ets/UpdateContext';
 
 export default function validationTest() {
+  describe('isSafePathComponent', () => {
+    it('accepts a plain hash-like name', 0, () => {
+      expect(isSafePathComponent('a1b2c3d4')).assertEqual(true);
+      expect(isSafePathComponent('origin_hash-1.ppk')).assertEqual(true);
+    });
+
+    it('rejects empty and dot names', 0, () => {
+      expect(isSafePathComponent('')).assertEqual(false);
+      expect(isSafePathComponent('.')).assertEqual(false);
+      expect(isSafePathComponent('..')).assertEqual(false);
+    });
+
+    it('rejects names containing path separators', 0, () => {
+      expect(isSafePathComponent('../etc')).assertEqual(false);
+      expect(isSafePathComponent('a/b')).assertEqual(false);
+      expect(isSafePathComponent('a\\b')).assertEqual(false);
+      expect(isSafePathComponent('a\0b')).assertEqual(false);
+    });
+  });
+
   describe('validateHashInfo', () => {
     it('accepts valid JSON object', 0, () => {
       let threw = false;

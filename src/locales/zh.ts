@@ -41,6 +41,10 @@ export default {
 
   // Error messages
   error_appkey_required: '需要提供 appKey',
+  error_client_singleton:
+    '检测到重复创建热更新 client：SDK 是进程级单例，请只创建一个 client 并在全局复用（运行期改配置请调用 client.setOptions）',
+  error_provider_singleton:
+    '检测到同时挂载多个 UpdateProvider：请确保应用中只有一个 UpdateProvider',
   error_parse_version_info: '解析 currentVersionInfo 失败: {{info}}',
   warn_unknown_bundle:
     '当前二进制内嵌 bundle 未在更新平台注册，增量更新已降级为全量。请使用 pushy uploadIpa / uploadApk / uploadApp 上传对应安装包。',

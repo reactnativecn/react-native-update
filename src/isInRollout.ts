@@ -28,7 +28,8 @@ export function murmurhash3_32_gc(key: string, seed = 0) {
       ((key.charCodeAt(++i) & 0xff) << 24);
     ++i;
 
-    ((k1 & 0xffff) * c1 + ((((k1 >>> 16) * c1) & 0xffff) << 16)) & 0xffffffff;
+    k1 =
+      ((k1 & 0xffff) * c1 + ((((k1 >>> 16) * c1) & 0xffff) << 16)) & 0xffffffff;
     k1 = (k1 << 15) | (k1 >>> 17);
     k1 =
       ((k1 & 0xffff) * c2 + ((((k1 >>> 16) * c2) & 0xffff) << 16)) & 0xffffffff;

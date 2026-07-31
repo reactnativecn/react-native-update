@@ -139,6 +139,25 @@ static BOOL PushyStringIsBlank(NSString *value) {
     return [[value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] length] == 0;
 }
 
+// Server-provided identifiers (hash/originHash) are used as child names under
+// the download root; anything that could resolve outside of it (path
+// separators, "..", ".") must be rejected before touching the filesystem.
+static BOOL PushyIsSafePathComponent(NSString *value) {
+    if (PushyStringIsBlank(value)) {
+        return NO;
+    }
+    if ([value isEqualToString:@"."] || [value isEqualToString:@".."]) {
+        return NO;
+    }
+    if ([value containsString:@"/"] || [value containsString:@"\\"]) {
+        return NO;
+    }
+    if ([value rangeOfString:@"\0"].location != NSNotFound) {
+        return NO;
+    }
+    return YES;
+}
+
 static void PushyRejectError(RCTPromiseRejectBlock reject, NSError *error) {
     // Prefer the stable cross-platform code (error_codes.h); fall back to the
     // numeric NSError code for system errors that were not classified.
@@ -248,6 +267,7 @@ static void PushyApplyStateToDefaults(NSUserDefaults *defaults, const pushy::sta
                  callback:(void (^)(NSError *error))callback;
 - (BOOL)switchVersion:(NSString *)hash error:(NSError **)error;
 - (BOOL)ensureDirectoryExistsAtPath:(NSString *)path;
++ (void)excludeFromBackup:(NSString *)path;
 - (void)unzipFileAtPath:(NSString *)path
           toDestination:(NSString *)destination
       completionHandler:(void (^)(NSError *error))completionHandler;
@@ -694,12 +714,12 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
     NSString *updateUrl = PushyOptionString(options, @"updateUrl");
     NSString *hash = PushyOptionString(options, @"hash");
 
-    if (PushyStringIsBlank(updateUrl) || PushyStringIsBlank(hash)) {
+    if (PushyStringIsBlank(updateUrl) || !PushyIsSafePathComponent(hash)) {
         callback(PushyErrorWithCode(pushy::error_codes::kInvalidOptions, ERROR_OPTIONS));
         return;
     }
     NSString *originHash = PushyOptionString(options, @"originHash");
-    if (type == PushyTypePatchFromPpk && PushyStringIsBlank(originHash)) {
+    if (type == PushyTypePatchFromPpk && !PushyIsSafePathComponent(originHash)) {
         callback(PushyErrorWithCode(pushy::error_codes::kInvalidOptions, ERROR_OPTIONS));
         return;
     }
@@ -893,7 +913,7 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
 
 - (BOOL)switchVersion:(NSString *)hash error:(NSError **)error
 {
-    if (PushyStringIsBlank(hash)) {
+    if (!PushyIsSafePathComponent(hash)) {
         if (error != NULL) {
             *error = PushyErrorWithCode(pushy::error_codes::kInvalidOptions, ERROR_OPTIONS);
         }
@@ -922,6 +942,10 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
     NSFileManager *fileManager = [NSFileManager defaultManager];
     BOOL isDirectory = NO;
     if ([fileManager fileExistsAtPath:path isDirectory:&isDirectory]) {
+        if (isDirectory) {
+            // Directories created by older versions never got the flag.
+            [RCTPushy excludeFromBackup:path];
+        }
         return isDirectory;
     }
 
@@ -933,8 +957,25 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
     if (!success && error != nil) {
         RCTLogWarn(@"Pushy create directory error: %@", error.localizedDescription);
     }
+    if (success) {
+        [RCTPushy excludeFromBackup:path];
+    }
 
     return success;
+}
+
+// Everything under rctpushy is re-downloadable, and Application Support is
+// backed up to iCloud by default — Apple requires such content to be
+// excluded from backups.
++ (void)excludeFromBackup:(NSString *)path
+{
+    NSURL *url = [NSURL fileURLWithPath:path isDirectory:YES];
+    NSError *error = nil;
+    if (![url setResourceValue:@YES
+                        forKey:NSURLIsExcludedFromBackupKey
+                         error:&error]) {
+        RCTLogWarn(@"Pushy exclude from backup error: %@", error.localizedDescription);
+    }
 }
 
 - (void)unzipFileAtPath:(NSString *)path

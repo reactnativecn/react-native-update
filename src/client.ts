@@ -133,6 +133,13 @@ export const sharedState: {
   applyingUpdate: false,
 };
 
+// The SDK is a process-level singleton: module-level sharedState, the global
+// i18n locale and the native update state are all per-process, so a second
+// client would silently share (and fight over) them. Constructing one is a
+// hard integration error, except for the idempotent re-creation of the same
+// client (same type + appKey), which dev fast-refresh triggers legitimately.
+let activeClient: Pushy | undefined;
+
 const assertHash = (hash: string) => {
   if (!sharedState.downloadedHash) {
     log(`no downloaded hash yet, ignore switch to ${hash}`);
@@ -169,6 +176,23 @@ export class Pushy {
 
   constructor(options: ClientOptions, clientType?: 'Pushy' | 'Cresc') {
     this.clientType = clientType || 'Pushy';
+    if (activeClient) {
+      if (
+        activeClient.clientType === this.clientType &&
+        activeClient.options.appKey === options.appKey
+      ) {
+        // Same client re-created (e.g. fast refresh re-running the module
+        // that builds it): apply the latest options and hand back the
+        // existing instance instead of forking process-level state.
+        activeClient.setOptions(options);
+        // biome-ignore lint/correctness/noConstructorReturn: intentional singleton — identical re-creation must yield the existing instance
+        return activeClient;
+      }
+      throw new UpdateError(
+        i18n.t('error_client_singleton'),
+        'SINGLETON_VIOLATION'
+      );
+    }
     this.options.server = cloneServerConfig(SERVER_PRESETS[this.clientType]);
 
     i18n.setLocale(
@@ -193,7 +217,27 @@ export class Pushy {
         },
       });
     }
+    activeClient = this;
   }
+
+  /**
+   * Bumped on every setOptions call. `options` is mutated in place (its
+   * identity never changes), so reactive consumers (the UpdateProvider)
+   * subscribe via onOptionsChange and re-read using this version as the
+   * change signal.
+   */
+  optionsVersion = 0;
+  private optionsListeners = new Set<() => void>();
+  /**
+   * Subscribe to option changes (any setOptions call). Returns an
+   * unsubscribe function.
+   */
+  onOptionsChange = (listener: () => void) => {
+    this.optionsListeners.add(listener);
+    return () => {
+      this.optionsListeners.delete(listener);
+    };
+  };
 
   setOptions = (options: Partial<ClientOptions>) => {
     for (const [key, value] of Object.entries(options)) {
@@ -207,6 +251,34 @@ export class Pushy {
         }
       }
     }
+    this.optionsVersion++;
+    for (const listener of this.optionsListeners) {
+      try {
+        listener();
+      } catch (e: any) {
+        log('onOptionsChange listener error:', e?.message || e);
+      }
+    }
+  };
+
+  private providerMounted = false;
+  /**
+   * Called by UpdateProvider on mount. A second concurrently mounted
+   * provider is the same integration error as a second client — fail hard
+   * instead of double-subscribing app-state listeners and update checks.
+   * Returns the release function used on unmount.
+   */
+  claimProviderMount = () => {
+    if (this.providerMounted) {
+      throw new UpdateError(
+        this.t('error_provider_singleton'),
+        'SINGLETON_VIOLATION'
+      );
+    }
+    this.providerMounted = true;
+    return () => {
+      this.providerMounted = false;
+    };
   };
 
   /**
@@ -452,11 +524,12 @@ export class Pushy {
   };
   requestCheckResult = async (
     endpoint: string,
-    fetchPayload: Parameters<typeof fetch>[1]
+    fetchPayload: Parameters<typeof fetch>[1],
+    signal?: AbortSignal
   ) => {
     const resp = await fetchWithTimeout(
       this.getCheckUrl(endpoint),
-      fetchPayload,
+      signal ? { ...fetchPayload, signal } : fetchPayload,
       DEFAULT_FETCH_TIMEOUT_MS
     );
 
@@ -478,9 +551,13 @@ export class Pushy {
     const { endpoint, value } = await executeEndpointFallback<CheckResult>({
       configuredEndpoints: this.getConfiguredCheckEndpoints(),
       getRemoteEndpoints: this.getRemoteEndpoints,
-      tryEndpoint: async (currentEndpoint) => {
+      tryEndpoint: async (currentEndpoint, signal) => {
         try {
-          return await this.requestCheckResult(currentEndpoint, fetchPayload);
+          return await this.requestCheckResult(
+            currentEndpoint,
+            fetchPayload,
+            signal
+          );
         } catch (e) {
           log('check endpoint failed', currentEndpoint, e);
           throw e;

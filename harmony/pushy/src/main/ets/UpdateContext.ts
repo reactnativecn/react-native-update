@@ -20,6 +20,27 @@ type FlushablePreferences = preferences.Preferences & {
   flushSync?: () => void;
 };
 
+// 服务端下发的 hash/originHash/fileName 会拼进 rootDir 作为子路径；凡是可能
+// 逃出 rootDir 的值（路径分隔符、".."、"."）必须在触碰文件系统前拒绝。
+export function isSafePathComponent(name: string): boolean {
+  return (
+    typeof name === 'string' &&
+    name.length > 0 &&
+    name !== '.' &&
+    name !== '..' &&
+    !name.includes('/') &&
+    !name.includes('\\') &&
+    !name.includes('\0')
+  );
+}
+
+function assertSafePathComponent(name: string): string {
+  if (!isSafePathComponent(name)) {
+    throw Error(`Invalid path component: ${name}`);
+  }
+  return name;
+}
+
 export class UpdateContext {
   private context: common.UIAbilityContext;
   private rootDir: string;
@@ -296,7 +317,7 @@ export class UpdateContext {
     const params = new DownloadTaskParams();
     params.type = type;
     params.url = url;
-    params.hash = hash;
+    params.hash = assertSafePathComponent(hash);
     return params;
   }
 
@@ -474,7 +495,7 @@ export class UpdateContext {
       url,
       hash,
     );
-    params.targetFile = this.rootDir + '/' + fileName;
+    params.targetFile = this.rootDir + '/' + assertSafePathComponent(fileName);
     await this.executeTask(params);
   }
 
@@ -488,7 +509,7 @@ export class UpdateContext {
       url,
       hash,
     );
-    params.originHash = originHash;
+    params.originHash = assertSafePathComponent(originHash);
     params.targetFile = `${this.rootDir}/${originHash}_${hash}.ppk.patch`;
     params.unzipDirectory = `${this.rootDir}/${hash}`;
     params.originDirectory = `${this.rootDir}/${params.originHash}`;
@@ -516,7 +537,7 @@ export class UpdateContext {
 
   public switchVersion(hash: string): void {
     try {
-      const bundlePath = this.getBundlePath(hash);
+      const bundlePath = this.getBundlePath(assertSafePathComponent(hash));
       if (!fileIo.accessSync(bundlePath)) {
         throw Error(`Bundle version ${hash} not found.`);
       }

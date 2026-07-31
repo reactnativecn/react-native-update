@@ -24,6 +24,9 @@ export type UpdateErrorCode =
   // A throw from a user-provided hook (e.g. beforeReload) — not an update
   // pipeline failure, and excluded from server-side patch-health telemetry.
   | 'USER_HOOK_ERROR'
+  // A second client/provider in the same process — a hard integration error;
+  // the SDK is a process-level singleton.
+  | 'SINGLETON_VIOLATION'
   // Native codes (see cpp/patch_core/error_codes.h)
   | 'INVALID_OPTIONS'
   | 'PATCH_FAILED'
@@ -47,6 +50,7 @@ const KNOWN_CODES = new Set<string>([
   'STORAGE_PERMISSION_ERROR',
   'APK_DOWNLOAD_FAILED',
   'USER_HOOK_ERROR',
+  'SINGLETON_VIOLATION',
   'INVALID_OPTIONS',
   'PATCH_FAILED',
   'FILE_OPERATION_FAILED',

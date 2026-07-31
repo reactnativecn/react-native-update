@@ -211,12 +211,36 @@ public class UpdateContext {
         executor.execute(new DownloadTask(context, params));
     }
 
+    // Server-provided identifiers (hash/originHash/fileName) become child
+    // names under rootDir; anything that could resolve outside of it (path
+    // separators, "..", ".") must be rejected before touching the filesystem.
+    static boolean isSafePathComponent(String name) {
+        return name != null
+                && !name.isEmpty()
+                && !name.equals(".")
+                && !name.equals("..")
+                && !name.contains("/")
+                && !name.contains("\\")
+                && name.indexOf('\0') < 0;
+    }
+
+    private static boolean rejectUnsafeComponent(String name, DownloadFileListener listener) {
+        if (isSafePathComponent(name)) {
+            return false;
+        }
+        listener.onDownloadFailed(new IllegalArgumentException("Invalid path component: " + name));
+        return true;
+    }
+
     public interface DownloadFileListener {
         void onDownloadCompleted(DownloadTaskParams params);
         void onDownloadFailed(Throwable error);
     }
 
     public void downloadFullUpdate(String url, String hash, DownloadFileListener listener) {
+        if (rejectUnsafeComponent(hash, listener)) {
+            return;
+        }
         DownloadTaskParams params = new DownloadTaskParams();
         params.type = DownloadTaskParams.TASK_TYPE_PATCH_FULL;
         params.url = url;
@@ -228,6 +252,9 @@ public class UpdateContext {
     }
 
     public void downloadFile(String url, String hash, String fileName, DownloadFileListener listener) {
+        if (rejectUnsafeComponent(fileName, listener)) {
+            return;
+        }
         DownloadTaskParams params = new DownloadTaskParams();
         params.type = DownloadTaskParams.TASK_TYPE_PLAIN_DOWNLOAD;
         params.url = url;
@@ -246,6 +273,9 @@ public class UpdateContext {
     }
 
     public void downloadPatchFromApk(String url, String hash, DownloadFileListener listener) {
+        if (rejectUnsafeComponent(hash, listener)) {
+            return;
+        }
         DownloadTaskParams params = new DownloadTaskParams();
         params.type = DownloadTaskParams.TASK_TYPE_PATCH_FROM_APK;
         params.url = url;
@@ -257,6 +287,9 @@ public class UpdateContext {
     }
 
     public void downloadPatchFromPpk(String url, String hash, String originHash, DownloadFileListener listener) {
+        if (rejectUnsafeComponent(hash, listener) || rejectUnsafeComponent(originHash, listener)) {
+            return;
+        }
         DownloadTaskParams params = new DownloadTaskParams();
         params.type = DownloadTaskParams.TASK_TYPE_PATCH_FROM_PPK;
         params.url = url;
@@ -312,6 +345,9 @@ public class UpdateContext {
     }
 
     public void switchVersion(String hash) {
+        if (!isSafePathComponent(hash)) {
+            throw new IllegalArgumentException("Invalid hash: " + hash);
+        }
         if (!new File(rootDir, hash+"/index.bundlejs").exists()) {
             throw new IllegalStateException("Bundle version " + hash + " not found.");
         }

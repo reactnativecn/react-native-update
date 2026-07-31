@@ -37,6 +37,26 @@ export const UpdateProvider = ({
   client = useRef(client).current;
   const { options } = client;
 
+  // A second concurrently mounted provider is a hard integration error (the
+  // client is a process-level singleton); the client throws on the second
+  // claim. Also releases the claim on unmount.
+  useEffect(() => client.claimProviderMount?.(), [client]);
+
+  // options is mutated in place by client.setOptions (its identity never
+  // changes), so effects keyed on it would never re-run. The client bumps a
+  // version on every setOptions; mirroring it into state re-renders this
+  // provider and re-runs the effects that list it as a dependency.
+  const [optionsVersion, setOptionsVersion] = useState(
+    client.optionsVersion ?? 0
+  );
+  useEffect(
+    () =>
+      client.onOptionsChange?.(() => {
+        setOptionsVersion((version) => version + 1);
+      }),
+    [client]
+  );
+
   const stateListener = useRef<NativeEventSubscription>(undefined);
   const [updateInfo, setUpdateInfo] = useState<CheckResult>();
   const updateInfoRef = useRef(updateInfo);
@@ -279,6 +299,7 @@ export const UpdateProvider = ({
 
   const markSuccess = client.markSuccess;
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: optionsVersion re-runs this when setOptions mutates options in place
   useEffect(() => {
     if (!client.assertDebug('checkUpdate()')) {
       return;
@@ -313,8 +334,11 @@ export const UpdateProvider = ({
       }
       stateListener.current?.remove();
     };
-  }, [checkUpdate, options, markSuccess, client]);
+    // optionsVersion: checkStrategy/autoMarkSuccess are read from the
+    // in-place-mutated options object, so option changes must re-run this.
+  }, [checkUpdate, options, markSuccess, client, optionsVersion]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: optionsVersion re-runs this when setOptions mutates options in place
   useEffect(() => {
     const { dismissErrorAfter } = options;
     if (
@@ -329,17 +353,22 @@ export const UpdateProvider = ({
         clearTimeout(dismissErrorTimer);
       };
     }
-  }, [lastError, options, dismissError]);
+    // optionsVersion: dismissErrorAfter changes must reschedule a running
+    // timer, not only apply to the next error.
+  }, [lastError, options, dismissError, optionsVersion]);
 
   const parseTestPayload = useCallback(
     (payload: UpdateTestPayload) => {
       if (payload?.type?.startsWith('__rnPushy')) {
-        const logger = options.logger || (() => {});
-        options.logger = ({ type, data }) => {
-          logger({ type, data });
-          Alert.alert(type, JSON.stringify(data));
-        };
         if (payload.type === '__rnPushyVersionHash') {
+          // Wrap the logger only for the duration of this test check; wrapping
+          // on any other __rnPushy* payload would never be undone (the finally
+          // below is the only restore point).
+          const logger = options.logger || (() => {});
+          options.logger = ({ type, data }) => {
+            logger({ type, data });
+            Alert.alert(type, JSON.stringify(data));
+          };
           const toHash = payload.data;
           sharedState.toHash = toHash;
           checkUpdate({ extra: { toHash } })

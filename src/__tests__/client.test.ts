@@ -1276,21 +1276,84 @@ describe('downloadAndInstallApk apkStatus (JS-3)', () => {
   });
 });
 
-describe('options isolation across instances', () => {
-  test('mutating options on one instance does not affect another instance', async () => {
+describe('client singleton', () => {
+  test('a second client with a different appKey throws SINGLETON_VIOLATION', async () => {
     setupClientMocks();
-    const { Pushy } = await importFreshClient('options-isolation');
-    const client1 = new Pushy({ appKey: 'app-1', debug: true });
-    const client2 = new Pushy({ appKey: 'app-2', debug: false });
-
-    client1.setOptions({ updateStrategy: 'alwaysAlert' });
-
+    const { Pushy } = await importFreshClient('singleton-different-appkey');
+    const client1 = new Pushy({ appKey: 'app-1' });
     expect(client1.options.appKey).toBe('app-1');
-    expect(client1.options.debug).toBe(true);
-    expect(client1.options.updateStrategy).toBe('alwaysAlert');
 
-    expect(client2.options.appKey).toBe('app-2');
-    expect(client2.options.debug).toBe(false);
-    expect(client2.options.updateStrategy).not.toBe('alwaysAlert');
+    let error: any;
+    try {
+      new Pushy({ appKey: 'app-2' });
+    } catch (e) {
+      error = e;
+    }
+    expect(error?.code).toBe('SINGLETON_VIOLATION');
+  });
+
+  test('a Cresc client after a Pushy client throws SINGLETON_VIOLATION', async () => {
+    setupClientMocks();
+    const { Pushy, Cresc } = await importFreshClient('singleton-cross-type');
+    new Pushy({ appKey: 'app-1' });
+
+    let error: any;
+    try {
+      new Cresc({ appKey: 'app-1' });
+    } catch (e) {
+      error = e;
+    }
+    expect(error?.code).toBe('SINGLETON_VIOLATION');
+  });
+
+  test('re-creating the same client is idempotent and applies the new options', async () => {
+    setupClientMocks();
+    const { Pushy } = await importFreshClient('singleton-idempotent');
+    const client1 = new Pushy({ appKey: 'app-1', debug: true });
+    // e.g. dev fast refresh re-running the module that builds the client
+    const client2 = new Pushy({
+      appKey: 'app-1',
+      updateStrategy: 'silentAndNow',
+    });
+
+    expect(client2).toBe(client1);
+    expect(client1.options.debug).toBe(true);
+    expect(client1.options.updateStrategy).toBe('silentAndNow');
+  });
+
+  test('setOptions bumps optionsVersion and notifies subscribers', async () => {
+    setupClientMocks();
+    const { Pushy } = await importFreshClient('singleton-options-version');
+    const client = new Pushy({ appKey: 'app-1' });
+    const initialVersion = client.optionsVersion;
+    const listener = mock(() => {});
+    const unsubscribe = client.onOptionsChange(listener);
+
+    client.setOptions({ updateStrategy: 'alwaysAlert' });
+    expect(client.optionsVersion).toBe(initialVersion + 1);
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    unsubscribe();
+    client.setOptions({ updateStrategy: 'silentAndNow' });
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  test('a second concurrent provider mount claim throws SINGLETON_VIOLATION', async () => {
+    setupClientMocks();
+    const { Pushy } = await importFreshClient('singleton-provider-claim');
+    const client = new Pushy({ appKey: 'app-1' });
+
+    const release = client.claimProviderMount();
+    let error: any;
+    try {
+      client.claimProviderMount();
+    } catch (e) {
+      error = e;
+    }
+    expect(error?.code).toBe('SINGLETON_VIOLATION');
+
+    // After unmount the claim is released and a new provider may mount.
+    release();
+    expect(() => client.claimProviderMount()).not.toThrow();
   });
 });
