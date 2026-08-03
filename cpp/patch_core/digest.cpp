@@ -173,5 +173,58 @@ std::string Sha256File(const std::string& path) {
   return hasher.HexDigest();
 }
 
+namespace {
+
+struct Crc32TableHolder {
+  uint32_t table[256];
+
+  Crc32TableHolder() {
+    for (uint32_t i = 0; i < 256; i++) {
+      uint32_t value = i;
+      for (int bit = 0; bit < 8; bit++) {
+        value = (value & 1u) ? (value >> 1) ^ 0xEDB88320u : value >> 1;
+      }
+      table[i] = value;
+    }
+  }
+};
+
+const uint32_t* Crc32Table() {
+  // Function-local static: thread-safe one-time construction (C++11).
+  static const Crc32TableHolder holder;
+  return holder.table;
+}
+
+}  // namespace
+
+void Crc32::Update(const uint8_t* data, size_t length) {
+  const uint32_t* table = Crc32Table();
+  uint32_t state = state_;
+  for (size_t i = 0; i < length; i++) {
+    state = table[(state ^ data[i]) & 0xFFu] ^ (state >> 8);
+  }
+  state_ = state;
+}
+
+bool Crc32File(const std::string& path, uint32_t* out) {
+  std::FILE* file = std::fopen(path.c_str(), "rb");
+  if (file == nullptr) {
+    return false;
+  }
+  Crc32 crc;
+  uint8_t buffer[64 * 1024];
+  size_t read = 0;
+  while ((read = std::fread(buffer, 1, sizeof(buffer), file)) > 0) {
+    crc.Update(buffer, read);
+  }
+  const bool failed = std::ferror(file) != 0;
+  std::fclose(file);
+  if (failed) {
+    return false;
+  }
+  *out = crc.Value();
+  return true;
+}
+
 }  // namespace digest
 }  // namespace pushy

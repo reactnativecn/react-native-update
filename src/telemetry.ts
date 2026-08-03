@@ -53,6 +53,14 @@ export const resolveServerEventType = (
       return 'mark_success';
     case 'rollback':
       return 'rollback';
+    case 'downloadFallback':
+      // An incremental strategy failed but a later one rescued the download.
+      // When the incremental patch itself failed to apply (e.g. pdiff
+      // copiesCrc mismatch on a rebuilt binary), that is still a patch-health
+      // signal even though the end user got the update via full. Plain
+      // download errors that full rescued stay local-only — they are network
+      // noise, not patch health.
+      return code === 'PATCH_FAILED' ? 'patch_fail' : undefined;
     default:
       return undefined;
   }

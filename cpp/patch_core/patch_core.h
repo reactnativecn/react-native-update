@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <ctime>
 #include <string>
 #include <vector>
@@ -20,6 +21,13 @@ struct Status {
 struct CopyOperation {
   std::string from;
   std::string to;
+  // Manifest-declared CRC32 of the source content (__diff.json copiesCrc,
+  // present in pdiff manifests from CLI >= 2.21.2). When set, the copy source
+  // is verified before copying; a mismatch fails the whole patch so the JS
+  // strategy chain falls back to the full package instead of installing a
+  // wrong resource from a rebuilt binary.
+  bool has_expected_crc = false;
+  uint32_t expected_crc = 0;
 };
 
 struct PatchManifest {

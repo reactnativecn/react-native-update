@@ -814,6 +814,102 @@ void TestSha256File() {
       "Sha256File over a missing file returns empty");
 }
 
+void TestCrc32KnownVectors() {
+  {
+    pushy::digest::Crc32 crc;
+    Expect(crc.Value() == 0x00000000u, "crc32 of empty input");
+  }
+  {
+    // The classic check value: crc32("123456789") == 0xCBF43926.
+    pushy::digest::Crc32 crc;
+    const char* input = "123456789";
+    crc.Update(reinterpret_cast<const uint8_t*>(input), 9);
+    Expect(crc.Value() == 0xCBF43926u, "crc32 check value of \"123456789\"");
+  }
+  {
+    // Streaming in awkward chunks must match the one-shot value.
+    const std::string input(100000, 'a');
+    pushy::digest::Crc32 one_shot;
+    one_shot.Update(
+        reinterpret_cast<const uint8_t*>(input.data()), input.size());
+    pushy::digest::Crc32 streamed;
+    size_t offset = 0;
+    size_t chunk = 1;
+    while (offset < input.size()) {
+      const size_t take =
+          offset + chunk > input.size() ? input.size() - offset : chunk;
+      streamed.Update(
+          reinterpret_cast<const uint8_t*>(input.data()) + offset, take);
+      offset += take;
+      chunk = chunk * 2 + 1;
+    }
+    Expect(
+        streamed.Value() == one_shot.Value(),
+        "crc32 streaming matches one-shot");
+  }
+}
+
+void TestCrc32File() {
+  TempDir temp;
+  const std::string dir = temp.path;
+  const std::string path = dir + "/input.bin";
+  WriteFile(path, "123456789");
+  uint32_t value = 0;
+  Expect(pushy::digest::Crc32File(path, &value), "Crc32File should read");
+  Expect(value == 0xCBF43926u, "Crc32File check value");
+  Expect(
+      !pushy::digest::Crc32File(dir + "/missing.bin", &value),
+      "Crc32File over a missing file returns false");
+}
+
+void TestApplyPatchCopiesVerifyExpectedCrc() {
+  TempDir temp;
+  const std::string source = JoinPath(temp.path, "origin");
+  const std::string target = JoinPath(temp.path, "target");
+  const std::string patch = JoinPath(temp.path, "bundle.patch");
+
+  WriteFile(JoinPath(source, "index.bundlejs"), "old bundle");
+  WriteFile(JoinPath(source, "assets/keep.txt"), "123456789");
+  WriteFile(patch, "unused patch");
+
+  FakeBundlePatcher patcher("patched bundle");
+  FileSourcePatchOptions options;
+  options.source_root = source;
+  options.target_root = target;
+  options.origin_bundle_path = JoinPath(source, "index.bundlejs");
+  options.bundle_patch_path = patch;
+  options.bundle_output_path = JoinPath(target, "index.bundlejs");
+  options.enable_merge = false;
+  CopyOperation copy;
+  copy.from = "assets/keep.txt";
+  copy.to = "assets/keep.txt";
+  copy.has_expected_crc = true;
+  copy.expected_crc = 0xCBF43926u;  // crc32("123456789")
+  options.manifest.copies.push_back(copy);
+
+  Status status = ApplyPatchFromFileSource(options, patcher);
+  Expect(status.ok, status.message);
+  ExpectEq(
+      ReadFile(JoinPath(target, "assets/keep.txt")),
+      "123456789",
+      "verified copy content");
+
+  // Same manifest applied on a "rebuilt" source whose file drifted: the copy
+  // must fail the whole patch (caller falls back to full), not copy silently.
+  WriteFile(JoinPath(source, "assets/keep.txt"), "drifted-bytes");
+  const std::string target2 = JoinPath(temp.path, "target2");
+  options.target_root = target2;
+  options.bundle_output_path = JoinPath(target2, "index.bundlejs");
+  Status mismatch = ApplyPatchFromFileSource(options, patcher);
+  Expect(!mismatch.ok, "drifted copy source must fail the patch");
+  Expect(
+      mismatch.message.find("crc32") != std::string::npos,
+      "mismatch error should mention crc32");
+  Expect(
+      !Exists(JoinPath(target2, "assets/keep.txt")),
+      "drifted content must not be copied");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -848,6 +944,9 @@ int main(int argc, char** argv) {
       {"Sha256KnownVectors", TestSha256KnownVectors},
       {"Sha256StreamingMatchesOneShot", TestSha256StreamingMatchesOneShot},
       {"Sha256File", TestSha256File},
+      {"Crc32KnownVectors", TestCrc32KnownVectors},
+      {"Crc32File", TestCrc32File},
+      {"ApplyPatchCopiesVerifyExpectedCrc", TestApplyPatchCopiesVerifyExpectedCrc},
   };
 
   int failures = 0;

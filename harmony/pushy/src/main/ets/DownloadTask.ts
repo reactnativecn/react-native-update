@@ -15,6 +15,10 @@ import NativePatchCore, {
 export interface PatchManifestArrays {
   copyFroms: string[];
   copyTos: string[];
+  // 与 copyFroms/copyTos 逐位对齐的 copiesCrc(CLI >= 2.21.2 的 pdiff
+  // manifest 携带,键是 to);无声明时为 null。拷贝前用它校验包内资源内容,
+  // 不符则整次 patch 失败落 full——重打包二进制不能静默拷出漂移的资源。
+  copyCrcs: (number | null)[];
   deletes: string[];
   // __diff.json 中对应 bundle patch 条目的 hbcTransform 元数据(原始 JSON
   // 字符串);为空时 native 走现状路径
@@ -27,6 +31,7 @@ export function parseManifestToArrays(
 ): PatchManifestArrays {
   const copyFroms: string[] = [];
   const copyTos: string[] = [];
+  const copyCrcs: (number | null)[] = [];
   const deletesValue = manifest.deletes;
   const deletes = Array.isArray(deletesValue)
     ? deletesValue.map(item => String(item))
@@ -35,6 +40,11 @@ export function parseManifestToArrays(
       : [];
 
   const copies = (manifest.copies || {}) as Record<string, string>;
+  const copiesCrcValue = manifest.copiesCrc;
+  const copiesCrc =
+    copiesCrcValue && typeof copiesCrcValue === 'object'
+      ? (copiesCrcValue as Record<string, number>)
+      : ({} as Record<string, number>);
   for (const [to, rawFrom] of Object.entries(copies)) {
     let from = String(rawFrom || '');
     if (normalizeResourceCopies) {
@@ -45,6 +55,8 @@ export function parseManifestToArrays(
     }
     copyFroms.push(from);
     copyTos.push(to);
+    const crc = copiesCrc[to];
+    copyCrcs.push(typeof crc === 'number' && Number.isFinite(crc) ? crc : null);
   }
 
   const hbcTransform = manifest.hbcTransform as
@@ -62,6 +74,7 @@ export function parseManifestToArrays(
   return {
     copyFroms,
     copyTos,
+    copyCrcs,
     deletes,
     hbcTransformMeta,
   };
@@ -229,6 +242,7 @@ export class DownloadTask {
       return {
         copyFroms: [],
         copyTos: [],
+        copyCrcs: [],
         deletes: [],
         hbcTransformMeta: '',
       };
@@ -534,6 +548,20 @@ export class DownloadTask {
 
   private async doPatchFromApp(params: DownloadTaskParams): Promise<void> {
     await this.downloadFile(params);
+    try {
+      await this.doPatchFromAppAfterDownload(params);
+    } catch (error: any) {
+      // 下载已完成,之后的失败都是 patch 应用失败(解压/hpatch/资源拷贝,
+      // 含 copiesCrc 校验)。打上稳定码,JS 层遥测按 patch_fail 归类,
+      // 而不是混进网络失败。
+      error.code = 'PATCH_FAILED';
+      throw error;
+    }
+  }
+
+  private async doPatchFromAppAfterDownload(
+    params: DownloadTaskParams,
+  ): Promise<void> {
     await this.recreateDirectory(params.unzipDirectory);
 
     await zlib.decompressFile(params.targetFile, params.unzipDirectory);
@@ -566,12 +594,22 @@ export class DownloadTask {
       `${params.unzipDirectory}/bundle.harmony.js`,
       manifestArrays.hbcTransformMeta,
     );
+    // 组按 from 聚合;同一 from 的内容必然一致,所以每组一个 CRC 即可
+    // (与 manifest 逐位对齐的 copyCrcs 里取第一个非空值)。
+    const crcByFrom = new Map<string, number>();
+    manifestArrays.copyFroms.forEach((from, index) => {
+      const crc = manifestArrays.copyCrcs[index];
+      if (crc !== null && !crcByFrom.has(from)) {
+        crcByFrom.set(from, crc);
+      }
+    });
     await this.copyFromResource(
       NativePatchCore.buildCopyGroups(
         manifestArrays.copyFroms,
         manifestArrays.copyTos,
       ),
       params.unzipDirectory,
+      crcByFrom,
     );
     try {
       if (fileIo.accessSync(params.targetFile)) {
@@ -584,6 +622,18 @@ export class DownloadTask {
 
   private async doPatchFromPpk(params: DownloadTaskParams): Promise<void> {
     await this.downloadFile(params);
+    try {
+      await this.doPatchFromPpkAfterDownload(params);
+    } catch (error: any) {
+      // 同 doPatchFromApp:下载完成后的失败按 patch 失败归类。
+      error.code = 'PATCH_FAILED';
+      throw error;
+    }
+  }
+
+  private async doPatchFromPpkAfterDownload(
+    params: DownloadTaskParams,
+  ): Promise<void> {
     await this.recreateDirectory(params.unzipDirectory);
 
     await zlib.decompressFile(params.targetFile, params.unzipDirectory);
@@ -626,6 +676,7 @@ export class DownloadTask {
   private async copyFromResource(
     copyGroups: CopyGroupResult[],
     targetRoot: string,
+    crcByFrom?: Map<string, number>,
   ): Promise<void> {
     let currentFrom = '';
     try {
@@ -637,6 +688,7 @@ export class DownloadTask {
         if (targets.length === 0) {
           continue;
         }
+        const expectedCrc = crcByFrom?.get(currentFrom);
 
         if (currentFrom.startsWith('resources/base/media/')) {
           // Strip only the final extension: 'icon.round.png' -> 'icon.round',
@@ -645,6 +697,7 @@ export class DownloadTask {
             .replace('resources/base/media/', '')
             .replace(/\.[^.]+$/, '');
           const mediaBuffer = await resourceManager.getMediaByName(mediaName);
+          this.verifyCopySourceCrc(mediaBuffer, expectedCrc, currentFrom);
           const parentDirs = [
             ...new Set(
               targets.map(t => t.substring(0, t.lastIndexOf('/'))).filter(Boolean),
@@ -658,6 +711,22 @@ export class DownloadTask {
           );
           continue;
         }
+
+        if (expectedCrc !== undefined) {
+          // 声明了 CRC 的条目改走字节路径:读出内容先校验再落盘。
+          // 重打包的二进制里同名 rawfile 内容可能已漂移,fd 直拷会把
+          // 错误字节静默装进版本目录。
+          const rawContent =
+            await resourceManager.getRawFileContent(currentFrom);
+          this.verifyCopySourceCrc(rawContent, expectedCrc, currentFrom);
+          const [firstTarget, ...restTargets] = targets;
+          await this.writeFileContent(firstTarget, rawContent);
+          await Promise.all(
+            restTargets.map(target => this.copySandboxFile(firstTarget, target)),
+          );
+          continue;
+        }
+
         const fromContent = await resourceManager.getRawFd(currentFrom);
         try {
           const [firstTarget, ...restTargets] = targets;
@@ -694,6 +763,22 @@ export class DownloadTask {
         error.message;
       console.error(error);
       throw error;
+    }
+  }
+
+  // pdiff 拷贝源内容校验(__diff.json copiesCrc):不符即抛错,整次 patch
+  // 失败后 JS 策略链自动回退 full,绝不把漂移的资源装进版本目录。
+  private verifyCopySourceCrc(
+    content: Uint8Array,
+    expectedCrc: number | undefined,
+    from: string,
+  ): void {
+    if (expectedCrc === undefined) {
+      return;
+    }
+    const actualCrc = NativePatchCore.crc32(content);
+    if (actualCrc !== expectedCrc) {
+      throw new Error(`resource content mismatch (crc32): ${from}`);
     }
   }
 

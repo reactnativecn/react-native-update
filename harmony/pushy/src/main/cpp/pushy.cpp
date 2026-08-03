@@ -936,6 +936,52 @@ static napi_value Sha256Hex(napi_env env, napi_callback_info info) {
   return result;
 }
 
+// CRC32(zip/zlib 多项式)。同步:输入是已在内存的 rawfile 资源字节,用于
+// pdiff 拷贝前与 __diff.json copiesCrc 比对(不符则整次 patch 失败落 full)。
+static napi_value Crc32(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value args[1] = {nullptr};
+  if (!GetArgCount(env, info, &argc, args) || argc < 1) {
+    ThrowError(env, "crc32: missing data argument");
+    return nullptr;
+  }
+
+  void* data = nullptr;
+  size_t length = 0;
+  bool is_typedarray = false;
+  napi_is_typedarray(env, args[0], &is_typedarray);
+  if (is_typedarray) {
+    napi_typedarray_type type;
+    napi_value arraybuffer = nullptr;
+    size_t offset = 0;
+    if (napi_get_typedarray_info(
+            env, args[0], &type, &length, &data, &arraybuffer, &offset) !=
+        napi_ok) {
+      ThrowError(env, "crc32: cannot read typed array");
+      return nullptr;
+    }
+  } else {
+    bool is_arraybuffer = false;
+    napi_is_arraybuffer(env, args[0], &is_arraybuffer);
+    if (!is_arraybuffer ||
+        napi_get_arraybuffer_info(env, args[0], &data, &length) != napi_ok) {
+      ThrowError(env, "crc32: expected Uint8Array or ArrayBuffer");
+      return nullptr;
+    }
+  }
+
+  pushy::digest::Crc32 crc;
+  if (length > 0) {
+    crc.Update(static_cast<const uint8_t*>(data), length);
+  }
+
+  napi_value result = nullptr;
+  // CRC32 fits a double exactly (32-bit unsigned), matching the JSON number
+  // representation in the manifest.
+  napi_create_double(env, static_cast<double>(crc.Value()), &result);
+  return result;
+}
+
 // 原生 patch 内核可消费的 diff 轨道版本(2 = hdiffv2 轨道)
 static napi_value GetSupportedDiffVersion(napi_env env, napi_callback_info) {
   napi_value result = nullptr;
@@ -954,6 +1000,7 @@ napi_value Init(napi_env env, napi_value exports) {
       !ExportFunction(env, exports, "applyPatchFromFileSource", ApplyPatchFromFileSource) ||
       !ExportFunction(env, exports, "cleanupOldEntries", CleanupOldEntries) ||
       !ExportFunction(env, exports, "sha256Hex", Sha256Hex) ||
+      !ExportFunction(env, exports, "crc32", Crc32) ||
       !ExportFunction(env, exports, "getSupportedDiffVersion", GetSupportedDiffVersion)) {
     return nullptr;
   }

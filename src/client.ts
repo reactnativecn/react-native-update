@@ -981,6 +981,23 @@ export class Pushy {
       delete sharedState.progressHandlers[hash];
     }
     delete sharedState.progressCallbacks[hash];
+    if (succeeded && errorMessages.length > 0) {
+      // An earlier strategy failed and a later one rescued the download
+      // (e.g. pdiff copiesCrc mismatch on a rebuilt binary → full). Surface
+      // the degradation: it is invisible to the end user but tells the
+      // platform that incremental delivery is failing for this binary.
+      this.report({
+        type: 'downloadFallback',
+        // UpdateError.code already carries the classified native rejection
+        // code (PATCH_FAILED vs DOWNLOAD_FAILED).
+        code: lastError?.code,
+        data: {
+          newVersion: hash,
+          succeeded,
+        },
+        message: errorMessages.join(';'),
+      });
+    }
     if (!succeeded) {
       const message = errorMessages.join(';');
       if (lastError) {

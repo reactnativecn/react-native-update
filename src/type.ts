@@ -83,6 +83,11 @@ export type EventType =
   // registered on the update platform (developer-facing only, local logger;
   // not a server telemetry event).
   | 'bundleMismatch'
+  // An incremental strategy (diff/pdiff) failed but a later strategy saved the
+  // download. Carries which strategy failed and why — the signal that watches
+  // pdiff copiesCrc verification failures (BUNDLEHASH_MIGRATION §4.2.1) in
+  // the field.
+  | 'downloadFallback'
   | 'errorRestart'
   | 'errorSwitchVersion'
   | 'downloadingApk'

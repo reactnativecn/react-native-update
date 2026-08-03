@@ -96,6 +96,13 @@ final class BundledResourceCopier {
             // failures (disk full, corrupt archive) that must fail the update,
             // not skips — otherwise the update activates with missing resources.
             ArrayList<String> failedCopies = new ArrayList<String>();
+            // Entries whose manifest-declared CRC32 could not be satisfied by
+            // any installed archive: the path-matched file has different bytes
+            // and no entry anywhere carries the expected content. Copying would
+            // install a wrong resource (rebuilt binary with drifted assets), so
+            // these fail the whole patch — the JS strategy chain then falls
+            // back to the full package.
+            ArrayList<String> crcMismatches = new ArrayList<String>();
 
             for (String fromPath : new ArrayList<String>(remainingFiles.keySet())) {
                 ArrayList<File> targets = remainingFiles.get(fromPath);
@@ -107,6 +114,7 @@ final class BundledResourceCopier {
                 String actualSourcePath = fromPath;
                 SafeZipFile matchedZipFile = null;
                 ResolvedResourceSource resolvedResource = null;
+                Long wantedCrc = crcByFrom != null ? crcByFrom.get(fromPath) : null;
 
                 if (entry == null) {
                     String normalizedFrom = normalizeResPath(fromPath);
@@ -117,19 +125,37 @@ final class BundledResourceCopier {
                     }
                 }
 
+                // Verify a path-matched entry against the manifest-declared
+                // CRC32: a rebuilt binary can keep the path but drift the
+                // content. On mismatch, discard the path match and try to
+                // locate the expected content elsewhere. An entry with an
+                // unknown CRC (-1) cannot be verified and is accepted as-is.
+                if (entry != null && wantedCrc != null
+                    && entry.getCrc() != -1L && entry.getCrc() != wantedCrc.longValue()) {
+                    entry = null;
+                    actualSourcePath = fromPath;
+                }
+
                 // Content (CRC32) match: robust across APK/AAB packaging because
                 // the checksum is over the uncompressed file content, not its
                 // path. Preferred over the resource-id heuristic below.
-                if (entry == null && crcByFrom != null) {
-                    Long wantedCrc = crcByFrom.get(fromPath);
-                    if (wantedCrc != null) {
-                        ZipSource matched = crcToEntry.get(wantedCrc);
-                        if (matched != null) {
-                            entry = matched.entry;
-                            matchedZipFile = matched.zipFile;
-                            actualSourcePath = matched.entry.getName();
-                        }
+                if (entry == null && wantedCrc != null) {
+                    ZipSource matched = crcToEntry.get(wantedCrc);
+                    if (matched != null) {
+                        entry = matched.entry;
+                        matchedZipFile = matched.zipFile;
+                        actualSourcePath = matched.entry.getName();
                     }
+                }
+
+                // A declared CRC that no installed entry satisfies is a hard
+                // content mismatch. The resource-id heuristic below cannot be
+                // trusted here: the content index above already covers every
+                // entry, so anything the heuristic finds has the wrong bytes.
+                if (entry == null && wantedCrc != null) {
+                    crcMismatches.add(fromPath);
+                    remainingFiles.remove(fromPath);
+                    continue;
                 }
 
                 if (entry == null) {
@@ -187,6 +213,13 @@ final class BundledResourceCopier {
                     }
                 }
                 remainingFiles.remove(fromPath);
+            }
+
+            if (!crcMismatches.isEmpty()) {
+                throw new IOException(
+                    "Bundled resource content mismatch (crc32) for "
+                        + crcMismatches.size() + " entries: " + crcMismatches
+                );
             }
 
             if (!failedCopies.isEmpty()) {

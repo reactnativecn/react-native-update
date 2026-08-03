@@ -1,5 +1,7 @@
 #include "patch_core.h"
 
+#include "digest.h"
+
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
@@ -532,8 +534,22 @@ Status ApplyPatchFromFileSource(
   }
 
   for (const CopyOperation& copy : options.manifest.copies) {
+    const std::string source_path = JoinPath(options.source_root, copy.from);
+    if (copy.has_expected_crc) {
+      uint32_t actual_crc = 0;
+      if (!digest::Crc32File(source_path, &actual_crc)) {
+        return Status::Error("Failed to read copy source " + source_path);
+      }
+      if (actual_crc != copy.expected_crc) {
+        // Rebuilt binary with drifted content at an unchanged path. Fail the
+        // patch — the caller falls back to the full package; never install a
+        // resource whose bytes differ from what the diff was generated against.
+        return Status::Error(
+            "Copy source content mismatch (crc32): " + copy.from);
+      }
+    }
     Status copy_status = CopyFile(
-        JoinPath(options.source_root, copy.from),
+        source_path,
         JoinPath(options.target_root, copy.to),
         true);
     if (!copy_status) {

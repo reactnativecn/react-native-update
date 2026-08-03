@@ -46,6 +46,20 @@ describe('resolveServerEventType', () => {
     expect(resolveServerEventType('errorMarkSuccess')).toBeUndefined();
     expect(resolveServerEventType('downloadingApk')).toBeUndefined();
   });
+
+  test('downloadFallback reports only patch-apply failures as patch_fail', () => {
+    // pdiff failed to apply (e.g. copiesCrc mismatch on a rebuilt binary) and
+    // full rescued the download: patch-health signal.
+    expect(resolveServerEventType('downloadFallback', 'PATCH_FAILED')).toBe(
+      'patch_fail'
+    );
+    // Plain download errors that a later strategy rescued are network noise —
+    // local-only.
+    expect(
+      resolveServerEventType('downloadFallback', 'DOWNLOAD_FAILED')
+    ).toBeUndefined();
+    expect(resolveServerEventType('downloadFallback')).toBeUndefined();
+  });
 });
 
 describe('resolveServerEventHash', () => {

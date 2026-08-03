@@ -181,15 +181,28 @@ static pushy::patch::PatchManifest PushyPatchManifestFromJson(NSDictionary *json
     pushy::patch::PatchManifest manifest;
 
     NSDictionary *copies = json[@"copies"];
+    // Content checksum per copy target ("copiesCrc", pdiff manifests from
+    // CLI >= 2.21.2). The patch core verifies the copy source against it and
+    // fails the patch on mismatch, so the JS strategy chain falls back to the
+    // full package instead of copying drifted bytes from a rebuilt binary.
+    NSDictionary *copiesCrc = json[@"copiesCrc"];
+    if (![copiesCrc isKindOfClass:[NSDictionary class]]) {
+        copiesCrc = nil;
+    }
     for (NSString *to in copies) {
         NSString *from = copies[to];
         if (from.length <= 0) {
             from = to;
         }
-        manifest.copies.push_back(pushy::patch::CopyOperation{
-            PushyToStdString(from),
-            PushyToStdString(to),
-        });
+        pushy::patch::CopyOperation operation;
+        operation.from = PushyToStdString(from);
+        operation.to = PushyToStdString(to);
+        NSNumber *expectedCrc = copiesCrc[to];
+        if ([expectedCrc isKindOfClass:[NSNumber class]]) {
+            operation.has_expected_crc = true;
+            operation.expected_crc = (uint32_t)[expectedCrc unsignedLongLongValue];
+        }
+        manifest.copies.push_back(operation);
     }
 
     NSDictionary *deletes = json[@"deletes"];

@@ -41,9 +41,18 @@ public class UpdateModuleImpl {
 
             @Override
             public void onDownloadFailed(Throwable error) {
-                promise.reject(ErrorCodes.DOWNLOAD_FAILED, error);
+                promise.reject(downloadErrorCode(error), error);
             }
         });
+    }
+
+    // Post-download failures (unzip / hdiff / resource copy, incl. copiesCrc
+    // verification) reject as PATCH_FAILED so JS-side telemetry can separate
+    // patch health from network health. DownloadTask wraps them.
+    private static String downloadErrorCode(Throwable error) {
+        return error instanceof PatchFailedException
+            ? ErrorCodes.PATCH_FAILED
+            : ErrorCodes.DOWNLOAD_FAILED;
     }
 
     public static void downloadAndInstallApk(
@@ -84,7 +93,7 @@ public class UpdateModuleImpl {
 
             @Override
             public void onDownloadFailed(Throwable error) {
-                promise.reject(ErrorCodes.DOWNLOAD_FAILED, error);
+                promise.reject(downloadErrorCode(error), error);
             }
         });
     }
@@ -107,7 +116,7 @@ public class UpdateModuleImpl {
 
                 @Override
                 public void onDownloadFailed(Throwable error) {
-                    promise.reject(ErrorCodes.DOWNLOAD_FAILED, error);
+                    promise.reject(downloadErrorCode(error), error);
                 }
             });
         } catch (Exception e) {

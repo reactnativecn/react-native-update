@@ -5,6 +5,7 @@
 > - 服务：pushy `p`/`s1` @ `2026.7.29-a2ecac26`，cresc api/worker/dailyjob @ `2026.7.29-3aabff91`，线上带 `bundleHash` 冒烟均通过
 > - **`bundleHashJudge.enabled` 仍为关**——待 CLI/客户端发版、覆盖率起来后再开
 > - **客户端与 CLI 已发版（2026-07-30）**：`react-native-update@10.49.0`、`react-native-update-cli@2.20.3`。全链路（客户端上报 → CLI 注册 → 服务端判定基建）就位，仅待覆盖率与开开关
+> - **`bundleHashJudge.enabled` 已于 2026-08-03 双端开启**（pushy + cresc，redis `config_dynamic`，回退=写回 false）。同日：CLI 2.21.2 补全 copiesCrc（§4.2.1 第 2 条）并随两服务端部署；客户端三端 CRC 校验 + fallback 遥测（§4.2.1 第 3/4 条）已实现、待随下个客户端版本发布
 > - Phase 2 遗留见 §4.5，Phase 3 待观察期后
 > 依据：`BUNDLEHASH_DESIGN.md`（设计定稿）。本文只讲**怎么落地**，不重复论证为什么。
 > 下游：`NATIVE_CHECKUPDATE_DESIGN.md` 的协议下沉必须等本迁移完成，否则协议下沉后再改协议要返工。
@@ -204,6 +205,12 @@ await addFileFromZipEntry(...);       // 只有新文件才打进 patch 包
 3. 客户端拷贝时校验，不符 → fallback full。代价退化为一次 pdiff 下载，**永不装出坏包**
 4. 给该 fallback 加遥测
 
+**已全部落地（2026-08-03）**：
+- 第 2 条：CLI 2.21.2（同路径分支补记 CRC；两服务端已 bump 部署，worker 新生成的 pdiff 均带全量 copiesCrc）
+- 第 3 条（三端）：Android `BundledResourceCopier` 路径命中也比 CRC，不符 → 内容定位 → 仍无 → 抛错；iOS/共享 C++ `CopyOperation.expected_crc` 在 `ApplyPatchFromFileSource` 拷贝前校验（`digest::Crc32File`，NIST/check-value 测试锚定）；Harmony pdiff 拷贝声明 CRC 的条目改走字节路径经 NAPI `crc32` 校验。三端不符均使整次 pdiff 失败，JS 策略链自动落 full
+- 第 4 条：新增本地事件 `downloadFallback`（增量策略失败但后续策略救回），失败码为 PATCH_FAILED 时映射服务端 `patch_fail`（网络噪音不上报）。为此补齐了 Android（`PatchFailedException`：下载完成后的失败 reject 为 PATCH_FAILED，此前一律 DOWNLOAD_FAILED）与 Harmony（patch 阶段 `error.code='PATCH_FAILED'`）的稳定码
+- 注意：存量已生成的 pdiff 只有 moved 条目的 CRC，客户端只校验有声明的条目——旧 pdiff 行为不变，随版本滚动自然收敛
+
 若遥测显示这一行的 pdiff 失败率显著，再引入**精确**判据（如"copies 含非 metro 资源"），而不是用恒为 true 的粗标记一刀切。
 
 ### 4.3 开关与灰度
@@ -237,7 +244,7 @@ cresc-server 是独立仓库（结构同构、历史独立，`handleCheckUpdate`
 
 ### 4.5 Phase 2 遗留（不阻塞开启开关）
 
-- 控制台 unknownBundle 聚合面板（§7 触达第 3 条，主渠道）——需 admin 侧配合。曾考虑挂在 `classifyCheckUpdateResult` 的 hitType 上，否决：hitType 是"下发了什么产物"维度，混入二进制身份维度不干净，应独立埋点
+- ~~控制台 unknownBundle 聚合面板~~ **已实现（2026-08-01，四端部署）**：最终形态不是独立的 bundleStatus"内容判定"维度（首版上线后即废弃——它依赖开关开启+双侧 hash+恰好有更新流动，观测窗口太窄、零数据），而是**请求侧合并进原生包面板**：客户端报了 bundleHash 就记 `packageVersion_bundleHash`（admin 图例把 64 位 hex 截 8 位展示），否则回退 `packageVersion_buildTime`，同一 attribute。全量流量可见、与开关/判定结果解耦；未注册人群在面板上直接带 packageVersion 上下文。代价是丢失 matched/rebuiltSameJs 区分——那只有教育用途，unknownBundle 占比（§4.6 的推进指标）不受影响。曾考虑挂在 `classifyCheckUpdateResult` 的 hitType 上，否决：hitType 是"下发了什么产物"维度，混入二进制身份维度不干净
 - `digests` 下发 + `__diff.json` copies 附摘要——与客户端 Phase 3 的消费侧同波次做
 - ~~CLI 上传冲突提示~~ **已实现（改判为无需动 CLI）**：`(appId, name)` 唯一约束下重复上传本来就 409，在两台服务器的冲突分支里用 bundleHash 增强语义——内容一致 →"无需重复上传"、内容不同 →"重打包且 JS 有变，请提升原生版本号"、任一侧无 hash → 通用文案不变。查询仅发生在冲突路径。cresc 3 条路由级用例覆盖；pushy 无路由级测试脚手架，靠同构代码 + cresc 用例 + tsc 兜底
 

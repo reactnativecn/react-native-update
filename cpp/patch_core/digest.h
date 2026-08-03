@@ -39,5 +39,23 @@ class Sha256 {
 // digest, or an empty string if the file cannot be read.
 std::string Sha256File(const std::string& path);
 
+// Streaming CRC32 (IEEE 802.3, reflected polynomial 0xEDB88320 — the zip /
+// zlib checksum). Used to verify pdiff copy sources against the CRCs the CLI
+// records from the origin package's zip entries (copiesCrc in __diff.json):
+// the values must be byte-compatible with what any zip tool would report.
+class Crc32 {
+ public:
+  void Update(const uint8_t* data, size_t length);
+
+  uint32_t Value() const { return state_ ^ 0xFFFFFFFFu; }
+
+ private:
+  uint32_t state_ = 0xFFFFFFFFu;
+};
+
+// CRC32 of a file on disk (streaming, bounded memory). Returns false if the
+// file cannot be read.
+bool Crc32File(const std::string& path, uint32_t* out);
+
 }  // namespace digest
 }  // namespace pushy

@@ -77,6 +77,9 @@ class DownloadTask implements Runnable {
     private final byte[] buffer = new byte[DOWNLOAD_CHUNK_SIZE];
     private final BundledResourceCopier bundledResourceCopier;
     private String hash;
+    // Set once downloadFile() returns: failures after this point in a patch
+    // task are patch-application failures, not download failures.
+    private boolean downloadPhaseCompleted = false;
 
     DownloadTask(Context context, DownloadTaskParams params) {
         this.context = context.getApplicationContext();
@@ -160,6 +163,7 @@ class DownloadTask implements Runnable {
             }
         }
 
+        downloadPhaseCompleted = true;
     }
 
     private byte[] readBytes(InputStream input) throws IOException {
@@ -408,6 +412,12 @@ class DownloadTask implements Runnable {
         }
     }
 
+    private boolean isPatchTask(int taskType) {
+        return taskType == DownloadTaskParams.TASK_TYPE_PATCH_FULL
+            || taskType == DownloadTaskParams.TASK_TYPE_PATCH_FROM_APK
+            || taskType == DownloadTaskParams.TASK_TYPE_PATCH_FROM_PPK;
+    }
+
     @Override
     public void run() {
         int taskType = params.type;
@@ -436,7 +446,18 @@ class DownloadTask implements Runnable {
             cleanUpAfterFailure(taskType);
 
             if (params.listener != null) {
-                params.listener.onDownloadFailed(error);
+                // A patch task that failed after its artifact was fully
+                // downloaded (unzip / hdiff / resource copy, incl. copiesCrc
+                // verification) is a patch failure, not a download failure —
+                // the module maps the exception type to PATCH_FAILED.
+                Throwable classified = error;
+                if (downloadPhaseCompleted
+                    && isPatchTask(taskType)
+                    && !(error instanceof PatchFailedException)) {
+                    classified = new PatchFailedException(
+                        String.valueOf(error.getMessage()), error);
+                }
+                params.listener.onDownloadFailed(classified);
             }
             return;
         }
