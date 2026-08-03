@@ -133,6 +133,12 @@ jobs:
           target: google_apis
           arch: x86_64
           avd-name: api34
+          # Pin the emulator build: the runner image moved to emulator 37.1.11
+          # (build 15917651) around 2026-07-30 and the release-mode app can no
+          # longer hold a Detox connection (ColorBuffer/graphics errors,
+          # endless relaunch until job timeout). 15507667 = 36.6.11, the last
+          # green build (run 30280107182, 2026-07-27).
+          emulator-build: 15507667
           emulator-boot-timeout: 900
           script: cd Example/e2etest && E2E_PLATFORM=android bunx detox test --configuration android.emu.release --headless --record-logs all --retries 1
 
@@ -235,6 +241,12 @@ jobs:
           target: google_apis
           arch: x86_64
           avd-name: api34
+          # Pin the emulator build: the runner image moved to emulator 37.1.11
+          # (build 15917651) around 2026-07-30 and the release-mode app can no
+          # longer hold a Detox connection (ColorBuffer/graphics errors,
+          # endless relaunch until job timeout). 15507667 = 36.6.11, the last
+          # green build (run 30280107182, 2026-07-27).
+          emulator-build: 15507667
           emulator-boot-timeout: 900
           # 注意:emulator-runner 把 script 的每一行单独用 sh -c 执行,
           # cd 不会跨行生效,所以每行必须自包含。
@@ -351,6 +363,12 @@ jobs:
           target: google_apis
           arch: x86_64
           avd-name: api34
+          # Pin the emulator build: the runner image moved to emulator 37.1.11
+          # (build 15917651) around 2026-07-30 and the release-mode app can no
+          # longer hold a Detox connection (ColorBuffer/graphics errors,
+          # endless relaunch until job timeout). 15507667 = 36.6.11, the last
+          # green build (run 30280107182, 2026-07-27).
+          emulator-build: 15507667
           emulator-boot-timeout: 900
           script: cd .e2e-rn077-oldarch/AwesomeProject && E2E_PLATFORM=android bunx detox test --configuration android.emu.release --headless --record-logs all --retries 1
 
