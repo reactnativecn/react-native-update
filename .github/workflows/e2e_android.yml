@@ -133,14 +133,15 @@ jobs:
           target: google_apis
           arch: x86_64
           avd-name: api34
-          # Pin the emulator build: the runner image moved to emulator 37.1.11
-          # (build 15917651) around 2026-07-30 and the release-mode app can no
-          # longer hold a Detox connection (ColorBuffer/graphics errors,
-          # endless relaunch until job timeout). 15507667 = 36.6.11, the last
-          # green build (run 30280107182, 2026-07-27).
+          # Pinned while stabilizing e2e. The 2026-07-30 breakage was NOT the
+          # emulator version (red herring): bundle-hash.test.ts landed 07-29 as
+          # a second suite, and .detoxrc.js forces maxWorkers 2 on CI — the
+          # second Detox worker tries to boot the same AVD twice, which Android
+          # cannot do, and retries until the job times out (fixed with
+          # --maxWorkers 1 below). Unpin once a run proves 37.x stable.
           emulator-build: 15507667
           emulator-boot-timeout: 900
-          script: cd Example/e2etest && E2E_PLATFORM=android bunx detox test --configuration android.emu.release --headless --record-logs all --retries 1
+          script: cd Example/e2etest && E2E_PLATFORM=android bunx detox test --configuration android.emu.release --headless --record-logs all --retries 1 --maxWorkers 1
 
       - name: Upload Detox artifacts
         # cancelled() 覆盖 job 超时被杀的场景,否则超时时拿不到现场
@@ -241,11 +242,12 @@ jobs:
           target: google_apis
           arch: x86_64
           avd-name: api34
-          # Pin the emulator build: the runner image moved to emulator 37.1.11
-          # (build 15917651) around 2026-07-30 and the release-mode app can no
-          # longer hold a Detox connection (ColorBuffer/graphics errors,
-          # endless relaunch until job timeout). 15507667 = 36.6.11, the last
-          # green build (run 30280107182, 2026-07-27).
+          # Pinned while stabilizing e2e. The 2026-07-30 breakage was NOT the
+          # emulator version (red herring): bundle-hash.test.ts landed 07-29 as
+          # a second suite, and .detoxrc.js forces maxWorkers 2 on CI — the
+          # second Detox worker tries to boot the same AVD twice, which Android
+          # cannot do, and retries until the job times out (fixed with
+          # --maxWorkers 1 below). Unpin once a run proves 37.x stable.
           emulator-build: 15507667
           emulator-boot-timeout: 900
           # 注意:emulator-runner 把 script 的每一行单独用 sh -c 执行,
@@ -363,14 +365,15 @@ jobs:
           target: google_apis
           arch: x86_64
           avd-name: api34
-          # Pin the emulator build: the runner image moved to emulator 37.1.11
-          # (build 15917651) around 2026-07-30 and the release-mode app can no
-          # longer hold a Detox connection (ColorBuffer/graphics errors,
-          # endless relaunch until job timeout). 15507667 = 36.6.11, the last
-          # green build (run 30280107182, 2026-07-27).
+          # Pinned while stabilizing e2e. The 2026-07-30 breakage was NOT the
+          # emulator version (red herring): bundle-hash.test.ts landed 07-29 as
+          # a second suite, and .detoxrc.js forces maxWorkers 2 on CI — the
+          # second Detox worker tries to boot the same AVD twice, which Android
+          # cannot do, and retries until the job times out (fixed with
+          # --maxWorkers 1 below). Unpin once a run proves 37.x stable.
           emulator-build: 15507667
           emulator-boot-timeout: 900
-          script: cd .e2e-rn077-oldarch/AwesomeProject && E2E_PLATFORM=android bunx detox test --configuration android.emu.release --headless --record-logs all --retries 1
+          script: cd .e2e-rn077-oldarch/AwesomeProject && E2E_PLATFORM=android bunx detox test --configuration android.emu.release --headless --record-logs all --retries 1 --maxWorkers 1
 
       - name: Upload Detox artifacts
         # cancelled() 覆盖 job 超时被杀的场景,否则超时时拿不到现场
