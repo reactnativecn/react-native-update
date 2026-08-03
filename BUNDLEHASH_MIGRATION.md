@@ -260,6 +260,18 @@ Phase 2 的收益与 Phase 0/1 的覆盖率成正比，但**不需要等覆盖�
 
 ## 5. Phase 3 — 收尾（客户端）
 
+> **定位修订（2026-08-03）：buildTime 不删，永久保留作 fallback。**
+> 理由：服务端分支与客户端双上报的保留成本≈0，而删除的伤害面（bundleHash
+> 空串设备失去二进制身份 → 重打包检测失明 / 双缺请求拿不到 full）明确存在
+> 且只能靠空串率数据压低，收益（构建注入清理、协议更干净）不急迫。注入的
+> pnpm 老毛病若再发作，修注入本身而不是删身份。
+> Phase 3 因此收缩为一件事：**§5.1 的 SyncBinaryVersion 迁移**——改为
+> `bundleHash || buildTime`（bundleHash 优先、buildTime 兜底，schema 认领式
+> 迁移照做）。不做它，rebuiltSameJs 的收益只兑现一半：服务端已不 block、照发
+> pdiff，但客户端 buildTime 一变仍清状态回内置包再白下载一遍；hash 优先后
+> 同 JS 重打包做到真正无感。§5.2 的 digests/copies 摘要照旧待做；§5.3 的
+> 降级序列与"删构建注入"**取消**。
+
 ### 5.1 `SyncBinaryVersion` 迁移有个状态危险，必须处理
 
 设计文档写"`SyncBinaryVersion` 改 `(packageVersion, bundleHash)`"。直接改会出事：
