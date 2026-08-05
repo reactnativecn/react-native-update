@@ -24,7 +24,8 @@ See the docs:
 6. The dashboard ships with **built-in analytics** (version distribution, update success rate), **staged (gray) rollouts** by percentage, and **release health monitoring** — no need to build your own data pipeline to keep every release under control.
 7. Built-in crash rollback keeps updates safe and reliable, and health monitoring helps you catch and stop a bad release early.
 8. Meta information and open APIs make the system more extensible.
-9. Paid technical support is available.
+9. An **MCP server** lets you connect the update service to Claude Desktop, an IDE or your own agent, ask in plain language why a device never received an update, and investigate alongside GitHub, Sentry or CI. Everything is read-only and scoped per app ([Cresc docs](https://cresc.dev/docs/mcp) / [Pushy docs](https://pushy.reactnative.cn/docs/mcp)).
+10. Paid technical support is available.
 
 ## Diff Algorithm Comparison
 
