@@ -110,6 +110,8 @@ Pod::Spec.new do |s|
 
   s.subspec 'RCTPushy' do |ss|
     ss.source_files = ['ios/RCTPushy/*.{h,m,mm}',
+                       'cpp/update_flow_core/flow_json.{h,cpp}',
+                       'cpp/update_flow_core/update_flow_core.{h,cpp}',
                        'cpp/patch_core/archive_patch_core.{h,cpp}',
                        'cpp/patch_core/digest.{h,cpp}',
                        'cpp/patch_core/hbc_transform.{h,cpp}',
