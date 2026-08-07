@@ -1,8 +1,12 @@
 # 原生检测更新设计：让砖机也能被修好
 
-> 状态：实施中——选型已改判方案 B（三端统一 C++ + 金标向量契约，见 §4 裁决）。
-> 决策层双实现已落地：`src/updateFlowCore.ts`（参照）+ `cpp/update_flow_core`
-> （移植），69 条向量双侧钉死。剩余工作：§8 第 4 步原生编排。
+> 状态：**实现完成（2026-08-07，e34f390..24f3adf）**——三端编排全部落地：
+> 标定层 syncNativeConfig、iOS RCTPushyOrchestrator、Android
+> NativeCheckOrchestrator（librnupdate.so 已重编 4 ABI 并过符号/对齐校验）、
+> Harmony NativeCheckOrchestrator.ts + NAPI，§10.3 的 JS 响应缓存复用
+> （getNativeCheckCache，2 分钟 TTL）也已闭环。剩余：e2e 用例（沿用
+> Example/e2etest 基建，验证"坏 bundle 下原生仍拉到修复版"端到端场景）、
+> README/CHANGELOG、发版。
 > 取代：`REMOTE_RESET_DESIGN.md`（本地启动熔断方案，已放弃，理由见 §1.2）
 > 前置：bundleHash 迁移 Phase 0/1/2 已上线且 buildTime 永久保留作 fallback 已定稿
 > （2026-08-03）——checkUpdate 的 wire protocol 已稳定，协议前置解除
