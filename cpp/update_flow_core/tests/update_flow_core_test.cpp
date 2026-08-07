@@ -46,6 +46,101 @@ Value Dispatch(const std::string& fn, const Value& args, bool* known) {
   return Value::Undefined();
 }
 
+// The parser consumes network data (checkUpdate responses); malformed and
+// hostile inputs must set ok=false without crashing — this suite runs under
+// ASan+UBSan in CI. Valid-but-tricky inputs pin the JS JSON.parse semantics
+// the port relies on.
+int RunParserRobustness() {
+  int failures = 0;
+
+  const char* malformed[] = {
+      "",
+      "{",
+      "[1,2",
+      "\"abc",
+      "{\"a\":}",
+      "{\"a\" 1}",
+      "{\"a\":1,}",
+      "[1,]",
+      "tru",
+      "nul",
+      "falsy",
+      "1x",
+      "1 2",
+      "- 1",
+      "\"\\q\"",
+      "\"\\u12\"",
+      "\"\\ud800\\u0041\"",  // high surrogate followed by a non-low escape
+      "{\"a\":1}garbage",
+      "[}",
+      "{]",
+  };
+  for (const char* input : malformed) {
+    bool ok = true;
+    Parse(input, &ok);
+    if (ok) {
+      std::fprintf(stderr, "robustness: accepted malformed input: %s\n", input);
+      failures++;
+    }
+  }
+
+  // Nesting: 64 levels parse, 65 are rejected (stack-depth cap).
+  for (int depth : {64, 65}) {
+    std::string nested;
+    for (int i = 0; i < depth; i++) {
+      nested.push_back('[');
+    }
+    for (int i = 0; i < depth; i++) {
+      nested.push_back(']');
+    }
+    bool ok = false;
+    Parse(nested, &ok);
+    bool expected = depth <= 64;
+    if (ok != expected) {
+      std::fprintf(stderr, "robustness: depth %d parsed=%d, expected %d\n",
+                   depth, ok, expected);
+      failures++;
+    }
+  }
+  // A deeply nested bomb must fail cleanly, not overflow the stack.
+  {
+    std::string bomb(100000, '[');
+    bool ok = true;
+    Parse(bomb, &ok);
+    if (ok) {
+      std::fprintf(stderr, "robustness: accepted nesting bomb\n");
+      failures++;
+    }
+  }
+
+  // Valid-but-tricky inputs: assert the parsed value via canonical stringify.
+  const struct {
+    const char* input;
+    const char* expected;
+  } tricky[] = {
+      // Duplicate keys: first position, last value (JSON.parse semantics).
+      {"{\"a\":1,\"b\":2,\"a\":3}", "{\"a\":3,\"b\":2}"},
+      {"\"\\u00e9\"", "\"\xc3\xa9\""},                    // BMP escape -> UTF-8
+      {"\"\\ud83d\\ude00\"", "\"\xf0\x9f\x98\x80\""},     // surrogate pair
+      {"  {  \"a\" : [ 1 , true , null ] }  ", "{\"a\":[1,true,null]}"},
+      {"-0.5", "-0.5"},
+      {"1e2", "100"},
+  };
+  for (const auto& t : tricky) {
+    bool ok = false;
+    Value v = Parse(t.input, &ok);
+    std::string actual = Stringify(v);
+    if (!ok || actual != t.expected) {
+      std::fprintf(stderr,
+                   "robustness: %s -> ok=%d %s (expected %s)\n", t.input, ok,
+                   actual.c_str(), t.expected);
+      failures++;
+    }
+  }
+
+  return failures;
+}
+
 }  // namespace
 
 int main(int argc, char* argv[]) {
@@ -69,7 +164,7 @@ int main(int argc, char* argv[]) {
   }
 
   const Value& cases = doc.Get("cases");
-  int failures = 0;
+  int failures = RunParserRobustness();
   for (size_t i = 0; i < cases.Size(); i++) {
     const Value& testCase = cases.At(i);
     const std::string& fn = testCase.Get("fn").AsString();
@@ -93,9 +188,11 @@ int main(int argc, char* argv[]) {
   }
 
   if (failures) {
-    std::fprintf(stderr, "%d of %zu vectors failed\n", failures, cases.Size());
+    std::fprintf(stderr, "%d failures (%zu vectors + parser robustness)\n",
+                 failures, cases.Size());
     return 1;
   }
-  std::printf("all %zu flow vectors passed\n", cases.Size());
+  std::printf("all %zu flow vectors + parser robustness passed\n",
+              cases.Size());
   return 0;
 }

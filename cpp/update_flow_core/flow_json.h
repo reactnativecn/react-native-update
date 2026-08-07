@@ -96,7 +96,8 @@ class Value {
 std::string Stringify(const Value& v);
 
 // Strict JSON parser (the vectors file and checkUpdate responses). Returns
-// Undefined and sets *ok to false on malformed input.
+// Undefined and sets *ok to false on malformed input; nesting beyond 64
+// levels is rejected so hostile server data cannot exhaust the stack.
 Value Parse(const std::string& text, bool* ok);
 
 }  // namespace flowjson

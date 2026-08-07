@@ -204,6 +204,11 @@ std::string Stringify(const Value& v) {
 
 namespace {
 
+// The parser also consumes server checkUpdate responses, so hostile input
+// must fail cleanly: nesting is capped to keep recursive descent off the
+// stack limit. Real responses nest ~4 levels.
+constexpr int kMaxDepth = 64;
+
 class Parser {
  public:
   Parser(const std::string& text) : text_(text) {}
@@ -258,9 +263,16 @@ class Parser {
     char c = text_[pos_];
     switch (c) {
       case '{':
-        return ParseObject();
-      case '[':
-        return ParseArray();
+      case '[': {
+        if (depth_ >= kMaxDepth) {
+          ok_ = false;
+          return Value::Undefined();
+        }
+        depth_++;
+        Value v = c == '{' ? ParseObject() : ParseArray();
+        depth_--;
+        return v;
+      }
       case '"':
         return Value::String(ParseString());
       case 't':
@@ -458,6 +470,7 @@ class Parser {
 
   const std::string& text_;
   size_t pos_ = 0;
+  int depth_ = 0;
   bool ok_ = true;
 };
 
