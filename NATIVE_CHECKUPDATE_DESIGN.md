@@ -1,8 +1,9 @@
 # 原生检测更新设计：让砖机也能被修好
 
-> 状态：设计草案，待评审
+> 状态：实施中——§8 第 2 步（纯函数抽取）已完成（`src/updateFlowCore.ts`，2026-08-07）
 > 取代：`REMOTE_RESET_DESIGN.md`（本地启动熔断方案，已放弃，理由见 §1.2）
-> 前置：`BUNDLEHASH_DESIGN.md`（设计定稿、待实施）——协议下沉前必须先定稿协议
+> 前置：bundleHash 迁移 Phase 0/1/2 已上线且 buildTime 永久保留作 fallback 已定稿
+> （2026-08-03）——checkUpdate 的 wire protocol 已稳定，协议前置解除
 > 关联：[[native-update-reset-design]] 的 Phase 3
 
 ---
@@ -82,6 +83,15 @@ A 直接淘汰。B 是 [[native-update-reset-design]] 里 Phase 3 的原计划�
 
 **B 与 C 的差别只有一个：检测逻辑本身出 bug 时，能不能不发新 binary 就修好。**
 
+补充两点评审结论（2026-08-06）：其一，B 并不消灭 TS 实现——app JS 侧的交互
+流程仍要用同一套决策逻辑，所以 B 实际是 **TS + C++ 双实现长期同步**（每次协
+议演进都要重编预编译 `.so`），而 C 是同一份 TS 源两处复用，这是 C 相对 B 的
+另一日常优势。其二，C 的独占收益比上表暗示的窄：只要 JS 侧 `checkUpdate` 保
+留为全功能回退（§6 是复用结果、不是拆除），原生检测逻辑出 bug 的最坏情形是
+正常设备仍被 JS 路径救起、只有砖机在窗口期救不了——即退回现状，而非"全网
+瘫"。真正集中风险的是原生**编排**代码（R2），而那部分 B / C 完全相同，
+guardian 救不了它。
+
 ---
 
 ## 5. Guardian bundle
@@ -93,30 +103,63 @@ A 直接淘汰。B 是 [[native-update-reset-design]] 里 Phase 3 的原计划�
 正确的边界是：**guardian 只做决策，IO 全部由原生执行。**
 
 ```
-原生 ──> guardian.buildCheckRequest(state)      ──> { url, headers, body }
-原生 <── (发 HTTP，各端现成客户端)
+原生 ──> guardian.buildCheckRequest(state)      ──> { endpoints, queryUrls, path, headers, body, timeoutMs }
+原生 <── (按 endpoints 顺序逐个请求，单个超时即换下一个；
+          首个失败后拉 queryUrls 合并远程候选、排除已失败的，继续顺序尝试)
 原生 ──> guardian.decide(state, responseText)   ──> { action, hash, url, type } | { action: 'none' }
 原生 <── (下载 + patch_core 应用 + state_core switchVersion，全是现成的)
 原生 ──> guardian.onOutcome(state, result)      ──> { nextState }
 ```
 
+**endpoint 计划是声明式的**（初稿此处只画了"一问一答"，漏掉了 JS 侧真实存在的
+多 endpoint 回退与远程 endpoint 发现）：候选排序（随机首选分摊负载 + 配置序回
+退 + 失败排除）是纯策略，由 `orderEndpointCandidates` 给出，随机数由原生作为
+输入注入（guardian 不可自取随机）。**原生侧刻意不实现 JS 交互路径的 hedged
+race**（`src/endpoint.ts` 的 250ms 错峰竞速）：原生检测跑在冷启动后台、结果下
+次启动才生效，延迟不敏感（§7 R5 本来就要求延迟数秒），顺序回退 + 单请求超时
+就够了——换来的是三端各自的执行引擎退化为一个 for 循环，无定时器、无 abort
+协调。两条路径共享同一份候选排序策略，只在并发形态上分叉。
+
 这个边界带来的简化是决定性的：
 
-- **不需要事件循环、不需要 Promise、不需要注入 HTTP** —— 只是同步求值一个小 HBC 再调几个函数
+- **不需要事件循环、不需要 Promise、不需要注入 HTTP** —— 只是同步求值一段小 JS 再调几个函数
 - **隔离性天然成立** —— guardian 与 app bundle 是两个独立的 parse 单元、独立求值；app bundle 的语法错误跟它毫无关系
-- 灰度分桶（`isInRollout`）、diff→pdiff→full 选择、`expVersion` 解析、URL 拼接这些**已经是纯函数了**（`src/isInRollout.ts`、`src/resolveCheckResult.ts`），可以几乎原样搬过去
+- 灰度分桶、diff→pdiff→full 选择、`expVersion` 解析、URL 拼接、请求体构造、
+  endpoint 排序**已全部抽为纯函数并在 JS 侧原地使用**（`src/updateFlowCore.ts`：
+  `buildCheckRequestBody` / `resolveCheckResult` / `decideDownload` /
+  `isInRollout` / `joinUrls` / `orderEndpointCandidates`，import 闭包为纯，
+  可在裸引擎中求值），guardian 直接复用同一份源码
 
 ### 5.2 运行时
 
-在后台线程创建一个 `hermes::makeHermesRuntime()`，求值 guardian 的 HBC，调用导出的函数，用完销毁。全同步，毫秒级。
+在后台线程创建一个 JS 运行时，求值 guardian 源码，调用导出的函数，用完销毁。全同步，毫秒级。
+
+**已定稿（2026-08-06）：guardian 以纯文本 JS 源码分发与求值，不用 HBC。**
+Hermes 字节码格式不跨版本稳定——若分发 HBC，服务端覆盖包必须按宿主 Hermes
+版本分桶，基线包也与构建期 hermesc 版本绑死，复杂度远超收益。源码求值走的
+是慢速路径，但 guardian 每次冷启动只求值一次、代码量千行级，毫秒级完全可接
+受。代价：宿主 libhermes 若编译时裁掉了源码编译器则不可用——这归入下面的链
+接可行性验证。
 
 放在 `cpp/` 里与 `patch_core` / `state_core` 同级，三端共享同一份 C++；各端只提供 HTTP 客户端（Android OkHttp、iOS NSURLSession、Harmony `@ohos.net.http` —— 都已在用）和文件路径。
 
-**主要风险**：直接链接 libhermes 的 C++ API 在 RN 各版本间会变，可能出现符号/ABI 兼容问题。Android 的 `librnupdate.so` 是预编译产物（4 个 ABI），链上 Hermes 后与宿主 RN 的 Hermes 版本耦合。**这是 C 相对 B 的主要代价，需要先做一个链接可行性验证再决定**。
+**主要风险**：直接链接 libhermes 的 C++ API 在 RN 各版本间会变，可能出现符号/ABI 兼容问题。Android 的 `librnupdate.so` 是预编译产物（4 个 ABI），链上 Hermes 后与宿主 RN 的 Hermes 版本耦合。**这是 C 相对 B 的主要代价，需要先做一个链接可行性验证再决定**（验证已推迟到纯函数抽取完成之后；纯文本 JS 定稿后，验证范围收窄为"能否拿到一个可求值源码的引擎"，不再含字节码版本矩阵）。
 
-备选：不用 Hermes，用一个极小的嵌入式 JS 引擎（QuickJS 约 200KB）。彻底解耦宿主 RN，代价是包体增加与另一套字节码工具链。
+备选：不用 Hermes，用一个极小的嵌入式 JS 引擎（QuickJS 约 200KB）。彻底解耦宿主 RN，代价是包体增加；纯文本分发下不需要其字节码工具链。若验证结论是"只有 QuickJS 才干净"，应改选方案 B——C 的独占收益（窗口期远程修决策纯函数的 bug）撑不起这个包体与供应链成本。
 
 ### 5.3 分发与覆盖
+
+> **裁决（2026-08-07）：远程覆盖通道不做，guardian 只带随 binary 打包的基线。**
+> 覆盖通道买的保险是"决策纯函数出 bug 时不发 binary 就能修"，但决策层是全
+> 链路最可测的部分（纯函数、单测、与 JS 侧同一份源码），且已有两条兜底：
+> JS 侧 checkUpdate 全功能回退（决策 bug 最坏退回现状，不是新增灾难）、服
+> 务端塑造响应/重绑版本本身就是一条远程修复通道（决策层消费的是服务端数
+> 据）。代价却是全系统最敏感的安全面——启动最早期执行、有权决定装什么版本
+> 的服务端下发代码——加上 §5.4/§5.5 的全部工程量，而覆盖机制自身是原生代
+> 码，它出 bug 同样无法远程修。保费高于风险敞口。
+> 未来若决策层 bug 真在现场咬人，优先评估**搭现有热更通道便车**（ppk 附带
+> guardian.js，复用既有 hash 校验与下发权限），不自建通道。§5.4/§5.5 保留
+> 作为那时的设计输入；"救砖"能力来自 §8 第 4 步的原生编排，不受本裁决影响。
 
 | | 来源 | 作用 |
 |---|---|---|
@@ -174,13 +217,24 @@ app 侧的 `client.ts` / `UpdateProvider` 仍然负责**交互**：更新提示�
 
 ## 8. 分期
 
-1. **bundleHash 迁移**（`BUNDLEHASH_DESIGN.md`，已定稿）—— 协议下沉的前置，否则返工
-2. **纯函数抽取** —— 把 `buildCheckRequest` / `decide` 从 `client.ts` 剥成无 IO 的纯函数，先在 JS 侧原地使用并补测试。这一步 B / C 都需要，且不依赖运行时选型，**可以立刻开始**
-3. **运行时选型** —— Hermes 链接可行性验证；失败则退回方案 B（C++ 纯函数）
-4. **原生编排** —— 三端 HTTP + 调用纯函数 + 复用现有下载/patch/state
-5. **guardian 分发通道**（仅方案 C）—— 打包、下发、§5.4 回滚保护
+1. ~~**bundleHash 迁移**~~ **已解除**（2026-08-03）—— Phase 0/1/2 已上线、
+   判定开关双端开启、buildTime 永久保留作 fallback 定稿，checkUpdate 的
+   wire protocol 已稳定；剩余的 Phase 3（SyncBinaryVersion 迁移）是客户端
+   本地状态变更，不动协议，与本方案只需在落地顺序上错开（都动原生启动路
+   径与状态 schema），不再构成前置
+2. ~~**纯函数抽取**~~ **已完成**（2026-08-07）—— `src/updateFlowCore.ts`：
+   `buildCheckRequestBody` / `resolveCheckResult` / `decideDownload` /
+   `isInRollout` / `joinUrls` / `orderEndpointCandidates`，无 IO、无
+   react-native 依赖、无模块级状态（身份/随机数均参数注入），import 闭包
+   为纯；client.ts / provider.tsx / endpoint.ts 已原地改用，单测覆盖
+3. **运行时选型** —— Hermes 链接可行性验证（已推迟；纯文本 JS 定稿后范围
+   收窄，见 §5.2）；失败则退回方案 B（C++ 纯函数）
+4. **原生编排** —— 三端 HTTP + 调用纯函数 + 复用现有下载/patch/state；
+   endpoint 执行引擎为顺序回退（§5.1），不移植 hedged race
+5. ~~**guardian 分发通道**~~ **已裁决不做**（2026-08-07，见 §5.3）——
+   guardian 只带基线、无远程覆盖；砖机救援能力在第 4 步，不受影响
 
-第 2 步是关键：**它是 B 和 C 的公共前置**，做完之后再决定选型也不迟，而且它本身就能让现有 JS 实现更可测。
+第 2 步曾是关键路径（B 和 C 的公共前置），现已完成——下一个决策点是第 3 步的求值引擎验证，其结论裁决"决策层用 JS 源码求值还是 C++ 重写"（第 4 步两个结果都要做，路线不再分叉）。
 
 ## 9. 已写代码的处置
 
