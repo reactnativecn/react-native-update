@@ -159,7 +159,9 @@ public class UpdateContext {
         });
     }
 
-    private String computeBundleHash() {
+    // Package-private: also the native cold-start check's request input
+    // (NativeCheckOrchestrator). Blocking — call off the main thread.
+    String computeBundleHash() {
         String cachePrefix = getPackageVersion() + "|" + getPackageLastUpdateTime() + "|";
         String cached = sp.getString(KEY_BUNDLE_HASH_CACHE, null);
         if (cached != null && cached.startsWith(cachePrefix)) {
@@ -529,6 +531,11 @@ public class UpdateContext {
     }
 
     public String getBundleUrl(String defaultAssetsUrl) {
+        // Integration guarantees getBundleUrl runs at every startup, which
+        // makes it the anchor for the once-per-process native update check.
+        // Cheap: an AtomicBoolean gate and a daemon thread spawn.
+        NativeCheckOrchestrator.schedule(this);
+
         isUsingBundleUrl = true;
         StateCoreResult currentState = getStateSnapshot();
         StateCoreResult launchState = runStateCore(

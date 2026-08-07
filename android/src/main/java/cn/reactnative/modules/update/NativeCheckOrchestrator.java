@@ -1,0 +1,352 @@
+package cn.reactnative.modules.update;
+
+import android.os.Build;
+import android.util.Log;
+import java.io.File;
+import java.util.HashSet;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+/**
+ * Native cold-start update check (NATIVE_CHECKUPDATE_DESIGN §10): once per
+ * process, a few seconds after getBundleUrl, entirely independent of the app
+ * bundle — this is what lets a device bricked by a bad hot update pull the
+ * fixed version on the next launch. All decisions come from
+ * cpp/update_flow_core via NativeUpdateFlow; this class is IO glue only.
+ * Failures are silent and bounded: one round per launch, no retry storms, no
+ * version blacklisting.
+ */
+final class NativeCheckOrchestrator {
+    static final String KEY_CONFIG = "nativeConfig";
+    // Raw response cache for the JS side to reuse (§10.3):
+    // {"ts": <epoch seconds>, "body": <raw checkUpdate response>}.
+    static final String KEY_RESP_CACHE = "nativeCheckResp";
+
+    private static final AtomicBoolean scheduled = new AtomicBoolean(false);
+
+    private NativeCheckOrchestrator() {
+    }
+
+    static void schedule(final UpdateContext context) {
+        if (UpdateContext.DEBUG) {
+            return;
+        }
+        if (!scheduled.compareAndSet(false, true)) {
+            return;
+        }
+        Thread thread = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    // Keep the check away from the cold-start critical path
+                    // (§7 R5) — its result targets the NEXT launch anyway.
+                    Thread.sleep(5000);
+                    runOnce(context);
+                } catch (Throwable e) {
+                    // The rescue path must never take the app down with it.
+                    Log.w(UpdateContext.TAG, "native check failed: " + e);
+                }
+            }
+        }, "pushy-native-check");
+        thread.setPriority(Thread.MIN_PRIORITY + 1);
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    private static void runOnce(UpdateContext context) throws JSONException {
+        String configJson = context.getKv(KEY_CONFIG);
+        if (configJson == null || configJson.isEmpty()) {
+            // No persisted config (old integration / first ever launch): the
+            // native check silently does not run — this is the rollout gate.
+            return;
+        }
+        JSONObject config;
+        try {
+            config = new JSONObject(configJson);
+        } catch (JSONException e) {
+            return;
+        }
+        if (config.optBoolean("disabled", false)) {
+            return;
+        }
+        String appKey = config.optString("appKey", "");
+        if (appKey.isEmpty()) {
+            return;
+        }
+
+        String currentVersion = context.getCurrentVersion();
+        String rolledBackVersion = context.rolledBackVersion();
+        String uuid = context.getKv("uuid");
+        if (uuid == null) {
+            uuid = "";
+        }
+
+        JSONObject identity = new JSONObject();
+        identity.put("packageVersion", context.getPackageVersion());
+        if (currentVersion != null) {
+            identity.put("currentVersion", currentVersion);
+        }
+        identity.put("uuid", uuid);
+        if (rolledBackVersion != null) {
+            identity.put("rolledBackVersion", rolledBackVersion);
+        }
+
+        JSONObject cInfo = new JSONObject();
+        cInfo.put("rnu", config.optString("rnu", ""));
+        cInfo.put("rn", config.optString("rn", ""));
+        cInfo.put("os", "android " + Build.VERSION.RELEASE);
+        cInfo.put("uuid", uuid);
+
+        JSONObject input = new JSONObject();
+        input.put("packageVersion", context.getPackageVersion());
+        if (currentVersion != null) {
+            input.put("currentVersion", currentVersion);
+        }
+        input.put("buildTime", context.getBuildTime());
+        input.put("cInfo", cInfo);
+        input.put("supportedDiffVersion", NativeUpdateCore.supportedDiffVersion());
+        input.put("bundleHash", context.computeBundleHash());
+
+        String body = NativeUpdateFlow.buildCheckRequestBody(input.toString());
+        if (body == null) {
+            return;
+        }
+
+        String responseText = runCheckRequest(config, appKey, body);
+        if (responseText == null) {
+            Log.i(UpdateContext.TAG,
+                "native check: no endpoint reachable, giving up until next launch");
+            return;
+        }
+
+        // Persist the raw response for the JS side to reuse (§10.3),
+        // regardless of what the decision turns out to be.
+        JSONObject cacheEntry = new JSONObject();
+        cacheEntry.put("ts", System.currentTimeMillis() / 1000);
+        cacheEntry.put("body", responseText);
+        context.setKv(KEY_RESP_CACHE, cacheEntry.toString());
+
+        String decisionJson =
+            NativeUpdateFlow.handleCheckResponse(responseText, identity.toString());
+        if (decisionJson == null) {
+            return;
+        }
+        JSONObject decision = new JSONObject(decisionJson);
+        if (!"download".equals(decision.optString("action"))) {
+            Log.i(UpdateContext.TAG,
+                "native check: nothing to do (" + decision.optString("reason") + ")");
+            return;
+        }
+        String hash = decision.optString("hash", "");
+        if (!UpdateContext.isSafePathComponent(hash)) {
+            return;
+        }
+
+        boolean downloaded =
+            new File(context.getRootDir(), hash + "/index.bundlejs").exists();
+        if (!downloaded) {
+            downloaded = performAttempts(
+                context, decision.optJSONArray("attempts"), hash, currentVersion);
+        }
+        if (!downloaded) {
+            return;
+        }
+
+        // Persist name/description/metaInfo alongside the version, mirroring
+        // the JS side's setLocalHashInfo after a successful download.
+        JSONObject info = decision.optJSONObject("info");
+        if (info != null) {
+            JSONObject hashInfo = new JSONObject();
+            for (String key : new String[] {"name", "description", "metaInfo"}) {
+                Object value = info.opt(key);
+                if (value instanceof String) {
+                    hashInfo.put(key, value);
+                }
+            }
+            context.setKv("hash_" + hash, hashInfo.toString());
+        }
+
+        if ("setNeedUpdate".equals(config.optString("afterDownload"))) {
+            // Silent strategies only: activate for the next launch.
+            // Alert-style strategies leave activation to the JS side (§6).
+            try {
+                context.switchVersion(hash);
+                Log.i(UpdateContext.TAG,
+                    "native check: downloaded " + hash + " and set for next launch");
+            } catch (Exception e) {
+                Log.w(UpdateContext.TAG, "native check: switchVersion failed: " + e);
+            }
+        } else {
+            Log.i(UpdateContext.TAG,
+                "native check: downloaded " + hash + ", activation left to JS");
+        }
+    }
+
+    private static final OkHttpClient httpClient = new OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(10, TimeUnit.SECONDS)
+        .build();
+
+    private static String httpRequest(String url, String postBody) {
+        try {
+            Request.Builder builder =
+                new Request.Builder().url(url).header("Accept", "application/json");
+            if (postBody != null) {
+                builder.post(RequestBody.create(
+                    postBody, MediaType.parse("application/json; charset=utf-8")));
+            }
+            try (Response response = httpClient.newCall(builder.build()).execute()) {
+                if (!response.isSuccessful() || response.body() == null) {
+                    return null;
+                }
+                return response.body().string();
+            }
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * Sequential fallback over the ordered candidates (§5.1): one request at
+     * a time with its own timeout; after the configured round fails,
+     * queryUrls discovery merges remote candidates (excluding the
+     * already-tried) for one more round. No hedged race on purpose — this
+     * path is latency-insensitive.
+     */
+    private static String runCheckRequest(JSONObject config, String appKey, String body) {
+        JSONArray endpoints = config.optJSONArray("endpoints");
+        String orderedJson = NativeUpdateFlow.orderEndpointCandidates(
+            endpoints == null ? "[]" : endpoints.toString(), Math.random());
+        JSONArray ordered;
+        try {
+            ordered = orderedJson == null ? new JSONArray() : new JSONArray(orderedJson);
+        } catch (JSONException e) {
+            return null;
+        }
+        HashSet<String> tried = new HashSet<>();
+        for (int i = 0; i < ordered.length(); i++) {
+            String base = ordered.optString(i, "");
+            if (base.isEmpty()) {
+                continue;
+            }
+            tried.add(base);
+            String response = httpRequest(base + "/checkUpdate/" + appKey, body);
+            if (response != null) {
+                return response;
+            }
+        }
+        JSONArray queryUrls = config.optJSONArray("queryUrls");
+        if (queryUrls == null) {
+            return null;
+        }
+        for (int i = 0; i < queryUrls.length(); i++) {
+            String listUrl = queryUrls.optString(i, "");
+            if (listUrl.isEmpty()) {
+                continue;
+            }
+            String listText = httpRequest(listUrl, null);
+            if (listText == null) {
+                continue;
+            }
+            JSONArray remote;
+            try {
+                remote = new JSONArray(listText);
+            } catch (JSONException e) {
+                continue;
+            }
+            for (int j = 0; j < remote.length(); j++) {
+                String base = remote.optString(j, "");
+                if (base.isEmpty() || tried.contains(base)) {
+                    continue;
+                }
+                tried.add(base);
+                String response = httpRequest(base + "/checkUpdate/" + appKey, body);
+                if (response != null) {
+                    return response;
+                }
+            }
+            // One successfully fetched remote list is enough.
+            break;
+        }
+        return null;
+    }
+
+    private static boolean performAttempts(
+        UpdateContext context, JSONArray attempts, String hash, String originHash
+    ) {
+        if (attempts == null) {
+            return false;
+        }
+        for (int i = 0; i < attempts.length(); i++) {
+            JSONObject attempt = attempts.optJSONObject(i);
+            if (attempt == null) {
+                continue;
+            }
+            String type = attempt.optString("type");
+            if ("diff".equals(type) && (originHash == null || originHash.isEmpty())) {
+                // diff patches from the running version; none is running.
+                continue;
+            }
+            JSONArray urls = attempt.optJSONArray("urls");
+            if (urls == null) {
+                continue;
+            }
+            for (int j = 0; j < urls.length(); j++) {
+                String url = urls.optString(j, "");
+                if (url.isEmpty()) {
+                    continue;
+                }
+                final CountDownLatch latch = new CountDownLatch(1);
+                final AtomicBoolean succeeded = new AtomicBoolean(false);
+                final String attemptType = type;
+                UpdateContext.DownloadFileListener listener =
+                    new UpdateContext.DownloadFileListener() {
+                        @Override
+                        public void onDownloadCompleted(DownloadTaskParams params) {
+                            succeeded.set(true);
+                            latch.countDown();
+                        }
+
+                        @Override
+                        public void onDownloadFailed(Throwable error) {
+                            Log.i(UpdateContext.TAG, "native check: " + attemptType
+                                + " attempt failed: " + error);
+                            latch.countDown();
+                        }
+                    };
+                if ("diff".equals(type)) {
+                    context.downloadPatchFromPpk(url, hash, originHash, listener);
+                } else if ("pdiff".equals(type)) {
+                    context.downloadPatchFromApk(url, hash, listener);
+                } else {
+                    context.downloadFullUpdate(url, hash, listener);
+                }
+                try {
+                    // Backstop only — the download pipeline carries its own
+                    // timeouts/failures.
+                    if (!latch.await(600, TimeUnit.SECONDS)) {
+                        Log.w(UpdateContext.TAG,
+                            "native check: " + type + " attempt timed out");
+                        return false;
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return false;
+                }
+                if (succeeded.get()) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+}
