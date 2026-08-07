@@ -16,6 +16,14 @@ export interface Spec extends TurboModule {
   setLocalHashInfo(hash: string, info: string): Promise<void>;
   getLocalHashInfo(hash: string): Promise<string>;
   setUuid(uuid: string): Promise<void>;
+  /**
+   * Persist the config subset the native cold-start update check consumes
+   * (appKey, endpoints, afterDownload policy; NATIVE_CHECKUPDATE_DESIGN
+   * §10.1). Stored as a raw JSON string, parsed natively on read. JS is the
+   * single config source — a native side without persisted config silently
+   * skips its check, which doubles as the feature's rollout gate.
+   */
+  syncNativeConfig(config: string): Promise<void>;
   reloadUpdate(options: { hash: string }): Promise<void>;
   restartApp(): Promise<void>;
   setNeedUpdate(options: { hash: string }): Promise<void>;

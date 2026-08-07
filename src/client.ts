@@ -264,6 +264,48 @@ export class Pushy {
         log('onOptionsChange listener error:', e?.message || e);
       }
     }
+    this.syncNativeConfig();
+  };
+
+  /**
+   * Persist the subset of options the native cold-start check needs
+   * (NATIVE_CHECKUPDATE_DESIGN §10.1). JS is the single config source; a
+   * native side without persisted config silently skips its check, so this
+   * is also the feature's rollout gate. Fire-and-forget: config sync must
+   * never affect the JS update flow.
+   */
+  private syncNativeConfig = () => {
+    if (
+      Platform.OS === 'web' ||
+      typeof PushyModule.syncNativeConfig !== 'function'
+    ) {
+      // Older natives lack the method; on web PushyModule is a noop Proxy
+      // and the feature-detect would false-positive.
+      return;
+    }
+    const { appKey, server, updateStrategy } = this.options;
+    if (!appKey || !server?.main?.length) {
+      return;
+    }
+    const config = {
+      appKey,
+      endpoints: server.main,
+      queryUrls: server.queryUrls ?? [],
+      // The native check may activate a downloaded version (next launch)
+      // only under the silent strategies; alert-style strategies keep
+      // activation with the JS side (§6/§10.1).
+      afterDownload:
+        updateStrategy === 'silentAndNow' || updateStrategy === 'silentAndLater'
+          ? 'setNeedUpdate'
+          : 'none',
+      rnu: cInfo.rnu,
+      rn: cInfo.rn,
+    };
+    Promise.resolve(PushyModule.syncNativeConfig(JSON.stringify(config))).catch(
+      (e: any) => {
+        log('syncNativeConfig failed:', e?.message || e);
+      }
+    );
   };
 
   private providerMounted = false;

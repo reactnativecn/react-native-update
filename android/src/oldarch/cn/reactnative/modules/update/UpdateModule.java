@@ -91,6 +91,11 @@ public class UpdateModule extends ReactContextBaseJavaModule {
     }
 
     @ReactMethod
+    public void syncNativeConfig(String config, Promise promise) {
+        UpdateModuleImpl.syncNativeConfig(updateContext, config, promise);
+    }
+
+    @ReactMethod
     public void setLocalHashInfo(String hash, String info) {
         UpdateModuleImpl.setLocalHashInfo(updateContext, hash, info);
     }

@@ -89,6 +89,11 @@ public class UpdateModule extends NativePushySpec {
     }
 
     @Override
+    public void syncNativeConfig(String config, Promise promise) {
+        UpdateModuleImpl.syncNativeConfig(updateContext, config, promise);
+    }
+
+    @Override
     public void setLocalHashInfo(String hash, String info, Promise promise) {
         UpdateModuleImpl.setLocalHashInfo(updateContext, hash, info, promise);
     }

@@ -186,6 +186,17 @@ export class PushyTurboModule extends UITurboModule {
     this.context.setKv('uuid', uuid);
   }
 
+  // Provisioning for the native cold-start update check
+  // (NATIVE_CHECKUPDATE_DESIGN §10.1): the raw JSON persists as-is, parsed on
+  // read by the orchestrator; absent config = check disabled. Validated at
+  // write time — a corrupt config would otherwise silently disable the
+  // native check forever with no signal.
+  async syncNativeConfig(config: string): Promise<void> {
+    logger.debug(TAG, ',call syncNativeConfig');
+    JSON.parse(config);
+    this.context.setKv('nativeConfig', config);
+  }
+
   async reloadUpdate(options: { hash: string }): Promise<void> {
     logger.debug(TAG, ',call reloadUpdate');
     const hash = this.requireHash(options.hash, 'reloadUpdate');

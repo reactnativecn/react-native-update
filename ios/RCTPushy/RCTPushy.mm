@@ -37,6 +37,9 @@ static NSString *const KeyPackageUpdatedMarked = @"REACTNATIVECN_PUSHY_ISPACKAGE
 // installed binary (packageVersion + embedded bundle size + mtime). Recomputed
 // only when the key changes, i.e. once per install.
 static NSString *const keyBundleHashCache = @"REACTNATIVECN_PUSHY_BUNDLEHASH_KEY";
+// Raw JSON persisted by JS (syncNativeConfig) for the native cold-start
+// update check; parsed on read by the orchestrator. Absent = check disabled.
+static NSString *const keyNativeConfig = @"REACTNATIVECN_PUSHY_NATIVE_CONFIG_KEY";
 static NSString *const PushyErrorDomain = @"cn.reactnative.pushy";
 
 // file def
@@ -449,6 +452,30 @@ RCT_EXPORT_METHOD(setUuid:(NSString *)uuid  resolver:(RCTPromiseResolveBlock)res
 
     NSUserDefaults *defaults = PushyDefaults();
     [defaults setObject:uuid forKey:keyUuid];
+    resolve(@true);
+}
+
+RCT_EXPORT_METHOD(syncNativeConfig:(NSString *)config
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+{
+    // Provisioning for the native cold-start check (NATIVE_CHECKUPDATE_DESIGN
+    // §10.1). Validate at write time: a corrupt config would otherwise
+    // silently disable the native check forever with no signal.
+    if (PushyStringIsBlank(config)) {
+        PushyRejectError(reject, PushyErrorWithCode(pushy::error_codes::kInvalidOptions, ERROR_OPTIONS));
+        return;
+    }
+    NSData *data = [config dataUsingEncoding:NSUTF8StringEncoding];
+    NSError *error = nil;
+    id object = data == nil ? nil : [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
+    if (![object isKindOfClass:[NSDictionary class]]) {
+        PushyRejectError(reject, PushyErrorWithCode(
+            pushy::error_codes::kInvalidOptions,
+            error != nil ? error.localizedDescription : ERROR_OPTIONS));
+        return;
+    }
+    [PushyDefaults() setObject:config forKey:keyNativeConfig];
     resolve(@true);
 }
 

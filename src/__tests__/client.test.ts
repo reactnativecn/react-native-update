@@ -34,6 +34,8 @@ const setupClientMocks = ({
   supportedDiffVersion = 2,
   // 内嵌 bundle 的 sha256(core 层同步读预取值);'' 模拟未知
   getBundleHash = mock(() => ''),
+  // undefined 模拟旧原生(无该方法,feature-detect 静默跳过)
+  syncNativeConfig = undefined,
 }: {
   isFirstTime?: boolean;
   markSuccess?: ReturnType<typeof mock>;
@@ -47,6 +49,7 @@ const setupClientMocks = ({
   resetToPackagedBundle?: ReturnType<typeof mock> | null;
   supportedDiffVersion?: number;
   getBundleHash?: ReturnType<typeof mock>;
+  syncNativeConfig?: ReturnType<typeof mock>;
 } = {}) => {
   (globalThis as any).__DEV__ = false;
 
@@ -75,6 +78,7 @@ const setupClientMocks = ({
       downloadAndInstallApk: mock(() => Promise.resolve()),
       restartApp,
       resetToPackagedBundle,
+      ...(syncNativeConfig ? { syncNativeConfig } : {}),
     },
     buildTime: '2023-01-01',
     cInfo: {
@@ -1355,5 +1359,57 @@ describe('client singleton', () => {
     // After unmount the claim is released and a new provider may mount.
     release();
     expect(() => client.claimProviderMount()).not.toThrow();
+  });
+});
+
+describe('syncNativeConfig', () => {
+  test('persists the native check config on construction (silent strategy activates)', async () => {
+    const syncNativeConfig = mock(() => Promise.resolve());
+    setupClientMocks({ syncNativeConfig });
+    const { Pushy } = await importFreshClient('sync-config-1');
+    new Pushy({ appKey: 'demo-app', updateStrategy: 'silentAndLater' });
+
+    expect(syncNativeConfig).toHaveBeenCalled();
+    const config = JSON.parse(
+      (syncNativeConfig.mock.calls.at(-1) as unknown as string[])[0]
+    );
+    expect(config.appKey).toBe('demo-app');
+    expect(config.afterDownload).toBe('setNeedUpdate');
+    expect(config.endpoints.length).toBeGreaterThan(0);
+    expect(config.queryUrls.length).toBeGreaterThan(0);
+    expect(config.rnu).toBe('10.0.0');
+    expect(config.rn).toBe('0.73.0');
+  });
+
+  test('alert strategies keep activation with JS (afterDownload none)', async () => {
+    const syncNativeConfig = mock(() => Promise.resolve());
+    setupClientMocks({ syncNativeConfig });
+    const { Pushy } = await importFreshClient('sync-config-2');
+    new Pushy({ appKey: 'demo-app' });
+
+    const config = JSON.parse(
+      (syncNativeConfig.mock.calls.at(-1) as unknown as string[])[0]
+    );
+    expect(config.afterDownload).toBe('none');
+  });
+
+  test('setOptions re-syncs when the strategy changes', async () => {
+    const syncNativeConfig = mock(() => Promise.resolve());
+    setupClientMocks({ syncNativeConfig });
+    const { Pushy } = await importFreshClient('sync-config-3');
+    const client = new Pushy({ appKey: 'demo-app' });
+    client.setOptions({ updateStrategy: 'silentAndNow' });
+
+    const config = JSON.parse(
+      (syncNativeConfig.mock.calls.at(-1) as unknown as string[])[0]
+    );
+    expect(config.afterDownload).toBe('setNeedUpdate');
+  });
+
+  test('an older native module without the method is skipped silently', async () => {
+    setupClientMocks();
+    const { Pushy } = await importFreshClient('sync-config-4');
+    // Must not throw even though PushyModule lacks syncNativeConfig.
+    new Pushy({ appKey: 'demo-app' });
   });
 });
