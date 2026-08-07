@@ -7,6 +7,7 @@ const { spawnSync } = require('child_process');
 const projectRoot = path.resolve(__dirname, '..');
 const androidJniDir = path.join(projectRoot, 'android', 'jni');
 const patchCoreDir = path.join(projectRoot, 'cpp', 'patch_core');
+const updateFlowCoreDir = path.join(projectRoot, 'cpp', 'update_flow_core');
 const harmonyModuleDir = path.join(projectRoot, 'harmony', 'pushy');
 const harmonyBuildDir = path.join(harmonyModuleDir, 'build');
 const harmonyNativeStageDir = path.join(
@@ -238,6 +239,10 @@ function syncHarmonyNativeSources() {
     path.join(harmonyNativeStageJniDir, 'lzma', 'C'),
   );
   copyPath(patchCoreDir, harmonyNativeStagePatchCoreDir);
+  copyPath(
+    updateFlowCoreDir,
+    path.join(harmonyNativeStageDir, 'update_flow_core'),
+  );
 }
 
 function cleanupHarmonyNativeSources() {

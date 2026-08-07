@@ -6,6 +6,7 @@ import { DownloadTaskParams } from './DownloadTaskParams';
 import { bundleManager } from '@kit.AbilityKit';
 import { util } from '@kit.ArkTS';
 import logger from './Logger';
+import { scheduleNativeCheck } from './NativeCheckOrchestrator';
 import NativePatchCore, {
   STATE_OP_CLEAR_FIRST_TIME,
   STATE_OP_CLEAR_ROLLBACK_MARK,
@@ -535,6 +536,18 @@ export class UpdateContext {
     }
   }
 
+  // 原生冷启动检测(NativeCheckOrchestrator)用来跳过已就绪版本的重复下载
+  // ——alert 类策略下版本已下载但未激活,若不判在这里会每次冷启动重下一遍。
+  public hasDownloadedVersion(hash: string): boolean {
+    try {
+      return fileIo.accessSync(
+        this.getBundlePath(assertSafePathComponent(hash)),
+      );
+    } catch (e) {
+      return false;
+    }
+  }
+
   public switchVersion(hash: string): void {
     try {
       const bundlePath = this.getBundlePath(assertSafePathComponent(hash));
@@ -563,6 +576,11 @@ export class UpdateContext {
   }
 
   public getBundleUrl() {
+    // 接入约定保证 getBundleUrl 每次启动必经,借它锚定每进程一次的原生检测
+    // (NativeCheckOrchestrator);dev 走 Metro provider 不会到这里,天然完成
+    // debug 门控。开销仅一个布尔门 + setTimeout。
+    scheduleNativeCheck(this);
+
     UpdateContext.isUsingBundleUrl = true;
     this.trace('getBundleUrl:enter');
     const stateBeforeLaunch = this.getStateSnapshot();

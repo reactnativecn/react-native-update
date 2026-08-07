@@ -17,6 +17,10 @@ set(PATCH_CORE_DIR ${REPO_ROOT}/cpp/patch_core)
 if(NOT EXISTS ${PATCH_CORE_DIR}/patch_core.cpp)
     set(PATCH_CORE_DIR ${STAGED_NATIVE_DIR}/patch_core)
 endif()
+set(UPDATE_FLOW_CORE_DIR ${REPO_ROOT}/cpp/update_flow_core)
+if(NOT EXISTS ${UPDATE_FLOW_CORE_DIR}/update_flow_core.cpp)
+    set(UPDATE_FLOW_CORE_DIR ${STAGED_NATIVE_DIR}/update_flow_core)
+endif()
 
 # Always compile from source. A prebuilt-import branch used to live here, but
 # it had no symbol verification: a stale libs/<abi>/librnupdate.so missing a
@@ -32,6 +36,8 @@ set(HDP_SOURCES
      ${PATCH_CORE_DIR}/hbc_transform_wire.cpp
      ${PATCH_CORE_DIR}/patch_core.cpp
      ${PATCH_CORE_DIR}/state_core.cpp
+     ${UPDATE_FLOW_CORE_DIR}/flow_json.cpp
+     ${UPDATE_FLOW_CORE_DIR}/update_flow_core.cpp
      ${ANDROID_JNI_DIR}/hpatch.c
      ${HDIFFPATCH_DIR}/libHDiffPatch/HPatch/patch.c
      ${HDIFFPATCH_DIR}/file_for_patch.c
@@ -46,6 +52,7 @@ add_library(rnupdate SHARED
 target_include_directories(rnupdate PRIVATE
      ${CMAKE_CURRENT_SOURCE_DIR}
      ${PATCH_CORE_DIR}
+     ${UPDATE_FLOW_CORE_DIR}
      ${ANDROID_JNI_DIR}
      ${HDIFFPATCH_DIR}
      ${HDIFFPATCH_DIR}/libHDiffPatch/HPatch
