@@ -18,13 +18,14 @@ import { URL } from 'react-native-url-polyfill';
 import { type Cresc, type Pushy, sharedState } from './client';
 import { ProgressContext, UpdateContext } from './context';
 import {
+  cInfo,
   currentVersion,
   currentVersionInfo,
   getCurrentVersionInfo,
   packageVersion,
 } from './core';
-import { resolveCheckResult } from './resolveCheckResult';
 import type { CheckResult, ProgressData, UpdateTestPayload } from './type';
+import { resolveCheckResult } from './updateFlowCore';
 import { assertWeb, log, noop } from './utils';
 
 export const UpdateProvider = ({
@@ -222,7 +223,11 @@ export const UpdateProvider = ({
         // known updateInfo instead of overwriting it with an empty object.
         return;
       }
-      const info = resolveCheckResult(rootInfo);
+      const info = resolveCheckResult(
+        rootInfo,
+        { packageVersion, currentVersion, uuid: cInfo.uuid },
+        log
+      );
       if (info.update) {
         info.description = info.description ?? '';
       }

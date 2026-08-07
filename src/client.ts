@@ -42,12 +42,17 @@ import type {
   UpdateServerConfig,
 } from './type';
 import {
+  buildCheckRequestBody,
+  type DownloadPlan,
+  type DownloadStrategyType,
+  decideDownload,
+} from './updateFlowCore';
+import {
   assertWeb,
   computeProgress,
   DEFAULT_FETCH_TIMEOUT_MS,
   fetchWithTimeout,
   info,
-  joinUrls,
   log,
   noop,
   promiseAny,
@@ -697,19 +702,16 @@ export class Pushy {
       }
     }
     this.lastChecking = now;
-    const fetchBody: Record<string, any> = {
+    const fetchBody = buildCheckRequestBody({
       packageVersion: this.options.overridePackageVersion || packageVersion,
-      hash: currentVersion,
+      currentVersion,
       buildTime,
       cInfo,
-      // 可消费的 diff 轨道版本(2 = hdiffv2 轨道),服务端据此门控下发
-      ...(supportedDiffVersion ? { diffV: supportedDiffVersion } : {}),
-      ...(bundleHash ? { bundleHash } : {}),
-      ...extra,
-    };
-    if (__DEV__) {
-      delete fetchBody.buildTime;
-    }
+      supportedDiffVersion,
+      bundleHash,
+      isDev: __DEV__,
+      extra,
+    });
     const stringifyBody = JSON.stringify(fetchBody);
     // harmony fetch body is not string
     let body: any = fetchBody;
@@ -766,7 +768,6 @@ export class Pushy {
     updateInfo: CheckResult,
     onDownloadProgress?: (data: ProgressData) => void
   ) => {
-    const { hash } = updateInfo;
     if (
       this.options.beforeDownloadUpdate &&
       (await this.options.beforeDownloadUpdate(updateInfo)) === false
@@ -774,17 +775,20 @@ export class Pushy {
       log('beforeDownloadUpdate returned false, skipping download');
       return;
     }
-    if (!updateInfo.update || !hash) {
+    const decision = decideDownload(
+      updateInfo,
+      { currentVersion, rolledBackVersion },
+      __DEV__
+    );
+    if (decision.action === 'none') {
+      if (decision.reason === 'alreadyCurrent') {
+        log(`current hash ${currentVersion}, ignored`);
+      } else if (decision.reason === 'rolledBack') {
+        log(`rolledback hash ${rolledBackVersion}, ignored`);
+      }
       return;
     }
-    if (hash === currentVersion) {
-      log(`current hash ${currentVersion}, ignored`);
-      return;
-    }
-    if (rolledBackVersion === hash) {
-      log(`rolledback hash ${rolledBackVersion}, ignored`);
-      return;
-    }
+    const { hash } = decision;
     if (sharedState.downloadedHash === hash) {
       log(`duplicated downloaded hash ${sharedState.downloadedHash}, ignored`);
       return sharedState.downloadedHash;
@@ -801,7 +805,7 @@ export class Pushy {
       }
       return existingTask;
     }
-    const task = this.performDownload(updateInfo, onDownloadProgress);
+    const task = this.performDownload(updateInfo, decision, onDownloadProgress);
     sharedState.downloadingTasks[hash] = task;
     try {
       return await task;
@@ -811,21 +815,11 @@ export class Pushy {
   };
   private performDownload = async (
     updateInfo: CheckResult,
+    plan: DownloadPlan,
     onDownloadProgress?: (data: ProgressData) => void
   ) => {
-    const {
-      hash,
-      diff,
-      pdiff,
-      full,
-      paths = [],
-      name,
-      description = '',
-      metaInfo,
-    } = updateInfo;
-    if (!hash) {
-      return;
-    }
+    const { name, description = '', metaInfo } = updateInfo;
+    const { hash, attempts, devNoop } = plan;
     const patchStartTime = Date.now();
     // One native listener per hash dispatching to a callback set, so
     // concurrent callers deduped onto this task can each observe progress
@@ -870,61 +864,35 @@ export class Pushy {
     let lastError: any;
     const errorMessages: string[] = [];
 
-    // Ordered download strategies, tried in sequence until one succeeds. Each
-    // resolves its candidate URL lazily (testUrls) and runs the matching native
-    // download. diff/pdiff are incremental and skipped entirely in dev; full is
-    // attempted whenever a URL exists, and in dev with no URL it is treated as a
-    // no-op success so the flow can proceed.
-    type DownloadStrategy = {
-      name: string;
-      candidate: string | undefined;
-      errorKey:
-        | 'error_diff_failed'
-        | 'error_pdiff_failed'
-        | 'error_full_patch_failed';
-      skipInDev: boolean;
-      devNoopWhenNoUrl: boolean;
-      run: (url: string) => Promise<void>;
+    // The ordered attempts come from decideDownload (the pure decision layer);
+    // this side only executes them: probe candidate URLs, run the matching
+    // native download, fall through to the next attempt on failure.
+    const runners: Record<
+      DownloadStrategyType,
+      (url: string) => Promise<void>
+    > = {
+      diff: (url) =>
+        PushyModule.downloadPatchFromPpk({
+          updateUrl: url,
+          hash,
+          originHash: currentVersion,
+        }),
+      pdiff: (url) =>
+        PushyModule.downloadPatchFromPackage({
+          updateUrl: url,
+          hash,
+        }),
+      full: (url) =>
+        PushyModule.downloadFullUpdate({
+          updateUrl: url,
+          hash,
+        }),
     };
-    const strategies: DownloadStrategy[] = [
-      {
-        name: 'diff',
-        candidate: diff,
-        errorKey: 'error_diff_failed',
-        skipInDev: true,
-        devNoopWhenNoUrl: false,
-        run: (url) =>
-          PushyModule.downloadPatchFromPpk({
-            updateUrl: url,
-            hash,
-            originHash: currentVersion,
-          }),
-      },
-      {
-        name: 'pdiff',
-        candidate: pdiff,
-        errorKey: 'error_pdiff_failed',
-        skipInDev: true,
-        devNoopWhenNoUrl: false,
-        run: (url) =>
-          PushyModule.downloadPatchFromPackage({
-            updateUrl: url,
-            hash,
-          }),
-      },
-      {
-        name: 'full',
-        candidate: full,
-        errorKey: 'error_full_patch_failed',
-        skipInDev: false,
-        devNoopWhenNoUrl: true,
-        run: (url) =>
-          PushyModule.downloadFullUpdate({
-            updateUrl: url,
-            hash,
-          }),
-      },
-    ];
+    const errorKeys = {
+      diff: 'error_diff_failed',
+      pdiff: 'error_pdiff_failed',
+      full: 'error_full_patch_failed',
+    } as const;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       if (attempt > 0) {
@@ -942,34 +910,36 @@ export class Pushy {
           attempt,
         },
       });
-      for (const strategy of strategies) {
+      if (devNoop) {
+        log(this.t('dev_incremental_update_disabled'));
+        succeeded = 'full';
+      }
+      for (const { type, urls } of attempts) {
         if (succeeded) {
           break;
         }
-        const url = await testUrls(joinUrls(paths, strategy.candidate));
-        if (url && !(strategy.skipInDev && __DEV__)) {
-          log(`downloading ${strategy.name}`);
-          try {
-            await strategy.run(url);
-            succeeded = strategy.name;
-          } catch (e: any) {
-            const errorMessage = this.t(strategy.errorKey, {
-              message: e.message,
-            });
-            errorMessages.push(errorMessage);
-            // Keep the i18n message for display, but preserve the native
-            // rejection's stable code (e.g. PATCH_FAILED vs DOWNLOAD_FAILED —
-            // telemetry classifies on it) and the original error as cause.
-            lastError = new UpdateError(
-              errorMessage,
-              asUpdateErrorCode(e?.code) ?? 'DOWNLOAD_FAILED',
-              { cause: e }
-            );
-            log(errorMessage);
-          }
-        } else if (!url && strategy.devNoopWhenNoUrl && __DEV__) {
-          log(this.t('dev_incremental_update_disabled'));
-          succeeded = strategy.name;
+        const url = await testUrls(urls);
+        if (!url) {
+          continue;
+        }
+        log(`downloading ${type}`);
+        try {
+          await runners[type](url);
+          succeeded = type;
+        } catch (e: any) {
+          const errorMessage = this.t(errorKeys[type], {
+            message: e.message,
+          });
+          errorMessages.push(errorMessage);
+          // Keep the i18n message for display, but preserve the native
+          // rejection's stable code (e.g. PATCH_FAILED vs DOWNLOAD_FAILED —
+          // telemetry classifies on it) and the original error as cause.
+          lastError = new UpdateError(
+            errorMessage,
+            asUpdateErrorCode(e?.code) ?? 'DOWNLOAD_FAILED',
+            { cause: e }
+          );
+          log(errorMessage);
         }
       }
       if (succeeded) {

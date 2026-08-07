@@ -1,30 +1,8 @@
-import { beforeEach, describe, expect, it, mock } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 
-// Use the preload setup file instead of inline mocks since bun resolves
-// dynamic imports relative to the test runner's context and caching.
 import './setup';
 
-let mockUuid = '';
-// Installed per test: setup.ts hands every module back to its real
-// implementation after each test, so a file-scope mock would only survive the
-// first one.
-beforeEach(() => {
-  mock.module('../core', () => {
-    return {
-      cInfo: {
-        get uuid() {
-          return mockUuid;
-        },
-      },
-    };
-  });
-});
-
-// Use a monotonic counter instead of Date.now() to avoid cache collisions
-// when two dynamic imports happen within the same millisecond.
-let importCounter = 0;
-
-import { murmurhash3_32_gc } from '../isInRollout';
+import { isInRollout, murmurhash3_32_gc } from '../updateFlowCore';
 
 describe('murmurhash3_32_gc', () => {
   it('should be deterministic (return the same output for the same input)', () => {
@@ -72,53 +50,31 @@ describe('murmurhash3_32_gc', () => {
 });
 
 describe('isInRollout', () => {
-  it('should return true when the rollout is greater than the hash modulo', async () => {
-    mockUuid = 'test1'; // hash % 100 === 62
-    const { isInRollout } = await import(
-      `../isInRollout?id=${++importCounter}`
-    );
-    expect(isInRollout(63)).toBe(true);
+  it('should return true when the rollout is greater than the hash modulo', () => {
+    // murmur('test1') % 100 === 62
+    expect(isInRollout(63, 'test1')).toBe(true);
   });
 
-  it('should return false when the rollout is equal to the hash modulo', async () => {
-    mockUuid = 'test1';
-    const { isInRollout } = await import(
-      `../isInRollout?id=${++importCounter}`
-    );
-    expect(isInRollout(62)).toBe(false);
+  it('should return false when the rollout is equal to the hash modulo', () => {
+    expect(isInRollout(62, 'test1')).toBe(false);
   });
 
-  it('should return false when the rollout is less than the hash modulo', async () => {
-    mockUuid = 'test1';
-    const { isInRollout } = await import(
-      `../isInRollout?id=${++importCounter}`
-    );
-    expect(isInRollout(61)).toBe(false);
+  it('should return false when the rollout is less than the hash modulo', () => {
+    expect(isInRollout(61, 'test1')).toBe(false);
   });
 
-  it('should evaluate correctly for a different uuid', async () => {
-    mockUuid = 'test3'; // hash % 100 === 53
-    const { isInRollout } = await import(
-      `../isInRollout?id=${++importCounter}`
-    );
-    expect(isInRollout(54)).toBe(true);
-    expect(isInRollout(53)).toBe(false);
-    expect(isInRollout(-1)).toBe(false);
+  it('should evaluate correctly for a different uuid', () => {
+    // murmur('test3') % 100 === 53
+    expect(isInRollout(54, 'test3')).toBe(true);
+    expect(isInRollout(53, 'test3')).toBe(false);
+    expect(isInRollout(-1, 'test3')).toBe(false);
   });
 
-  it('should always return false for 0% rollout', async () => {
-    mockUuid = 'test1';
-    const { isInRollout } = await import(
-      `../isInRollout?id=${++importCounter}`
-    );
-    expect(isInRollout(0)).toBe(false);
+  it('should always return false for 0% rollout', () => {
+    expect(isInRollout(0, 'test1')).toBe(false);
   });
 
-  it('should always return true for 100% rollout', async () => {
-    mockUuid = 'test1';
-    const { isInRollout } = await import(
-      `../isInRollout?id=${++importCounter}`
-    );
-    expect(isInRollout(100)).toBe(true);
+  it('should always return true for 100% rollout', () => {
+    expect(isInRollout(100, 'test1')).toBe(true);
   });
 });

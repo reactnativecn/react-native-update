@@ -96,10 +96,9 @@ const realProjectModules: Record<string, Record<string, unknown>> = {
   '../core': { ...(await import('../core')) },
   '../endpoint': { ...(await import('../endpoint')) },
   '../error': { ...(await import('../error')) },
-  '../isInRollout': { ...(await import('../isInRollout')) },
   '../permissions': { ...(await import('../permissions')) },
-  '../resolveCheckResult': { ...(await import('../resolveCheckResult')) },
   '../telemetry': { ...(await import('../telemetry')) },
+  '../updateFlowCore': { ...(await import('../updateFlowCore')) },
   '../utils': { ...(await import('../utils')) },
 };
 
