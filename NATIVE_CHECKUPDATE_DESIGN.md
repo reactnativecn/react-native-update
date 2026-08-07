@@ -141,11 +141,28 @@ Hermes 字节码格式不跨版本稳定——若分发 HBC，服务端覆盖包
 受。代价：宿主 libhermes 若编译时裁掉了源码编译器则不可用——这归入下面的链
 接可行性验证。
 
-放在 `cpp/` 里与 `patch_core` / `state_core` 同级，三端共享同一份 C++；各端只提供 HTTP 客户端（Android OkHttp、iOS NSURLSession、Harmony `@ohos.net.http` —— 都已在用）和文件路径。
+**源码可移植性已验证（2026-08-07）**：`src/updateFlowCore.ts` 经
+`bun build --format=cjs` 打成 6.4KB 单文件纯文本 JS（零依赖、零 require），
+在三个裸引擎下对同一驱动脚本的输出**逐字节一致**且全部正确——macOS 系统
+`jsc`（与 iOS JavaScriptCore 同源）、Hermes VM（RN 0.73 配套版本，源码直接
+求值无需 HBC）、Node V8。函数调用边界（JSON 进出）即 §5.1 的三步接口，工作
+正常。进一步用 ObjC 写了最小原生宿主实测通过：`JSContext` 求值源码 →
+`callWithArguments` 调 `decideDownload` → 拿回决策 JSON——40 行代码、仅链
+系统 Foundation + JavaScriptCore 两个框架，就是 iOS 编排器的最终形态。语法下限：产物含 `?.`/`??`/对象展开 → Hermes ≥0.7（RN 0.64+）、iOS
+JSC ≥13.4；如需更老目标，guardian 构建加 es2015 降级即可。
 
-**主要风险**：直接链接 libhermes 的 C++ API 在 RN 各版本间会变，可能出现符号/ABI 兼容问题。Android 的 `librnupdate.so` 是预编译产物（4 个 ABI），链上 Hermes 后与宿主 RN 的 Hermes 版本耦合。**这是 C 相对 B 的主要代价，需要先做一个链接可行性验证再决定**（验证已推迟到纯函数抽取完成之后；纯文本 JS 定稿后，验证范围收窄为"能否拿到一个可求值源码的引擎"，不再含字节码版本矩阵）。
+**纯文本定稿的推论——三端不必用同一个引擎**：源码是共享物，引擎只是求值
+器，选型可以按端就地取材：
 
-备选：不用 Hermes，用一个极小的嵌入式 JS 引擎（QuickJS 约 200KB）。彻底解耦宿主 RN，代价是包体增加；纯文本分发下不需要其字节码工具链。若验证结论是"只有 QuickJS 才干净"，应改选方案 B——C 的独占收益（窗口期远程修决策纯函数的 bug）撑不起这个包体与供应链成本。
+| 端 | 引擎 | 风险 |
+|---|---|---|
+| iOS | 系统 JavaScriptCore 框架 | **零**——系统框架，零链接、零包体、零版本耦合，上面已实测同源引擎 |
+| Harmony | 系统 JSVM-API（V8，API 11+，RNOH 本就要求 5.0+） | 低——系统能力，待落地时确认 API 细节 |
+| Android | 开放问题：androidx.javascriptengine（系统 WebView 引擎、沙箱进程、异步）/ 链接 Hermes（ABI 耦合宿主 RN）/ QuickJS（~200KB×4 ABI） | **剩余的全部 spike 范围** |
+
+原生编排层（HTTP、下载、状态）仍放 `cpp/` 与 `patch_core` / `state_core` 同级三端共享；求值器作为注入接口由各端实现，与 HTTP 客户端同一地位。
+
+**剩余风险收窄为 Android 单点**：直接链接 libhermes 的 C++ API 在 RN 各版本间会变，且 `librnupdate.so` 是预编译产物（4 个 ABI）。若三个 Android 候选都不干净，**仅 Android 一端退回方案 B（决策逻辑 C++ 重写）也是可接受的混合形态**——三端源码一致性只在 iOS/Harmony 保持，Android 以 updateFlowCore 为参照实现并靠共享测试向量对齐。
 
 ### 5.3 分发与覆盖
 
@@ -227,8 +244,10 @@ app 侧的 `client.ts` / `UpdateProvider` 仍然负责**交互**：更新提示�
    `isInRollout` / `joinUrls` / `orderEndpointCandidates`，无 IO、无
    react-native 依赖、无模块级状态（身份/随机数均参数注入），import 闭包
    为纯；client.ts / provider.tsx / endpoint.ts 已原地改用，单测覆盖
-3. **运行时选型** —— Hermes 链接可行性验证（已推迟；纯文本 JS 定稿后范围
-   收窄，见 §5.2）；失败则退回方案 B（C++ 纯函数）
+3. **运行时选型** —— 源码可移植性已验证（2026-08-07，三裸引擎逐字节一
+   致，见 §5.2）；iOS 定为系统 JavaScriptCore、Harmony 定为系统 JSVM-API，
+   **剩余 spike 仅 Android**（javascriptengine / Hermes 链接 / QuickJS 三
+   选一，全不干净则 Android 单端退回 C++ 实现的混合形态）
 4. **原生编排** —— 三端 HTTP + 调用纯函数 + 复用现有下载/patch/state；
    endpoint 执行引擎为顺序回退（§5.1），不移植 hedged race
 5. ~~**guardian 分发通道**~~ **已裁决不做**（2026-08-07，见 §5.3）——
