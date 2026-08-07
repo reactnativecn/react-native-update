@@ -197,6 +197,13 @@ export class PushyTurboModule extends UITurboModule {
     this.context.setKv('nativeConfig', config);
   }
 
+  // 原生冷启动检测落盘的原始响应缓存,JS 侧新鲜期内直接复用免二次请求
+  // (NATIVE_CHECKUPDATE_DESIGN §10.3)。缺省空串,永不 reject。
+  async getNativeCheckCache(): Promise<string> {
+    logger.debug(TAG, ',call getNativeCheckCache');
+    return this.context.getKv('nativeCheckResp') ?? '';
+  }
+
   async reloadUpdate(options: { hash: string }): Promise<void> {
     logger.debug(TAG, ',call reloadUpdate');
     const hash = this.requireHash(options.hash, 'reloadUpdate');

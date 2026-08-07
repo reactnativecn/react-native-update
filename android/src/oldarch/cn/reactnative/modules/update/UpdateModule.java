@@ -96,6 +96,11 @@ public class UpdateModule extends ReactContextBaseJavaModule {
     }
 
     @ReactMethod
+    public void getNativeCheckCache(Promise promise) {
+        UpdateModuleImpl.getNativeCheckCache(updateContext, promise);
+    }
+
+    @ReactMethod
     public void setLocalHashInfo(String hash, String info) {
         UpdateModuleImpl.setLocalHashInfo(updateContext, hash, info);
     }

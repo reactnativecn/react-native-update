@@ -94,6 +94,11 @@ public class UpdateModule extends NativePushySpec {
     }
 
     @Override
+    public void getNativeCheckCache(Promise promise) {
+        UpdateModuleImpl.getNativeCheckCache(updateContext, promise);
+    }
+
+    @Override
     public void setLocalHashInfo(String hash, String info, Promise promise) {
         UpdateModuleImpl.setLocalHashInfo(updateContext, hash, info, promise);
     }

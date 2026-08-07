@@ -44,6 +44,9 @@ static NSString *const keyBundleHashCache = @"REACTNATIVECN_PUSHY_BUNDLEHASH_KEY
 // Raw JSON persisted by JS (syncNativeConfig) for the native cold-start
 // update check; parsed on read by the orchestrator. Absent = check disabled.
 static NSString *const keyNativeConfig = @"REACTNATIVECN_PUSHY_NATIVE_CONFIG_KEY";
+// Raw response cache written by the native cold-start check for the JS side
+// to reuse (§10.3): {"ts": <epoch seconds>, "body": <raw response>}.
+static NSString *const keyNativeCheckCache = @"REACTNATIVECN_PUSHY_NATIVE_CHECK_RESP_KEY";
 static NSString *const PushyErrorDomain = @"cn.reactnative.pushy";
 
 // file def
@@ -532,6 +535,12 @@ RCT_EXPORT_METHOD(syncNativeConfig:(NSString *)config
     }
     [PushyDefaults() setObject:config forKey:keyNativeConfig];
     resolve(@true);
+}
+
+RCT_EXPORT_METHOD(getNativeCheckCache:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+{
+    resolve([PushyDefaults() stringForKey:keyNativeCheckCache] ?: @"");
 }
 
 RCT_EXPORT_METHOD(setLocalHashInfo:(NSString *)hash
@@ -1164,11 +1173,6 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
 @end
 
 #pragma mark - native cold-start check orchestration
-
-// Raw response cache for the JS side to reuse instead of re-checking
-// (NATIVE_CHECKUPDATE_DESIGN §10.3): {"ts": <epoch seconds>, "body": <raw
-// checkUpdate response>}.
-static NSString *const keyNativeCheckCache = @"REACTNATIVECN_PUSHY_NATIVE_CHECK_RESP_KEY";
 
 // Blocking JSON HTTP round-trip on the orchestrator's utility thread. Returns
 // the response body on 2xx, nil on any failure. The semaphore timeout is a

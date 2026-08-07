@@ -624,6 +624,39 @@ export class Pushy {
     this.lastWorkingEndpoint = endpoint;
     return value;
   };
+  /**
+   * Reuse the native cold-start check's cached response when fresh
+   * (NATIVE_CHECKUPDATE_DESIGN §10.3) instead of re-checking. Returns
+   * undefined whenever the cache is absent, stale, or unreadable — any
+   * failure falls through to a normal network check.
+   */
+  private readNativeCheckCache = async (): Promise<CheckResult | undefined> => {
+    try {
+      if (__DEV__ || typeof PushyModule.getNativeCheckCache !== 'function') {
+        return undefined;
+      }
+      const raw = await Promise.resolve(PushyModule.getNativeCheckCache());
+      if (!raw || typeof raw !== 'string') {
+        return undefined;
+      }
+      const entry = JSON.parse(raw);
+      if (typeof entry?.ts !== 'number' || typeof entry?.body !== 'string') {
+        return undefined;
+      }
+      if (Date.now() / 1000 - entry.ts > 120) {
+        return undefined;
+      }
+      const result = JSON.parse(entry.body);
+      if (!result || typeof result !== 'object') {
+        return undefined;
+      }
+      log('reusing native check response cache');
+      return result as CheckResult;
+    } catch {
+      return undefined;
+    }
+  };
+
   assertDebug = (matter: string) => {
     if (__DEV__ && !this.options.debug) {
       info(this.t('dev_debug_disabled', { matter }));
@@ -774,7 +807,14 @@ export class Pushy {
         type: 'checking',
         message: `${this.options.appKey}: ${stringifyBody}`,
       });
-      const respJsonPromise = this.fetchCheckResult(fetchPayload);
+      // The native cold-start check may have a fresh response on disk
+      // (§10.3); reuse it instead of re-checking. The read happens INSIDE
+      // the promise so no await lands between the dedup window above and the
+      // lastRespJson assignment below (the JS2-1 double-send lesson).
+      const respJsonPromise = (async (): Promise<CheckResult> => {
+        const cached = await this.readNativeCheckCache();
+        return cached ?? (await this.fetchCheckResult(fetchPayload));
+      })();
       this.lastRespJson = respJsonPromise;
       const result: CheckResult = await respJsonPromise;
 

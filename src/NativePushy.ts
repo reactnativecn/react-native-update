@@ -24,6 +24,13 @@ export interface Spec extends TurboModule {
    * skips its check, which doubles as the feature's rollout gate.
    */
   syncNativeConfig(config: string): Promise<void>;
+  /**
+   * Raw response cached by the native cold-start check
+   * ('{"ts":<epoch seconds>,"body":<raw checkUpdate response>}'), so the JS
+   * side can reuse a fresh result instead of re-checking (§10.3). Resolves to
+   * an empty string when absent; never rejects.
+   */
+  getNativeCheckCache(): Promise<string>;
   reloadUpdate(options: { hash: string }): Promise<void>;
   restartApp(): Promise<void>;
   setNeedUpdate(options: { hash: string }): Promise<void>;

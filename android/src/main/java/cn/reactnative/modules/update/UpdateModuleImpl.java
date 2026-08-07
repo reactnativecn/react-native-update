@@ -224,6 +224,19 @@ public class UpdateModuleImpl {
         });
     }
 
+    /**
+     * Raw response cached by the native cold-start check, for the JS side to
+     * reuse instead of re-checking (§10.3). Empty string when absent; never
+     * rejects.
+     */
+    public static void getNativeCheckCache(
+        final UpdateContext updateContext,
+        final Promise promise
+    ) {
+        String cached = updateContext.getKv(NativeCheckOrchestrator.KEY_RESP_CACHE);
+        promise.resolve(cached == null ? "" : cached);
+    }
+
     private static void setUuidInternal(UpdateContext updateContext, String uuid) {
         updateContext.setKv("uuid", uuid);
     }
