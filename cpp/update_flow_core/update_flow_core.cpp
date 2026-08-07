@@ -261,4 +261,17 @@ Value DecideDownload(const Value& info, const Value& identity, bool isDev) {
   return decision;
 }
 
+Value HandleCheckResponse(const std::string& responseText,
+                          const Value& identity, bool isDev) {
+  bool ok = false;
+  Value root = flowjson::Parse(responseText, &ok);
+  if (!ok || !root.IsObject()) {
+    return DeclineDownload("invalidResponse");
+  }
+  Value resolved = ResolveCheckResult(root, identity);
+  Value decision = DecideDownload(resolved, identity, isDev);
+  decision.Set("info", std::move(resolved));
+  return decision;
+}
+
 }  // namespace updateflow

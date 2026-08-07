@@ -296,3 +296,70 @@ app 侧的 `client.ts` / `UpdateProvider` 仍然负责**交互**：更新提示�
 - `autoReset` 遥测事件 —— 无 reset 动作后失去意义，撤回
 
 `unconfirmedBoots` / 前台闸门 / `markBootHealthy` / `PROVIDER_REQUIRED` / `CONTENT_APPEARED` 全部撤回。
+
+---
+
+## 10. 原生编排设计（§8 第 4 步）
+
+### 10.1 标定（provisioning）——设计到此才暴露的缺口
+
+appKey、server endpoints、更新策略今天只活在 JS 的 `ClientOptions` 里，而原
+生检测跑在冷启动、任何 JS 之前。解决：**JS 是唯一配置源，原生只消费落盘副
+本。** 每次 `setOptions`（含构造）后 JS 调新的原生方法 `syncNativeConfig`，
+持久化：
+
+```
+{ appKey, endpoints: server.main, queryUrls, afterDownload: 'none' | 'setNeedUpdate',
+  disabled?: boolean, rnu, rn }
+```
+
+- `afterDownload` 由 updateStrategy 折算：`silentAndLater` / `silentAndNow`
+  → `setNeedUpdate`（原生的作用面本来就是"下次启动"）；alert 类策略 → 只下
+  载不激活，弹窗与确认永远归 JS（§6）
+- **无配置 → 原生静默不跑**。首次安装首启、或从未升级到新 JS 的老接入，天
+  然回到现状，零行为变化——这就是灰度开关，不需要另设开关
+- 刻意不做 Info.plist / AndroidManifest 注入：配置双源必然漂移
+- 砖机场景自洽：设备能被坏热更砖掉，说明它至少健康跑过一次 JS，配置早已落盘
+
+### 10.2 流程
+
+冷启动 + 延迟 5s（R5），后台线程，每次冷启动至多一轮：
+
+```
+读 config（无则退出）+ 原生 state（currentVersion / rolledBackVersion /
+  packageVersion / buildTime / uuid / supportedDiffVersion / bundleHash 缓存）
+→ BuildCheckRequestBody（bundleHash 同步读缓存，缺省省略字段）
+→ OrderEndpointCandidates(endpoints, 原生随机数)
+→ 顺序请求，单个超时 10s；全失败 → 拉 queryUrls（任一成功即用）合并新候选，
+  排除已失败的，再顺序一轮；仍失败 → 本轮放弃
+→ HandleCheckResponse(响应原文, identity, isDev=false)（已实现，含 info 透出）
+→ action=download：按 attempts 顺序走现有下载器（diff→pdiff→full，
+  testUrls 语义由原生逐个尝试实现）；成功 → setLocalHashInfo(info 的
+  name/description/metaInfo) → 按 afterDownload 决定是否 setNeedUpdate
+→ 响应原文 + 时间戳落盘（§10.3）
+```
+
+### 10.3 与 JS 的去重（§6 的落地形态）
+
+首版**原生只写缓存**：响应原文 + 时间戳落到固定文件。紧随其后的 JS 小改
+动：`checkUpdate` 先读该缓存，时间戳新鲜（暂定 2 分钟）则直接复用不发请
+求。改造前的过渡期是双检查——多一次网络请求，服务端有缓存，无害。
+
+### 10.4 失败策略
+
+- 整轮静默失败：无重试风暴、无退避状态机，下次冷启动天然重试
+- 下载/patch 失败不拉黑版本、不计数（本地熔断的教训：多记会毁好版本）；
+  每次启动至多重试一轮，行为有界
+- 不引入任何新的回退/降级路径；apk 过期（expired）响应原生不处理，留给 JS UI
+
+### 10.5 安全面
+
+与 JS 路径同一协议、同一 HTTPS endpoints、同一下载器 hash 校验，无新增
+面。`flow_json` 解析网络数据已做深度上限 + 畸形输入回归（ASan/UBSan）。
+
+### 10.6 分平台落地顺序
+
+iOS（NSURLSession，下载/patch/state 全现成，纯增量）→ Android（OkHttp +
+librnupdate.so 进 update_flow_core，绑一次 .so 重编）→ Harmony。e2e 用例
+沿用 Example/e2etest 既有基建，验证"坏 bundle 下原生仍能拉到修复版"的端到
+端场景。

@@ -141,6 +141,86 @@ int RunParserRobustness() {
   return failures;
 }
 
+// HandleCheckResponse is pure composition (no decision logic of its own), so
+// it is tested directly here instead of via TS-generated vectors: response
+// text in, canonical decision out.
+int RunHandleCheckResponse() {
+  int failures = 0;
+  Value identity = Value::Object();
+  identity.Set("packageVersion", Value::String("2.3.4"));
+  identity.Set("currentVersion", Value::String("cur"));
+  identity.Set("uuid", Value::String("test1"));  // bucket 62
+  identity.Set("rolledBackVersion", Value::String("bad"));
+
+  const struct {
+    const char* name;
+    const char* response;
+    const char* expected;
+  } cases[] = {
+      {"malformed", "not json{",
+       "{\"action\":\"none\",\"reason\":\"invalidResponse\"}"},
+      {"non-object", "[1,2]",
+       "{\"action\":\"none\",\"reason\":\"invalidResponse\"}"},
+      {"upToDate", "{\"upToDate\":true}",
+       "{\"action\":\"none\",\"reason\":\"noUpdate\",\"info\":{\"upToDate\":"
+       "true}}"},
+      {"expired",
+       "{\"expired\":true,\"downloadUrl\":\"https://x/app.apk\"}",
+       "{\"action\":\"none\",\"reason\":\"noUpdate\",\"info\":{\"expired\":"
+       "true,\"downloadUrl\":\"https://x/app.apk\"}}"},
+      {"alreadyCurrent",
+       "{\"update\":true,\"hash\":\"cur\",\"full\":\"cur.ppk\","
+       "\"paths\":[\"cdn.x.com\"]}",
+       "{\"action\":\"none\",\"reason\":\"noUpdate\",\"info\":{\"upToDate\":"
+       "true}}"},
+      {"download",
+       "{\"update\":true,\"hash\":\"h2\",\"full\":\"h2.ppk\","
+       "\"paths\":[\"cdn.x.com\"],\"name\":\"v2\"}",
+       "{\"action\":\"download\",\"hash\":\"h2\",\"attempts\":[{\"type\":"
+       "\"full\",\"urls\":[\"https://cdn.x.com/h2.ppk\"]}],\"devNoop\":false,"
+       "\"info\":{\"update\":true,\"hash\":\"h2\",\"full\":\"h2.ppk\","
+       "\"paths\":[\"cdn.x.com\"],\"name\":\"v2\"}}"},
+      {"rollout-in",
+       "{\"update\":true,\"hash\":\"root\",\"full\":\"root.ppk\","
+       "\"paths\":[\"cdn.x.com\"],\"expVersion\":{\"name\":\"g\",\"hash\":"
+       "\"gray\",\"full\":\"gray.ppk\",\"config\":{\"rollout\":{\"2.3.4\":"
+       "63}}}}",
+       "{\"action\":\"download\",\"hash\":\"gray\",\"attempts\":[{\"type\":"
+       "\"full\",\"urls\":[\"https://cdn.x.com/gray.ppk\"]}],\"devNoop\":"
+       "false,\"info\":{\"update\":true,\"name\":\"g\",\"hash\":\"gray\","
+       "\"full\":\"gray.ppk\",\"config\":{\"rollout\":{\"2.3.4\":63}},"
+       "\"paths\":[\"cdn.x.com\"]}}"},
+      {"rollout-out",
+       "{\"update\":true,\"hash\":\"root\",\"full\":\"root.ppk\","
+       "\"paths\":[\"cdn.x.com\"],\"expVersion\":{\"name\":\"g\",\"hash\":"
+       "\"gray\",\"full\":\"gray.ppk\",\"config\":{\"rollout\":{\"2.3.4\":"
+       "62}}}}",
+       "{\"action\":\"download\",\"hash\":\"root\",\"attempts\":[{\"type\":"
+       "\"full\",\"urls\":[\"https://cdn.x.com/root.ppk\"]}],\"devNoop\":"
+       "false,\"info\":{\"update\":true,\"hash\":\"root\",\"full\":"
+       "\"root.ppk\",\"paths\":[\"cdn.x.com\"]}}"},
+      {"rolledBack",
+       "{\"update\":true,\"hash\":\"bad\",\"full\":\"bad.ppk\","
+       "\"paths\":[\"cdn.x.com\"]}",
+       "{\"action\":\"none\",\"reason\":\"rolledBack\",\"info\":{\"update\":"
+       "true,\"hash\":\"bad\",\"full\":\"bad.ppk\",\"paths\":[\"cdn.x.com\"]}"
+       "}"},
+  };
+  for (const auto& c : cases) {
+    Value decision =
+        updateflow::HandleCheckResponse(c.response, identity, false);
+    std::string actual = Stringify(decision);
+    if (actual != c.expected) {
+      std::fprintf(stderr,
+                   "handleCheckResponse %s MISMATCH\n  expected: %s\n"
+                   "  actual:   %s\n",
+                   c.name, c.expected, actual.c_str());
+      failures++;
+    }
+  }
+  return failures;
+}
+
 }  // namespace
 
 int main(int argc, char* argv[]) {
@@ -164,7 +244,7 @@ int main(int argc, char* argv[]) {
   }
 
   const Value& cases = doc.Get("cases");
-  int failures = RunParserRobustness();
+  int failures = RunParserRobustness() + RunHandleCheckResponse();
   for (size_t i = 0; i < cases.Size(); i++) {
     const Value& testCase = cases.At(i);
     const std::string& fn = testCase.Get("fn").AsString();
