@@ -158,7 +158,19 @@ JSC ≥13.4；如需更老目标，guardian 构建加 es2015 降级即可。
 |---|---|---|
 | iOS | 系统 JavaScriptCore 框架 | **零**——系统框架，零链接、零包体、零版本耦合，上面已实测同源引擎 |
 | Harmony | 系统 JSVM-API（V8，API 11+，RNOH 本就要求 5.0+） | 低——系统能力，待落地时确认 API 细节 |
-| Android | 开放问题：androidx.javascriptengine（系统 WebView 引擎、沙箱进程、异步）/ 链接 Hermes（ABI 耦合宿主 RN）/ QuickJS（~200KB×4 ABI） | **剩余的全部 spike 范围** |
+| Android | 开放问题：androidx.javascriptengine（系统 WebView 引擎、沙箱进程、异步）/ QuickJS（~200KB×4 ABI）/ ~~链接宿主 Hermes~~ | **剩余的全部 spike 范围**（Hermes 路线已被侦察排除，见下） |
+
+**Android 链接宿主 Hermes 已排除（2026-08-07 对 hermes-android
+250829098.0.10 / RN 0.85 预编译产物的符号侦察）**：prefab 里虽然带了
+`hermes_abi/hermes_abi.h`（稳定 C ABI 头），但其入口 `get_hermes_abi_vtable`
+**并未从 `libhermesvm.so` 导出**——只导出了 C++ 的
+`facebook::hermes::makeHermesRuntime(RuntimeConfig const&)`，而走 C++ 路线
+要求调用方与宿主版本的 `RuntimeConfig` 布局、libc++ ABI 精确匹配，且 JSI 符
+号导出为零（消费方须自行编译与宿主一致版本的 jsi.cpp）。对跨 RN 版本分发的
+预编译 `librnupdate.so`，这是不可控的版本矩阵；老 RN 的 `libhermes.so` 连库
+名和导出面都不同。若未来官方开始导出稳定 C ABI，此路线可复活。当前 Android
+实际候选就两个：javascriptengine（零包体、依赖 WebView provider、沙箱进程异
+步——对冷启动后台任务可接受，需真机验证）与 QuickJS（确定可行、包体代价）。
 
 原生编排层（HTTP、下载、状态）仍放 `cpp/` 与 `patch_core` / `state_core` 同级三端共享；求值器作为注入接口由各端实现，与 HTTP 客户端同一地位。
 
