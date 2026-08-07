@@ -1,6 +1,8 @@
 # 原生检测更新设计：让砖机也能被修好
 
-> 状态：实施中——§8 第 2 步（纯函数抽取）已完成（`src/updateFlowCore.ts`，2026-08-07）
+> 状态：实施中——选型已改判方案 B（三端统一 C++ + 金标向量契约，见 §4 裁决）。
+> 决策层双实现已落地：`src/updateFlowCore.ts`（参照）+ `cpp/update_flow_core`
+> （移植），69 条向量双侧钉死。剩余工作：§8 第 4 步原生编排。
 > 取代：`REMOTE_RESET_DESIGN.md`（本地启动熔断方案，已放弃，理由见 §1.2）
 > 前置：bundleHash 迁移 Phase 0/1/2 已上线且 buildTime 永久保留作 fallback 已定稿
 > （2026-08-03）——checkUpdate 的 wire protocol 已稳定，协议前置解除
@@ -92,9 +94,26 @@ A 直接淘汰。B 是 [[native-update-reset-design]] 里 Phase 3 的原计划�
 瘫"。真正集中风险的是原生**编排**代码（R2），而那部分 B / C 完全相同，
 guardian 救不了它。
 
+> **最终裁决（2026-08-07）：选 B，三端统一 C++，金标向量作为双实现的强制契
+> 约（已实现）。** 推理链：引擎方案的全部价值 = 单一事实来源；Android 宿主
+> Hermes 被符号侦察排除、javascriptengine 因可用性是运行时属性只能当可选优
+> 化——一个必定可用的 C++ 实现无论如何要存在；一旦如此，混合形态（iOS/
+> Harmony 求值 + Android C++）要养两套机制，统一 C++ 的改动次数相同却删掉了
+> 求值器机制整个类别；QuickJS 统一保单源要付 200KB×4 + 三端引擎集成，只换
+> 来"少改一处代码"，而那处改动有向量护栏，是机械劳动。
+> "单源"要保的性质是**语义唯一且被机械强制**，由金标向量提供：
+> `src/updateFlowCore.ts` 是参照实现（oracle），
+> `scripts/generate-flow-vectors.ts` 产出
+> `cpp/update_flow_core/tests/flow_vectors.json`（69 向量），
+> `src/__tests__/flowVectors.test.ts` 钉住 TS 与向量文件一致，
+> `scripts/test-update-flow-core.sh`（CI cpp-test job，带 ASan/UBSan）钉住
+> C++ 移植与向量一致。**纪律：语义改动先落 TS → 重新生成向量 → 移植 C++，
+> 两侧不绿不发版。** C++ 侧的 `flow_json` 按 JS 语义实现（插入序对象、
+> undefined ≠ null、JS truthiness / 严格相等），移植才能逐字节对齐。
+
 ---
 
-## 5. Guardian bundle
+## 5. Guardian bundle（已否决路线，留档防止重新发明；裁决见 §4）
 
 ### 5.1 关键设计约束：它必须是纯函数，不做 IO
 
@@ -256,16 +275,18 @@ app 侧的 `client.ts` / `UpdateProvider` 仍然负责**交互**：更新提示�
    `isInRollout` / `joinUrls` / `orderEndpointCandidates`，无 IO、无
    react-native 依赖、无模块级状态（身份/随机数均参数注入），import 闭包
    为纯；client.ts / provider.tsx / endpoint.ts 已原地改用，单测覆盖
-3. **运行时选型** —— 源码可移植性已验证（2026-08-07，三裸引擎逐字节一
-   致，见 §5.2）；iOS 定为系统 JavaScriptCore、Harmony 定为系统 JSVM-API，
-   **剩余 spike 仅 Android**（javascriptengine / Hermes 链接 / QuickJS 三
-   选一，全不干净则 Android 单端退回 C++ 实现的混合形态）
-4. **原生编排** —— 三端 HTTP + 调用纯函数 + 复用现有下载/patch/state；
-   endpoint 执行引擎为顺序回退（§5.1），不移植 hedged race
-5. ~~**guardian 分发通道**~~ **已裁决不做**（2026-08-07，见 §5.3）——
-   guardian 只带基线、无远程覆盖；砖机救援能力在第 4 步，不受影响
+3. ~~**运行时选型**~~ **已关闭：改判方案 B**（2026-08-07，裁决与推理链见
+   §4）。`cpp/update_flow_core` 已实现（flow_json + 七个决策函数的 1:1 移
+   植），69 条金标向量在本机与 CI（ASan/UBSan）全过
+4. **原生编排** —— 三端 HTTP + 调用 `update_flow_core` + 复用现有下载/
+   patch/state；endpoint 执行引擎为顺序回退（§5.1），不移植 hedged race。
+   Android 侧 `update_flow_core` 进 `librnupdate.so`（协议演进从此绑定
+   `.so` 重编，走 build-android-so.sh + CI + verify-android-so.js 的 16KB
+   对齐断言）
+5. ~~**guardian 分发通道**~~ **已裁决不做**（2026-08-07，见 §5.3）——随
+   §4 改判 B，整个 guardian 路线关闭；砖机救援能力在第 4 步，不受影响
 
-第 2 步曾是关键路径（B 和 C 的公共前置），现已完成——下一个决策点是第 3 步的求值引擎验证，其结论裁决"决策层用 JS 源码求值还是 C++ 重写"（第 4 步两个结果都要做，路线不再分叉）。
+剩余工作只有第 4 步：原生编排。决策层已就位（TS 参照 + C++ 移植 + 向量契约），编排层是纯 IO 胶水。
 
 ## 9. 已写代码的处置
 
