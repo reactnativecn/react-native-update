@@ -42,6 +42,10 @@ Value Dispatch(const std::string& fn, const Value& args, bool* known) {
     return updateflow::DecideDownload(args.At(0), args.At(1),
                                       args.At(2).Truthy());
   }
+  if (fn == "shouldActivateAfterDownload") {
+    return Value::Bool(updateflow::ShouldActivateAfterDownload(
+        args.At(0), args.At(1).AsString()));
+  }
   *known = false;
   return Value::Undefined();
 }
@@ -155,60 +159,86 @@ int RunHandleCheckResponse() {
   const struct {
     const char* name;
     const char* response;
+    const char* afterDownload;
     const char* expected;
   } cases[] = {
-      {"malformed", "not json{",
+      {"malformed", "not json{", "none",
        "{\"action\":\"none\",\"reason\":\"invalidResponse\"}"},
-      {"non-object", "[1,2]",
+      {"non-object", "[1,2]", "none",
        "{\"action\":\"none\",\"reason\":\"invalidResponse\"}"},
-      {"upToDate", "{\"upToDate\":true}",
+      {"upToDate", "{\"upToDate\":true}", "none",
        "{\"action\":\"none\",\"reason\":\"noUpdate\",\"info\":{\"upToDate\":"
        "true}}"},
       {"expired",
-       "{\"expired\":true,\"downloadUrl\":\"https://x/app.apk\"}",
+       "{\"expired\":true,\"downloadUrl\":\"https://x/app.apk\"}", "none",
        "{\"action\":\"none\",\"reason\":\"noUpdate\",\"info\":{\"expired\":"
        "true,\"downloadUrl\":\"https://x/app.apk\"}}"},
       {"alreadyCurrent",
        "{\"update\":true,\"hash\":\"cur\",\"full\":\"cur.ppk\","
        "\"paths\":[\"cdn.x.com\"]}",
+       "none",
        "{\"action\":\"none\",\"reason\":\"noUpdate\",\"info\":{\"upToDate\":"
        "true}}"},
       {"download",
        "{\"update\":true,\"hash\":\"h2\",\"full\":\"h2.ppk\","
        "\"paths\":[\"cdn.x.com\"],\"name\":\"v2\"}",
+       "none",
        "{\"action\":\"download\",\"hash\":\"h2\",\"attempts\":[{\"type\":"
        "\"full\",\"urls\":[\"https://cdn.x.com/h2.ppk\"]}],\"devNoop\":false,"
+       "\"activate\":false,"
        "\"info\":{\"update\":true,\"hash\":\"h2\",\"full\":\"h2.ppk\","
        "\"paths\":[\"cdn.x.com\"],\"name\":\"v2\"}}"},
-      {"rollout-in",
+      {"download-silent-strategy",
+       "{\"update\":true,\"hash\":\"h2\",\"full\":\"h2.ppk\","
+       "\"paths\":[\"cdn.x.com\"]}",
+       "setNeedUpdate",
+       "{\"action\":\"download\",\"hash\":\"h2\",\"attempts\":[{\"type\":"
+       "\"full\",\"urls\":[\"https://cdn.x.com/h2.ppk\"]}],\"devNoop\":false,"
+       "\"activate\":true,"
+       "\"info\":{\"update\":true,\"hash\":\"h2\",\"full\":\"h2.ppk\","
+       "\"paths\":[\"cdn.x.com\"]}}"},
+      {"download-forceBoot",
+       "{\"update\":true,\"hash\":\"h2\",\"full\":\"h2.ppk\","
+       "\"paths\":[\"cdn.x.com\"],\"config\":{\"forceBoot\":true}}",
+       "none",
+       "{\"action\":\"download\",\"hash\":\"h2\",\"attempts\":[{\"type\":"
+       "\"full\",\"urls\":[\"https://cdn.x.com/h2.ppk\"]}],\"devNoop\":false,"
+       "\"activate\":true,"
+       "\"info\":{\"update\":true,\"hash\":\"h2\",\"full\":\"h2.ppk\","
+       "\"paths\":[\"cdn.x.com\"],\"config\":{\"forceBoot\":true}}}"},
+      {"rollout-in-forceBoot",
        "{\"update\":true,\"hash\":\"root\",\"full\":\"root.ppk\","
        "\"paths\":[\"cdn.x.com\"],\"expVersion\":{\"name\":\"g\",\"hash\":"
        "\"gray\",\"full\":\"gray.ppk\",\"config\":{\"rollout\":{\"2.3.4\":"
-       "63}}}}",
+       "63},\"forceBoot\":true}}}",
+       "none",
        "{\"action\":\"download\",\"hash\":\"gray\",\"attempts\":[{\"type\":"
        "\"full\",\"urls\":[\"https://cdn.x.com/gray.ppk\"]}],\"devNoop\":"
-       "false,\"info\":{\"update\":true,\"name\":\"g\",\"hash\":\"gray\","
-       "\"full\":\"gray.ppk\",\"config\":{\"rollout\":{\"2.3.4\":63}},"
-       "\"paths\":[\"cdn.x.com\"]}}"},
+       "false,\"activate\":true,"
+       "\"info\":{\"update\":true,\"name\":\"g\",\"hash\":\"gray\","
+       "\"full\":\"gray.ppk\",\"config\":{\"rollout\":{\"2.3.4\":63},"
+       "\"forceBoot\":true},\"paths\":[\"cdn.x.com\"]}}"},
       {"rollout-out",
        "{\"update\":true,\"hash\":\"root\",\"full\":\"root.ppk\","
        "\"paths\":[\"cdn.x.com\"],\"expVersion\":{\"name\":\"g\",\"hash\":"
        "\"gray\",\"full\":\"gray.ppk\",\"config\":{\"rollout\":{\"2.3.4\":"
        "62}}}}",
+       "none",
        "{\"action\":\"download\",\"hash\":\"root\",\"attempts\":[{\"type\":"
        "\"full\",\"urls\":[\"https://cdn.x.com/root.ppk\"]}],\"devNoop\":"
-       "false,\"info\":{\"update\":true,\"hash\":\"root\",\"full\":"
-       "\"root.ppk\",\"paths\":[\"cdn.x.com\"]}}"},
-      {"rolledBack",
+       "false,\"activate\":false,\"info\":{\"update\":true,\"hash\":\"root\","
+       "\"full\":\"root.ppk\",\"paths\":[\"cdn.x.com\"]}}"},
+      {"rolledBack-wins-over-forceBoot",
        "{\"update\":true,\"hash\":\"bad\",\"full\":\"bad.ppk\","
-       "\"paths\":[\"cdn.x.com\"]}",
+       "\"paths\":[\"cdn.x.com\"],\"config\":{\"forceBoot\":true}}",
+       "none",
        "{\"action\":\"none\",\"reason\":\"rolledBack\",\"info\":{\"update\":"
-       "true,\"hash\":\"bad\",\"full\":\"bad.ppk\",\"paths\":[\"cdn.x.com\"]}"
-       "}"},
+       "true,\"hash\":\"bad\",\"full\":\"bad.ppk\",\"paths\":[\"cdn.x.com\"],"
+       "\"config\":{\"forceBoot\":true}}}"},
   };
   for (const auto& c : cases) {
-    Value decision =
-        updateflow::HandleCheckResponse(c.response, identity, false);
+    Value decision = updateflow::HandleCheckResponse(c.response, identity,
+                                                     false, c.afterDownload);
     std::string actual = Stringify(decision);
     if (actual != c.expected) {
       std::fprintf(stderr,

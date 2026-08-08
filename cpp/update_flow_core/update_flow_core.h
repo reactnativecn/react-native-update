@@ -48,16 +48,30 @@ flowjson::Value ResolveCheckResult(const flowjson::Value& rootInfo,
 flowjson::Value DecideDownload(const flowjson::Value& info,
                                const flowjson::Value& identity, bool isDev);
 
+// Whether the orchestrator should activate a downloaded version for the
+// next launch: the client's silent strategies opt in locally
+// (afterDownload == "setNeedUpdate"), or the server marks the version
+// config.forceBoot — the per-version remote override that closes the
+// brick-rescue gap for alert-strategy apps (a bricked device never runs
+// JS, so activation cannot wait for it). Native-only; the device-local
+// rolledBackVersion guard in DecideDownload still wins, and the activated
+// version keeps the first_time crash-protection rollback.
+bool ShouldActivateAfterDownload(const flowjson::Value& info,
+                                 const std::string& afterDownload);
+
 // Composes Parse → ResolveCheckResult → DecideDownload: one call from the
 // raw checkUpdate response text to a download decision, so the platform
 // orchestrators contain no decision logic at all. identity is the union of
 // both composed functions' needs: { packageVersion, currentVersion?, uuid,
-// rolledBackVersion? }. The decision additionally carries `info` — the
-// resolved check result — so orchestrators can persist name/description/
-// metaInfo alongside a downloaded version (the JS side's setLocalHashInfo).
+// rolledBackVersion? }. afterDownload is the client's persisted activation
+// policy; a download decision carries `activate` (ShouldActivateAfterDownload
+// folded over it and the version's forceBoot) plus `info` — the resolved
+// check result — so orchestrators can persist name/description/metaInfo
+// alongside a downloaded version (the JS side's setLocalHashInfo).
 // Malformed JSON yields { action: 'none', reason: 'invalidResponse' }.
 flowjson::Value HandleCheckResponse(const std::string& responseText,
                                     const flowjson::Value& identity,
-                                    bool isDev);
+                                    bool isDev,
+                                    const std::string& afterDownload);
 
 }  // namespace updateflow

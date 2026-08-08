@@ -1062,9 +1062,9 @@ static napi_value FlowOrderEndpointCandidates(napi_env env,
 
 static napi_value FlowHandleCheckResponse(napi_env env,
                                           napi_callback_info info) {
-  size_t argc = 2;
-  napi_value args[2] = {nullptr, nullptr};
-  if (!GetArgCount(env, info, &argc, args) || argc < 2) {
+  size_t argc = 3;
+  napi_value args[3] = {nullptr, nullptr, nullptr};
+  if (!GetArgCount(env, info, &argc, args) || argc < 3) {
     ThrowError(env, "handleCheckResponse: missing arguments");
     return nullptr;
   }
@@ -1077,6 +1077,10 @@ static napi_value FlowHandleCheckResponse(napi_env env,
   if (!ok) {
     return nullptr;
   }
+  std::string after_download = GetString(env, args[2], &ok);
+  if (!ok) {
+    return nullptr;
+  }
   bool parsed = false;
   flowjson::Value identity = flowjson::Parse(identity_json, &parsed);
   if (!parsed || !identity.IsObject()) {
@@ -1084,7 +1088,7 @@ static napi_value FlowHandleCheckResponse(napi_env env,
   }
   return MakeUtf8String(env,
                         flowjson::Stringify(updateflow::HandleCheckResponse(
-                            response_text, identity, false)));
+                            response_text, identity, false, after_download)));
 }
 
 napi_value Init(napi_env env, napi_value exports) {

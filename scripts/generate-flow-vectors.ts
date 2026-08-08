@@ -20,6 +20,7 @@ import {
   murmurhash3_32_gc,
   orderEndpointCandidates,
   resolveCheckResult,
+  shouldActivateAfterDownload,
 } from '../src/updateFlowCore';
 
 const impls: Record<string, (...args: any[]) => any> = {
@@ -30,6 +31,7 @@ const impls: Record<string, (...args: any[]) => any> = {
   buildCheckRequestBody,
   resolveCheckResult,
   decideDownload,
+  shouldActivateAfterDownload,
 };
 
 export interface FlowVector {
@@ -247,6 +249,29 @@ export const buildVectors = (): FlowVector[] => {
   ); // paths defaulted to []
   add('decideDownload', dlInfo, dlIdentity, true); // dev: full only
   add('decideDownload', { ...dlInfo, full: undefined }, dlIdentity, true); // devNoop
+
+  // shouldActivateAfterDownload — silent strategies opt in locally, the
+  // server's per-version forceBoot overrides remotely (JS truthiness)
+  add('shouldActivateAfterDownload', { hash: 'x' }, 'setNeedUpdate');
+  add('shouldActivateAfterDownload', { hash: 'x' }, 'none');
+  add(
+    'shouldActivateAfterDownload',
+    { hash: 'x', config: { forceBoot: true } },
+    'none'
+  );
+  add(
+    'shouldActivateAfterDownload',
+    { hash: 'x', config: { forceBoot: false } },
+    'none'
+  );
+  add(
+    'shouldActivateAfterDownload',
+    { hash: 'x', config: { forceBoot: 1 } },
+    'none'
+  );
+  add('shouldActivateAfterDownload', { hash: 'x', config: {} }, 'none');
+  add('shouldActivateAfterDownload', { hash: 'x', config: { forceBoot: true } });
+  add('shouldActivateAfterDownload', { upToDate: true }, 'none');
 
   return cases;
 };

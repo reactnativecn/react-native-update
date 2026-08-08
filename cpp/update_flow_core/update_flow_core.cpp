@@ -261,8 +261,15 @@ Value DecideDownload(const Value& info, const Value& identity, bool isDev) {
   return decision;
 }
 
+bool ShouldActivateAfterDownload(const Value& info,
+                                 const std::string& afterDownload) {
+  return afterDownload == "setNeedUpdate" ||
+         info.Get("config").Get("forceBoot").Truthy();
+}
+
 Value HandleCheckResponse(const std::string& responseText,
-                          const Value& identity, bool isDev) {
+                          const Value& identity, bool isDev,
+                          const std::string& afterDownload) {
   bool ok = false;
   Value root = flowjson::Parse(responseText, &ok);
   if (!ok || !root.IsObject()) {
@@ -270,6 +277,10 @@ Value HandleCheckResponse(const std::string& responseText,
   }
   Value resolved = ResolveCheckResult(root, identity);
   Value decision = DecideDownload(resolved, identity, isDev);
+  if (decision.Get("action").AsString() == "download") {
+    decision.Set("activate", Value::Bool(ShouldActivateAfterDownload(
+                                 resolved, afterDownload)));
+  }
   decision.Set("info", std::move(resolved));
   return decision;
 }

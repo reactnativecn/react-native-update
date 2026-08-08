@@ -367,3 +367,29 @@ iOS（NSURLSession，下载/patch/state 全现成，纯增量）→ Android（Ok
 librnupdate.so 进 update_flow_core，绑一次 .so 重编）→ Harmony。e2e 用例
 沿用 Example/e2etest 既有基建，验证"坏 bundle 下原生仍能拉到修复版"的端到
 端场景。
+
+### 10.7 forceBoot——策略的按版本远程覆盖（救砖的最后一环，2026-08-08 实现）
+
+§10.1 的 `afterDownload` 折算暴露了一个洞：alert 类策略（默认策略）下原生只
+下载不激活，而砖机的 JS 永远不会跑——修复版躺在磁盘上永不生效，救援在它存
+在的理由上失效。
+
+解法是把激活决策做成**客户端默认 + 服务端按版本覆盖**：版本 `config` 增加
+`forceBoot: true`（控制台按版本勾选，语义是"强制以该版本启动"，不是 UX 层
+面的"静默"）。激活谓词收敛为纯层的 `shouldActivateAfterDownload(info,
+afterDownload)`：本地 silent 策略 或 响应标记 forceBoot 即激活。
+`HandleCheckResponse` 增参 `afterDownload` 并在 download 决策中直接给出
+`activate` 布尔——三端编排器各自只读这一个字段，零判断逻辑。
+
+刻意的语义边界：
+- **仅作用于原生**。JS 侧交互策略不感知不受影响——健康设备该弹窗还弹窗,
+  用户点"取消"只是"这次不切",下次冷启动仍会进入标记版本（原生分不出砖机
+  与健康设备,这正是显式标记版本想要的触达）。
+- **本机 `rolledBack` 黑名单赢过 forceBoot**（守卫在谓词之前）:本机有崩溃
+  证据的版本不会被重装,开发者应重绑到别的版本。
+- **first_time 崩溃保护对强制版本依然生效**:强制启动的版本若也是坏的,
+  下次启动照常回滚,不存在"强制进入坏版本且无法回头"。
+
+服务端配合（pushy-server / cresc-server,另行实施）:根版本响应透传
+`config`（现只有 expVersion 携带）;控制台版本编辑与重绑界面加 forceBoot
+开关。

@@ -46,7 +46,8 @@ Java_cn_reactnative_modules_update_NativeUpdateFlow_orderEndpointCandidates(
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_cn_reactnative_modules_update_NativeUpdateFlow_handleCheckResponse(
-    JNIEnv* env, jclass, jstring responseText, jstring identityJson) {
+    JNIEnv* env, jclass, jstring responseText, jstring identityJson,
+    jstring afterDownload) {
   bool ok = false;
   flowjson::Value identity = flowjson::Parse(
       pushy::jni_util::JStringToString(env, identityJson), &ok);
@@ -55,5 +56,6 @@ Java_cn_reactnative_modules_update_NativeUpdateFlow_handleCheckResponse(
   }
   return ToJString(env, flowjson::Stringify(updateflow::HandleCheckResponse(
                             pushy::jni_util::JStringToString(env, responseText),
-                            identity, false)));
+                            identity, false,
+                            pushy::jni_util::JStringToString(env, afterDownload))));
 }

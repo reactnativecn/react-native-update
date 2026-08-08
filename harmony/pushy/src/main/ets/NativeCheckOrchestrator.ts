@@ -69,6 +69,7 @@ interface Decision {
   reason?: string;
   hash?: string;
   attempts?: DecisionAttempt[];
+  activate?: boolean;
   info?: DecisionInfo;
 }
 
@@ -167,6 +168,7 @@ async function runOnce(context: UpdateContext): Promise<void> {
   const decisionJson = NativePatchCore.handleCheckResponse(
     responseText,
     JSON.stringify(identity),
+    config.afterDownload ?? '',
   );
   if (!decisionJson) {
     return;
@@ -210,8 +212,9 @@ async function runOnce(context: UpdateContext): Promise<void> {
     context.setKv(`hash_${hash}`, JSON.stringify(hashInfo));
   }
 
-  if (config.afterDownload === 'setNeedUpdate') {
-    // 仅静默策略:激活到下次启动;alert 类策略把激活权留给 JS(§6)。
+  if (decision.activate === true) {
+    // 静默策略、或服务端按版本标记的 forceBoot(远程覆盖,救砖指令):激活
+    // 到下次启动;否则激活权留给 JS(§6)。
     try {
       context.switchVersion(hash);
       logger.debug(TAG, `downloaded ${hash} and set for next launch`);

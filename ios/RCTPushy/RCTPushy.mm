@@ -1322,7 +1322,8 @@ static NSString *PushyHttpRequest(NSString *urlString, NSString *method,
     }
 
     flowjson::Value decision = updateflow::HandleCheckResponse(
-        PushyToStdString(responseText), identity, false);
+        PushyToStdString(responseText), identity, false,
+        config.Get("afterDownload").AsString());
     if (decision.Get("action").AsString() != "download") {
         RCTLogInfo(@"RCTPushy -- native check: nothing to do (%s)",
                    decision.Get("reason").AsString().c_str());
@@ -1358,9 +1359,10 @@ static NSString *PushyHttpRequest(NSString *urlString, NSString *method,
     [defaults setObject:[NSString stringWithUTF8String:flowjson::Stringify(hashInfo).c_str()]
                  forKey:PushyHashInfoKey(hash)];
 
-    if (config.Get("afterDownload").AsString() == "setNeedUpdate") {
-        // Silent strategies only: activate for the next launch. Alert-style
-        // strategies leave activation to the JS side (§6/§10.1).
+    if (decision.Get("activate").Truthy()) {
+        // Silent strategies or a server-marked forceBoot version (per-version
+        // remote override — the brick rescue): activate for the next launch.
+        // Otherwise activation stays with the JS side (§6/§10.1).
         NSError *error = nil;
         if ([[self engine] switchVersion:hash error:&error]) {
             RCTLogInfo(@"RCTPushy -- native check: downloaded %@ and set for next launch", hash);

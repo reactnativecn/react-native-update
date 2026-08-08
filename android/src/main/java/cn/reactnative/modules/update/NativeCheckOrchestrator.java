@@ -135,8 +135,8 @@ final class NativeCheckOrchestrator {
         cacheEntry.put("body", responseText);
         context.setKv(KEY_RESP_CACHE, cacheEntry.toString());
 
-        String decisionJson =
-            NativeUpdateFlow.handleCheckResponse(responseText, identity.toString());
+        String decisionJson = NativeUpdateFlow.handleCheckResponse(
+            responseText, identity.toString(), config.optString("afterDownload", ""));
         if (decisionJson == null) {
             return;
         }
@@ -175,9 +175,10 @@ final class NativeCheckOrchestrator {
             context.setKv("hash_" + hash, hashInfo.toString());
         }
 
-        if ("setNeedUpdate".equals(config.optString("afterDownload"))) {
-            // Silent strategies only: activate for the next launch.
-            // Alert-style strategies leave activation to the JS side (§6).
+        if (decision.optBoolean("activate", false)) {
+            // Silent strategies or a server-marked forceBoot version
+            // (per-version remote override — the brick rescue): activate for
+            // the next launch. Otherwise activation stays with the JS side.
             try {
                 context.switchVersion(hash);
                 Log.i(UpdateContext.TAG,

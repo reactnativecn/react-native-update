@@ -98,6 +98,7 @@ interface NativePatchCoreBindings {
   handleCheckResponse(
     responseText: string,
     identityJson: string,
+    afterDownload: string,
   ): string | undefined;
 }
 

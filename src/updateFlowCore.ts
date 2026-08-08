@@ -220,6 +220,24 @@ export function resolveCheckResult(
   return rootResult;
 }
 
+/**
+ * Whether the native orchestrator should activate a downloaded version for
+ * the next launch: either the client opted in via its silent strategies
+ * (afterDownload === 'setNeedUpdate'), or the server marked this version
+ * `config.forceBoot` — the per-version remote override that closes the
+ * brick-rescue gap for alert-strategy apps (a bricked device never runs JS,
+ * so activation cannot wait for it). Native-only: the JS side's interactive
+ * strategies are not consulted and not affected. The device-local
+ * rolledBackVersion guard in decideDownload still wins over forceBoot, and
+ * the activated version keeps the first_time crash-protection rollback.
+ */
+export function shouldActivateAfterDownload(
+  info: CheckResult,
+  afterDownload?: string
+): boolean {
+  return afterDownload === 'setNeedUpdate' || !!info?.config?.forceBoot;
+}
+
 export type DownloadStrategyType = 'diff' | 'pdiff' | 'full';
 
 export interface DownloadAttempt {

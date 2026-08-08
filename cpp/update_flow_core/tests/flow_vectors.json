@@ -1302,6 +1302,98 @@
         "attempts": [],
         "devNoop": true
       }
+    },
+    {
+      "fn": "shouldActivateAfterDownload",
+      "args": [
+        {
+          "hash": "x"
+        },
+        "setNeedUpdate"
+      ],
+      "expected": true
+    },
+    {
+      "fn": "shouldActivateAfterDownload",
+      "args": [
+        {
+          "hash": "x"
+        },
+        "none"
+      ],
+      "expected": false
+    },
+    {
+      "fn": "shouldActivateAfterDownload",
+      "args": [
+        {
+          "hash": "x",
+          "config": {
+            "forceBoot": true
+          }
+        },
+        "none"
+      ],
+      "expected": true
+    },
+    {
+      "fn": "shouldActivateAfterDownload",
+      "args": [
+        {
+          "hash": "x",
+          "config": {
+            "forceBoot": false
+          }
+        },
+        "none"
+      ],
+      "expected": false
+    },
+    {
+      "fn": "shouldActivateAfterDownload",
+      "args": [
+        {
+          "hash": "x",
+          "config": {
+            "forceBoot": 1
+          }
+        },
+        "none"
+      ],
+      "expected": true
+    },
+    {
+      "fn": "shouldActivateAfterDownload",
+      "args": [
+        {
+          "hash": "x",
+          "config": {}
+        },
+        "none"
+      ],
+      "expected": false
+    },
+    {
+      "fn": "shouldActivateAfterDownload",
+      "args": [
+        {
+          "hash": "x",
+          "config": {
+            "forceBoot": true
+          }
+        }
+      ],
+      "expected": true
+    },
+    {
+      "fn": "shouldActivateAfterDownload",
+      "args": [
+        {
+          "upToDate": true
+        },
+        "none"
+      ],
+      "expected": false
     }
   ]
 }
