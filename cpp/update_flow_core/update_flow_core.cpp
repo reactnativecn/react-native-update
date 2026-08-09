@@ -127,11 +127,15 @@ Value OrderEndpointCandidates(const Value& endpoints, double randomSample) {
   if (n < 2) {
     return deduped;
   }
-  double idx = std::floor(randomSample * static_cast<double>(n));
-  size_t first = idx <= 0 ? 0
-                          : (idx >= static_cast<double>(n - 1)
-                                 ? n - 1
-                                 : static_cast<size_t>(idx));
+  const double idx = std::isfinite(randomSample)
+                         ? std::floor(randomSample * static_cast<double>(n))
+                         : 0;
+  // Validate in floating-point space before converting to size_t: converting
+  // NaN, infinity, or an out-of-range value is undefined behavior in C++.
+  const size_t first = idx <= 0 ? 0
+                                : (idx >= static_cast<double>(n - 1)
+                                       ? n - 1
+                                       : static_cast<size_t>(idx));
   Value ordered = Value::Array();
   ordered.Push(deduped.At(first));
   for (size_t i = 0; i < n; i++) {
@@ -184,7 +188,9 @@ Value ResolveCheckResult(const Value& rootInfo, const Value& identity) {
   if (rootResult.Get("update").Truthy() && expVersion.Truthy() &&
       rollout.IsNumber()) {
     if (IsInRollout(rollout.AsNumber(), identity.Get("uuid").AsString())) {
-      if (Value::StrictEquals(expVersion.Get("hash"), currentVersion)) {
+      const Value& expHash = expVersion.Get("hash");
+      if (expHash.IsString() && !expHash.AsString().empty() &&
+          Value::StrictEquals(expHash, currentVersion)) {
         Value upToDate = Value::Object();
         upToDate.Set("upToDate", Value::Bool(true));
         return upToDate;
@@ -200,8 +206,10 @@ Value ResolveCheckResult(const Value& rootInfo, const Value& identity) {
       return info;
     }
   }
-  if (rootResult.Get("update").Truthy() &&
-      Value::StrictEquals(rootResult.Get("hash"), currentVersion)) {
+  const Value& rootHash = rootResult.Get("hash");
+  if (rootResult.Get("update").Truthy() && rootHash.IsString() &&
+      !rootHash.AsString().empty() &&
+      Value::StrictEquals(rootHash, currentVersion)) {
     Value upToDate = Value::Object();
     upToDate.Set("upToDate", Value::Bool(true));
     return upToDate;
@@ -252,12 +260,17 @@ Value DecideDownload(const Value& info, const Value& identity, bool isDev) {
   Value fullUrls = JoinUrls(paths, info.Get("full"));
   pushAttempt("full", fullUrls);
 
+  const bool devNoop =
+      isDev && !(fullUrls.IsArray() && fullUrls.Size() > 0);
+  if (attempts.Size() == 0 && !devNoop) {
+    return DeclineDownload("noArtifact");
+  }
+
   Value decision = Value::Object();
   decision.Set("action", Value::String("download"));
   decision.Set("hash", hash);
   decision.Set("attempts", std::move(attempts));
-  decision.Set("devNoop",
-               Value::Bool(isDev && !(fullUrls.IsArray() && fullUrls.Size() > 0)));
+  decision.Set("devNoop", Value::Bool(devNoop));
   return decision;
 }
 

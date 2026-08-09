@@ -3,6 +3,7 @@ import deviceInfo from '@ohos.deviceInfo';
 import logger from './Logger';
 import NativePatchCore from './NativePatchCore';
 import type { UpdateContext } from './UpdateContext';
+import { isSafePathComponent } from './PathUtils';
 
 // 原生冷启动检测(NATIVE_CHECKUPDATE_DESIGN §10):每进程一次,getBundleUrl
 // 后延迟数秒运行,完全不依赖 app bundle——坏热更把 JS 砸挂后,下次启动仍能
@@ -12,16 +13,18 @@ import type { UpdateContext } from './UpdateContext';
 // 鸿蒙的 debug 门控由触发点天然承担:dev 走 MetroJSBundleProvider,
 // PushyFileJSBundleProvider.getBundleUrl 不会被调用。
 const TAG = 'NativeCheck';
-const KEY_CONFIG = 'nativeConfig';
+export const KEY_CONFIG = 'nativeConfig';
 // 供 JS 侧复用的原始响应缓存(§10.3),同时记录请求与配置指纹以限定命中范围。
-const KEY_RESP_CACHE = 'nativeCheckResp';
+export const KEY_RESP_CACHE = 'nativeCheckResp';
 const REQUEST_TIMEOUT_MS = 10000;
+const MAX_CHECK_HTTP_ATTEMPTS = 8;
 const START_DELAY_MS = 5000;
 const DOWNLOAD_TYPE_DIFF = 'diff';
 const DOWNLOAD_TYPE_PDIFF = 'pdiff';
 
 interface NativeConfig {
   appKey?: string;
+  packageVersion?: string;
   endpoints?: string[];
   queryUrls?: string[];
   afterDownload?: string;
@@ -127,9 +130,10 @@ async function runOnce(
   // the launch-path snapshot captured before that happens.
   const rolledBackVersion = launchRolledBackVersion;
   const uuid = context.getKv('uuid') ?? '';
+  const packageVersion = config.packageVersion || context.getPackageVersion();
 
   const identity: FlowIdentity = {
-    packageVersion: context.getPackageVersion(),
+    packageVersion,
     currentVersion,
     uuid,
   };
@@ -140,7 +144,9 @@ async function runOnce(
   const cInfo: FlowCInfo = {
     rnu: config.rnu ?? '',
     rn: config.rn ?? '',
-    os: `harmony ${deviceInfo.sdkApiVersion}`,
+    // RNOH's Platform.Version is osFullName; use the same value so JS can
+    // reuse the response cache produced by this native request.
+    os: `harmony ${deviceInfo.osFullName}`,
     uuid,
   };
 
@@ -178,7 +184,7 @@ async function runOnce(
     return;
   }
   const hash = decision.hash ?? '';
-  if (!hash) {
+  if (!isSafePathComponent(hash)) {
     return;
   }
 
@@ -307,9 +313,14 @@ async function runCheckRequest(
   }
   const ordered = JSON.parse(orderedJson) as string[];
   const tried = new Set<string>();
-  for (const base of ordered) {
+  let httpAttempts = 0;
+  for (const rawBase of ordered) {
+    const base = normalizeEndpointBase(rawBase);
     if (!base) {
       continue;
+    }
+    if (httpAttempts++ >= MAX_CHECK_HTTP_ATTEMPTS) {
+      return undefined;
     }
     tried.add(base);
     const response = await httpRequest(`${base}/checkUpdate/${appKey}`, body);
@@ -320,6 +331,9 @@ async function runCheckRequest(
   for (const listUrl of config.queryUrls ?? []) {
     if (!listUrl) {
       continue;
+    }
+    if (httpAttempts++ >= MAX_CHECK_HTTP_ATTEMPTS) {
+      return undefined;
     }
     const listText = await httpRequest(listUrl);
     if (listText === undefined) {
@@ -335,9 +349,16 @@ async function runCheckRequest(
     } catch (e) {
       continue;
     }
-    for (const base of remote) {
-      if (typeof base !== 'string' || !base || tried.has(base)) {
+    for (const rawBase of remote) {
+      if (typeof rawBase !== 'string') {
         continue;
+      }
+      const base = normalizeEndpointBase(rawBase);
+      if (!base || tried.has(base)) {
+        continue;
+      }
+      if (httpAttempts++ >= MAX_CHECK_HTTP_ATTEMPTS) {
+        return undefined;
       }
       tried.add(base);
       const response = await httpRequest(`${base}/checkUpdate/${appKey}`, body);
@@ -349,6 +370,10 @@ async function runCheckRequest(
     break;
   }
   return undefined;
+}
+
+function normalizeEndpointBase(base: string): string {
+  return base.replace(/\/+$/, '');
 }
 
 async function performAttempts(

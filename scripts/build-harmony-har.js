@@ -216,6 +216,12 @@ function syncHarmonyNativeSources() {
       path.join(patchCoreDir, 'patch_core.cpp'),
     )}`,
   );
+  ensureFileExists(
+    path.join(updateFlowCoreDir, 'update_flow_core.cpp'),
+    `Missing shared update flow core source: ${relativeToProject(
+      path.join(updateFlowCoreDir, 'update_flow_core.cpp'),
+    )}`,
+  );
 
   fs.rmSync(harmonyNativeStageDir, { recursive: true, force: true });
   fs.mkdirSync(path.join(harmonyNativeStageJniDir, 'lzma'), {

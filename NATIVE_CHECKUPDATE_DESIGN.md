@@ -108,7 +108,7 @@ guardian 救不了它。
 > "单源"要保的性质是**语义唯一且被机械强制**，由金标向量提供：
 > `src/updateFlowCore.ts` 是参照实现（oracle），
 > `scripts/generate-flow-vectors.ts` 产出
-> `cpp/update_flow_core/tests/flow_vectors.json`（69 向量），
+> `cpp/update_flow_core/tests/flow_vectors.json`（金标向量集），
 > `src/__tests__/flowVectors.test.ts` 钉住 TS 与向量文件一致，
 > `scripts/test-update-flow-core.sh`（CI cpp-test job，带 ASan/UBSan）钉住
 > C++ 移植与向量一致。**纪律：语义改动先落 TS → 重新生成向量 → 移植 C++，
@@ -281,7 +281,7 @@ app 侧的 `client.ts` / `UpdateProvider` 仍然负责**交互**：更新提示�
    为纯；client.ts / provider.tsx / endpoint.ts 已原地改用，单测覆盖
 3. ~~**运行时选型**~~ **已关闭：改判方案 B**（2026-08-07，裁决与推理链见
    §4）。`cpp/update_flow_core` 已实现（flow_json + 七个决策函数的 1:1 移
-   植），69 条金标向量在本机与 CI（ASan/UBSan）全过
+   植），金标向量集在本机与 CI（ASan/UBSan）全过
 4. **原生编排** —— 三端 HTTP + 调用 `update_flow_core` + 复用现有下载/
    patch/state；endpoint 执行引擎为顺序回退（§5.1），不移植 hedged race。
    Android 侧 `update_flow_core` 进 `librnupdate.so`（协议演进从此绑定
@@ -312,8 +312,9 @@ appKey、server endpoints、更新策略今天只活在 JS 的 `ClientOptions` �
 本。** 每次 `setOptions`（含构造）后 JS 调新的原生方法 `syncNativeConfig`，
 持久化：
 
-```
-{ appKey, endpoints: server.main, queryUrls, afterDownload: 'none' | 'setNeedUpdate',
+```text
+{ appKey, packageVersion, endpoints: server.main, queryUrls,
+  afterDownload: 'none' | 'setNeedUpdate',
   disabled?: boolean, rnu, rn }
 ```
 
@@ -329,13 +330,13 @@ appKey、server endpoints、更新策略今天只活在 JS 的 `ClientOptions` �
 
 冷启动 + 延迟 5s（R5），后台线程，每次冷启动至多一轮：
 
-```
+```text
 读 config（无则退出）+ 原生 state（currentVersion / rolledBackVersion /
   packageVersion / buildTime / uuid / supportedDiffVersion / bundleHash 缓存）
 → BuildCheckRequestBody（bundleHash 同步读缓存，缺省省略字段）
 → OrderEndpointCandidates(endpoints, 原生随机数)
-→ 顺序请求，单个超时 10s；全失败 → 拉 queryUrls（任一成功即用）合并新候选，
-  排除已失败的，再顺序一轮；仍失败 → 本轮放弃
+→ 顺序请求，单个超时 10s、整轮 HTTP 最多 8 次；全失败 → 拉 queryUrls
+  （任一成功即用）合并新候选，排除已失败的，再顺序一轮；仍失败 → 本轮放弃
 → HandleCheckResponse(响应原文, identity, isDev=false)（已实现，含 info 透出）
 → action=download：按 attempts 顺序走现有下载器（diff→pdiff→full，
   testUrls 语义由原生逐个尝试实现）；成功 → setLocalHashInfo(info 的

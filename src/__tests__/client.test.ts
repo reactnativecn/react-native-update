@@ -1382,6 +1382,7 @@ describe('syncNativeConfig', () => {
     expect(config.queryUrls.length).toBeGreaterThan(0);
     expect(config.rnu).toBe('10.0.0');
     expect(config.rn).toBe('0.73.0');
+    expect(config.packageVersion).toBe('1.0.0');
   });
 
   test('alert strategies keep activation with JS (afterDownload none)', async () => {
@@ -1402,11 +1403,91 @@ describe('syncNativeConfig', () => {
     const { Pushy } = await importFreshClient('sync-config-3');
     const client = new Pushy({ appKey: 'demo-app' });
     client.setOptions({ updateStrategy: 'silentAndNow' });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
 
     const config = JSON.parse(
       (syncNativeConfig.mock.calls.at(-1) as unknown as string[])[0]
     );
     expect(config.afterDownload).toBe('setNeedUpdate');
+  });
+
+  test('persists and exposes the effective overridden package version', async () => {
+    const syncNativeConfig = mock(() => Promise.resolve());
+    setupClientMocks({ syncNativeConfig });
+    const { Pushy } = await importFreshClient('sync-config-package-override');
+    const client = new Pushy({
+      appKey: 'demo-app',
+      overridePackageVersion: '9.9.9',
+    });
+
+    const config = JSON.parse(
+      (syncNativeConfig.mock.calls.at(-1) as unknown as string[])[0]
+    );
+    expect(config.packageVersion).toBe('9.9.9');
+    expect(client.getEffectivePackageVersion()).toBe('9.9.9');
+  });
+
+  test('skips duplicate config writes after the same value succeeds', async () => {
+    const syncNativeConfig = mock(() => Promise.resolve());
+    setupClientMocks({ syncNativeConfig });
+    const { Pushy } = await importFreshClient('sync-config-dedupe');
+    const client = new Pushy({ appKey: 'demo-app' });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    client.setOptions({ appKey: 'demo-app' });
+
+    expect(syncNativeConfig).toHaveBeenCalledTimes(1);
+  });
+
+  test('serializes config writes and preserves the newest pending value', async () => {
+    const resolvers: Array<() => void> = [];
+    const syncNativeConfig = mock(
+      () =>
+        new Promise<void>((resolve) => {
+          resolvers.push(resolve);
+        })
+    );
+    setupClientMocks({ syncNativeConfig });
+    const { Pushy } = await importFreshClient('sync-config-serialized');
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    client.setOptions({ updateStrategy: 'silentAndNow' });
+    expect(syncNativeConfig).toHaveBeenCalledTimes(1);
+    resolvers[0]();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(syncNativeConfig).toHaveBeenCalledTimes(2);
+    const config = JSON.parse(
+      (syncNativeConfig.mock.calls.at(-1) as unknown as string[])[0]
+    );
+    expect(config.afterDownload).toBe('setNeedUpdate');
+    resolvers[1]();
+  });
+
+  test('retries a config write that failed', async () => {
+    let calls = 0;
+    const syncNativeConfig = mock(() => {
+      calls++;
+      return calls === 1
+        ? Promise.reject(new Error('write failed'))
+        : Promise.resolve();
+    });
+    setupClientMocks({ syncNativeConfig });
+    const { Pushy } = await importFreshClient('sync-config-retry');
+    const client = new Pushy({ appKey: 'demo-app' });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    client.setOptions({ appKey: 'demo-app' });
+
+    expect(syncNativeConfig).toHaveBeenCalledTimes(2);
   });
 
   test('an older native module without the method is skipped silently', async () => {

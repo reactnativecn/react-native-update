@@ -12,6 +12,8 @@
 // omitting `expected`, and undefined-valued object members disappear on
 // serialization — the C++ side mirrors both (Kind::Undefined members are
 // skipped by stringify).
+
+import { fileURLToPath } from 'node:url';
 import {
   buildCheckRequestBody,
   decideDownload,
@@ -270,17 +272,19 @@ export const buildVectors = (): FlowVector[] => {
     'none'
   );
   add('shouldActivateAfterDownload', { hash: 'x', config: {} }, 'none');
-  add('shouldActivateAfterDownload', { hash: 'x', config: { forceBoot: true } });
+  add('shouldActivateAfterDownload', {
+    hash: 'x',
+    config: { forceBoot: true },
+  });
   add('shouldActivateAfterDownload', { upToDate: true }, 'none');
 
   return cases;
 };
 
 if (import.meta.main) {
-  const outPath = new URL(
-    '../cpp/update_flow_core/tests/flow_vectors.json',
-    import.meta.url
-  ).pathname;
+  const outPath = fileURLToPath(
+    new URL('../cpp/update_flow_core/tests/flow_vectors.json', import.meta.url)
+  );
   const doc = {
     generated_by: 'scripts/generate-flow-vectors.ts — do not edit by hand',
     cases: buildVectors(),

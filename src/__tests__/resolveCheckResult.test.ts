@@ -128,4 +128,38 @@ describe('resolveCheckResult', () => {
 
     expect(result).toEqual(createRootResult());
   });
+
+  test('does not treat two missing hashes as already current', () => {
+    const result = resolveCheckResult(
+      createRootResult({
+        expVersion: {
+          name: 'gray-without-hash',
+          config: {
+            rollout: {
+              [identity.packageVersion]: 100,
+            },
+          },
+        } as any,
+      }),
+      { ...identity, currentVersion: undefined }
+    );
+
+    expect(result).toEqual({
+      update: true,
+      name: 'gray-without-hash',
+      config: {
+        rollout: {
+          [identity.packageVersion]: 100,
+        },
+      },
+      paths: ['cdn.example.com'],
+    });
+
+    expect(
+      resolveCheckResult(
+        { update: true },
+        { ...identity, currentVersion: undefined }
+      )
+    ).toEqual({ update: true });
+  });
 });

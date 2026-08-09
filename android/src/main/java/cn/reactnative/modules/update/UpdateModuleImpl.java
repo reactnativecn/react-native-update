@@ -266,7 +266,7 @@ public class UpdateModuleImpl {
         StateSerialRunner.run(promise, ErrorCodes.FILE_OPERATION_FAILED, "syncNativeConfig", new StateSerialRunner.Operation() {
             @Override
             public void run() {
-                updateContext.setKv("nativeConfig", config);
+                updateContext.setKv(NativeCheckOrchestrator.KEY_CONFIG, config);
                 promise.resolve(true);
             }
         });

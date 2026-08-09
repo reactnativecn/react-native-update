@@ -29,6 +29,8 @@ final class NativeCheckOrchestrator {
     // Raw response cache for the JS side to reuse (§10.3), scoped to the
     // exact logical request and native config that produced it.
     static final String KEY_RESP_CACHE = "nativeCheckResp";
+    private static final int MAX_CHECK_HTTP_ATTEMPTS = 8;
+    private static final long DOWNLOAD_ROUND_TIMEOUT_SECONDS = 600;
 
     private static final AtomicBoolean scheduled = new AtomicBoolean(false);
 
@@ -84,6 +86,11 @@ final class NativeCheckOrchestrator {
         if (appKey.isEmpty()) {
             return;
         }
+        String packageVersion = config.optString(
+            "packageVersion", context.getPackageVersion());
+        if (packageVersion.isEmpty()) {
+            packageVersion = context.getPackageVersion();
+        }
 
         String currentVersion = context.getCurrentVersion();
         // Snapshot captured on the launch path before getConstants consumes
@@ -97,7 +104,7 @@ final class NativeCheckOrchestrator {
         }
 
         JSONObject identity = new JSONObject();
-        identity.put("packageVersion", context.getPackageVersion());
+        identity.put("packageVersion", packageVersion);
         identity.put(
             "currentVersion",
             currentVersion == null ? JSONObject.NULL : currentVersion
@@ -116,7 +123,7 @@ final class NativeCheckOrchestrator {
         cInfo.put("uuid", uuid);
 
         JSONObject input = new JSONObject();
-        input.put("packageVersion", context.getPackageVersion());
+        input.put("packageVersion", packageVersion);
         input.put(
             "currentVersion",
             currentVersion == null ? JSONObject.NULL : currentVersion
@@ -218,6 +225,7 @@ final class NativeCheckOrchestrator {
     private static final OkHttpClient httpClient = new OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.SECONDS)
+        .callTimeout(15, TimeUnit.SECONDS)
         .build();
 
     private static String httpRequest(String url, String postBody) {
@@ -251,6 +259,13 @@ final class NativeCheckOrchestrator {
         }
     }
 
+    private static String normalizeEndpointBase(String base) {
+        while (base.endsWith("/")) {
+            base = base.substring(0, base.length() - 1);
+        }
+        return base;
+    }
+
     /**
      * Sequential fallback over the ordered candidates (§5.1): one request at
      * a time with its own timeout; after the configured round fails,
@@ -269,10 +284,14 @@ final class NativeCheckOrchestrator {
             return null;
         }
         HashSet<String> tried = new HashSet<>();
+        int httpAttempts = 0;
         for (int i = 0; i < ordered.length(); i++) {
-            String base = ordered.optString(i, "");
+            String base = normalizeEndpointBase(ordered.optString(i, ""));
             if (base.isEmpty()) {
                 continue;
+            }
+            if (httpAttempts++ >= MAX_CHECK_HTTP_ATTEMPTS) {
+                return null;
             }
             tried.add(base);
             String response = httpRequest(base + "/checkUpdate/" + appKey, body);
@@ -289,6 +308,9 @@ final class NativeCheckOrchestrator {
             if (listUrl.isEmpty()) {
                 continue;
             }
+            if (httpAttempts++ >= MAX_CHECK_HTTP_ATTEMPTS) {
+                return null;
+            }
             String listText = httpRequest(listUrl, null);
             if (listText == null) {
                 continue;
@@ -300,9 +322,12 @@ final class NativeCheckOrchestrator {
                 continue;
             }
             for (int j = 0; j < remote.length(); j++) {
-                String base = remote.optString(j, "");
+                String base = normalizeEndpointBase(remote.optString(j, ""));
                 if (base.isEmpty() || tried.contains(base)) {
                     continue;
+                }
+                if (httpAttempts++ >= MAX_CHECK_HTTP_ATTEMPTS) {
+                    return null;
                 }
                 tried.add(base);
                 String response = httpRequest(base + "/checkUpdate/" + appKey, body);
@@ -322,6 +347,8 @@ final class NativeCheckOrchestrator {
         if (attempts == null) {
             return false;
         }
+        final long deadlineNanos = System.nanoTime()
+            + TimeUnit.SECONDS.toNanos(DOWNLOAD_ROUND_TIMEOUT_SECONDS);
         for (int i = 0; i < attempts.length(); i++) {
             JSONObject attempt = attempts.optJSONObject(i);
             if (attempt == null) {
@@ -367,11 +394,13 @@ final class NativeCheckOrchestrator {
                     context.downloadFullUpdate(url, hash, listener);
                 }
                 try {
-                    // Backstop only — the download pipeline carries its own
-                    // timeouts/failures.
-                    if (!latch.await(600, TimeUnit.SECONDS)) {
+                    // One deadline covers the complete diff→pdiff→full round;
+                    // each DownloadTask also has its own per-call timeout.
+                    long remainingNanos = deadlineNanos - System.nanoTime();
+                    if (remainingNanos <= 0
+                        || !latch.await(remainingNanos, TimeUnit.NANOSECONDS)) {
                         Log.w(UpdateContext.TAG,
-                            "native check: " + type + " attempt timed out");
+                            "native check: download round timed out during " + type);
                         return false;
                     }
                 } catch (InterruptedException e) {

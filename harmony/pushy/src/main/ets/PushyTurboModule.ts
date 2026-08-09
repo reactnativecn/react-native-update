@@ -8,6 +8,10 @@ import logger from './Logger';
 import NativePatchCore from './NativePatchCore';
 import { UpdateContext } from './UpdateContext';
 import { EventHub } from './EventHub';
+import {
+  KEY_CONFIG,
+  KEY_RESP_CACHE,
+} from './NativeCheckOrchestrator';
 
 const TAG = 'PushyTurboModule';
 
@@ -194,14 +198,14 @@ export class PushyTurboModule extends UITurboModule {
   async syncNativeConfig(config: string): Promise<void> {
     logger.debug(TAG, ',call syncNativeConfig');
     JSON.parse(config);
-    this.context.setKv('nativeConfig', config);
+    this.context.setKv(KEY_CONFIG, config);
   }
 
   // 原生冷启动检测落盘的原始响应缓存,JS 侧新鲜期内直接复用免二次请求
   // (NATIVE_CHECKUPDATE_DESIGN §10.3)。缺省空串,永不 reject。
   async getNativeCheckCache(): Promise<string> {
     logger.debug(TAG, ',call getNativeCheckCache');
-    return this.context.getKv('nativeCheckResp') ?? '';
+    return this.context.getKv(KEY_RESP_CACHE) ?? '';
   }
 
   async reloadUpdate(options: { hash: string }): Promise<void> {

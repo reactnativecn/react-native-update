@@ -72,6 +72,11 @@ int RunParserRobustness() {
       "1x",
       "1 2",
       "- 1",
+      "01",
+      "-01",
+      "1.",
+      "1e",
+      "1e+",
       "\"\\q\"",
       "\"\\u12\"",
       "\"\\ud800\\u0041\"",  // high surrogate followed by a non-low escape
@@ -274,6 +279,10 @@ int main(int argc, char* argv[]) {
   }
 
   const Value& cases = doc.Get("cases");
+  if (!cases.IsArray() || cases.Size() == 0) {
+    std::fprintf(stderr, "%s must contain a non-empty cases array\n", argv[1]);
+    return 2;
+  }
   int failures = RunParserRobustness() + RunHandleCheckResponse();
   for (size_t i = 0; i < cases.Size(); i++) {
     const Value& testCase = cases.At(i);

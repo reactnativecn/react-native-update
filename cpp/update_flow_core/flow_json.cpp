@@ -445,19 +445,57 @@ class Parser {
     if (pos_ < text_.size() && text_[pos_] == '-') {
       pos_++;
     }
-    while (pos_ < text_.size()) {
-      char c = text_[pos_];
-      if ((c >= '0' && c <= '9') || c == '.' || c == 'e' || c == 'E' ||
-          c == '+' || c == '-') {
-        pos_++;
-      } else {
-        break;
-      }
-    }
-    if (pos_ == start) {
+
+    if (pos_ >= text_.size()) {
       ok_ = false;
       return Value::Undefined();
     }
+    if (text_[pos_] == '0') {
+      pos_++;
+      // RFC 8259 forbids leading zeroes (except the number zero itself).
+      if (pos_ < text_.size() && text_[pos_] >= '0' && text_[pos_] <= '9') {
+        ok_ = false;
+        return Value::Undefined();
+      }
+    } else if (text_[pos_] >= '1' && text_[pos_] <= '9') {
+      while (pos_ < text_.size() && text_[pos_] >= '0' &&
+             text_[pos_] <= '9') {
+        pos_++;
+      }
+    } else {
+      ok_ = false;
+      return Value::Undefined();
+    }
+
+    if (pos_ < text_.size() && text_[pos_] == '.') {
+      pos_++;
+      if (pos_ >= text_.size() || text_[pos_] < '0' || text_[pos_] > '9') {
+        ok_ = false;
+        return Value::Undefined();
+      }
+      while (pos_ < text_.size() && text_[pos_] >= '0' &&
+             text_[pos_] <= '9') {
+        pos_++;
+      }
+    }
+
+    if (pos_ < text_.size() &&
+        (text_[pos_] == 'e' || text_[pos_] == 'E')) {
+      pos_++;
+      if (pos_ < text_.size() &&
+          (text_[pos_] == '+' || text_[pos_] == '-')) {
+        pos_++;
+      }
+      if (pos_ >= text_.size() || text_[pos_] < '0' || text_[pos_] > '9') {
+        ok_ = false;
+        return Value::Undefined();
+      }
+      while (pos_ < text_.size() && text_[pos_] >= '0' &&
+             text_[pos_] <= '9') {
+        pos_++;
+      }
+    }
+
     char* end = nullptr;
     std::string token = text_.substr(start, pos_ - start);
     double n = std::strtod(token.c_str(), &end);

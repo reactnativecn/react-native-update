@@ -12,7 +12,7 @@ import NativePatchCore, {
   CopyGroupResult,
 } from './NativePatchCore';
 
-const VERSION_COMPLETE_FILE_NAME = '.pushy-complete';
+export const VERSION_COMPLETE_FILE_NAME = '.pushy-complete';
 
 export interface PatchManifestArrays {
   copyFroms: string[];

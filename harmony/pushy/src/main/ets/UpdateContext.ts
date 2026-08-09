@@ -1,6 +1,9 @@
 import preferences from '@ohos.data.preferences';
 import fileIo from '@ohos.file.fs';
-import { DownloadTask } from './DownloadTask';
+import {
+  DownloadTask,
+  VERSION_COMPLETE_FILE_NAME,
+} from './DownloadTask';
 import common from '@ohos.app.ability.common';
 import { DownloadTaskParams } from './DownloadTaskParams';
 import { bundleManager } from '@kit.AbilityKit';
@@ -16,31 +19,13 @@ import NativePatchCore, {
   STATE_OP_SWITCH_VERSION,
   StateCoreResult,
 } from './NativePatchCore';
+import { assertSafePathComponent } from './PathUtils';
+
+export { isSafePathComponent } from './PathUtils';
 
 type FlushablePreferences = preferences.Preferences & {
   flushSync?: () => void;
 };
-
-// 服务端下发的 hash/originHash/fileName 会拼进 rootDir 作为子路径；凡是可能
-// 逃出 rootDir 的值（路径分隔符、".."、"."）必须在触碰文件系统前拒绝。
-export function isSafePathComponent(name: string): boolean {
-  return (
-    typeof name === 'string' &&
-    name.length > 0 &&
-    name !== '.' &&
-    name !== '..' &&
-    !name.includes('/') &&
-    !name.includes('\\') &&
-    !name.includes('\0')
-  );
-}
-
-function assertSafePathComponent(name: string): string {
-  if (!isSafePathComponent(name)) {
-    throw Error(`Invalid path component: ${name}`);
-  }
-  return name;
-}
 
 export class UpdateContext {
   private context: common.UIAbilityContext;
@@ -542,7 +527,9 @@ export class UpdateContext {
     try {
       const safeHash = assertSafePathComponent(hash);
       return fileIo.accessSync(this.getBundlePath(safeHash))
-        && fileIo.accessSync(`${this.rootDir}/${safeHash}/.pushy-complete`);
+        && fileIo.accessSync(
+          `${this.rootDir}/${safeHash}/${VERSION_COMPLETE_FILE_NAME}`,
+        );
     } catch (e) {
       return false;
     }

@@ -225,7 +225,11 @@ export const UpdateProvider = ({
       }
       const info = resolveCheckResult(
         rootInfo,
-        { packageVersion, currentVersion, uuid: cInfo.uuid },
+        {
+          packageVersion: client.getEffectivePackageVersion(),
+          currentVersion,
+          uuid: cInfo.uuid,
+        },
         log
       );
       if (info.update) {

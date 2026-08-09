@@ -166,6 +166,9 @@ export class Pushy {
   // Endpoint that most recently served a successful checkUpdate; telemetry
   // reuses it instead of re-running the fallback race.
   private lastWorkingEndpoint?: string;
+  private syncedNativeConfigJson?: string;
+  private pendingNativeConfigJson?: string;
+  private nativeConfigSyncInFlight = false;
 
   version = cInfo.rnu;
   loggerPromise = (() => {
@@ -283,6 +286,7 @@ export class Pushy {
     }
     return JSON.stringify({
       appKey,
+      packageVersion: this.getEffectivePackageVersion(),
       endpoints: server.main,
       queryUrls: server.queryUrls ?? [],
       // The native check may activate a downloaded version (next launch)
@@ -297,17 +301,52 @@ export class Pushy {
     });
   };
 
-  private syncNativeConfig = () => {
-    const configJson = this.getNativeConfigJson();
-    if (!configJson) {
+  private flushNativeConfig = () => {
+    if (this.nativeConfigSyncInFlight) {
       return;
     }
-    Promise.resolve(PushyModule.syncNativeConfig(configJson)).catch(
-      (e: any) => {
+    const configJson = this.pendingNativeConfigJson;
+    this.pendingNativeConfigJson = undefined;
+    if (!configJson || configJson === this.syncedNativeConfigJson) {
+      return;
+    }
+    this.nativeConfigSyncInFlight = true;
+    let syncResult: Promise<void>;
+    try {
+      syncResult = Promise.resolve(PushyModule.syncNativeConfig(configJson));
+    } catch (e: any) {
+      this.nativeConfigSyncInFlight = false;
+      log('syncNativeConfig failed:', e?.message || e);
+      this.flushNativeConfig();
+      return;
+    }
+    syncResult
+      .then(() => {
+        this.syncedNativeConfigJson = configJson;
+      })
+      .catch((e: any) => {
         log('syncNativeConfig failed:', e?.message || e);
-      }
-    );
+      })
+      .finally(() => {
+        this.nativeConfigSyncInFlight = false;
+        this.flushNativeConfig();
+      });
   };
+
+  private syncNativeConfig = () => {
+    const configJson = this.getNativeConfigJson();
+    if (!configJson || configJson === this.syncedNativeConfigJson) {
+      return;
+    }
+    // Coalesce rapid setOptions calls, but serialize bridge writes so an older
+    // completion can never overwrite the newest desired configuration.
+    this.pendingNativeConfigJson = configJson;
+    this.flushNativeConfig();
+  };
+
+  /** Package version used by every server-side update decision. */
+  getEffectivePackageVersion = () =>
+    this.options.overridePackageVersion || packageVersion;
 
   private jsonStringsEqual = (left: string, right: string): boolean => {
     const compare = (a: unknown, b: unknown): boolean => {
@@ -475,8 +514,7 @@ export class Pushy {
             body: JSON.stringify({
               type: payloadType,
               hash,
-              packageVersion:
-                this.options.overridePackageVersion || packageVersion,
+              packageVersion: this.getEffectivePackageVersion(),
               cInfo,
               detail: truncateDetail(detail),
             }),
@@ -833,7 +871,7 @@ export class Pushy {
     }
     this.lastChecking = now;
     const fetchBody = buildCheckRequestBody({
-      packageVersion: this.options.overridePackageVersion || packageVersion,
+      packageVersion: this.getEffectivePackageVersion(),
       currentVersion,
       buildTime,
       cInfo,

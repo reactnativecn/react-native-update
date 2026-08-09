@@ -132,9 +132,14 @@ export function orderEndpointCandidates(
   if (deduped.length < 2) {
     return deduped;
   }
-  const first = Math.min(
-    Math.floor(randomSample * deduped.length),
-    deduped.length - 1
+  const first = Math.max(
+    0,
+    Math.min(
+      Number.isFinite(randomSample)
+        ? Math.floor(randomSample * deduped.length)
+        : 0,
+      deduped.length - 1
+    )
   );
   return [
     deduped[first],
@@ -200,7 +205,11 @@ export function resolveCheckResult(
   if (rootResult.update && expVersion && typeof rollout === 'number') {
     if (isInRollout(rollout, identity.uuid)) {
       log(`${expVersion.name} in ${rollout}% rollout, continue`);
-      if (expVersion.hash === identity.currentVersion) {
+      if (
+        typeof expVersion.hash === 'string' &&
+        expVersion.hash.length > 0 &&
+        expVersion.hash === identity.currentVersion
+      ) {
         return { upToDate: true };
       }
       const info: CheckResult = {
@@ -214,7 +223,12 @@ export function resolveCheckResult(
     }
     log(`${expVersion.name} not in ${rollout}% rollout, ignored`);
   }
-  if (rootResult.update && rootResult.hash === identity.currentVersion) {
+  if (
+    rootResult.update &&
+    typeof rootResult.hash === 'string' &&
+    rootResult.hash.length > 0 &&
+    rootResult.hash === identity.currentVersion
+  ) {
     return { upToDate: true };
   }
   return rootResult;
@@ -255,7 +269,10 @@ export interface DownloadPlan {
 }
 
 export type DownloadDecision =
-  | { action: 'none'; reason: 'noUpdate' | 'alreadyCurrent' | 'rolledBack' }
+  | {
+      action: 'none';
+      reason: 'noUpdate' | 'alreadyCurrent' | 'rolledBack' | 'noArtifact';
+    }
   | ({ action: 'download' } & DownloadPlan);
 
 export function decideDownload(
@@ -290,10 +307,14 @@ export function decideDownload(
   if (fullUrls?.length) {
     attempts.push({ type: 'full', urls: fullUrls });
   }
+  const devNoop = !!isDev && !fullUrls?.length;
+  if (!attempts.length && !devNoop) {
+    return { action: 'none', reason: 'noArtifact' };
+  }
   return {
     action: 'download',
     hash,
     attempts,
-    devNoop: !!isDev && !fullUrls?.length,
+    devNoop,
   };
 }

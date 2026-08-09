@@ -1258,17 +1258,34 @@ static NSString *PushyHttpRequest(NSString *urlString, NSString *method,
     }
     dispatch_semaphore_t sem = dispatch_semaphore_create(0);
     __block NSString *result = nil;
-    [[[NSURLSession sharedSession] dataTaskWithRequest:request
+    NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request
         completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-            NSInteger status = [(NSHTTPURLResponse *)response statusCode];
-            if (error == nil && status >= 200 && status < 300 && data != nil) {
+            NSHTTPURLResponse *httpResponse =
+                [response isKindOfClass:[NSHTTPURLResponse class]]
+                    ? (NSHTTPURLResponse *)response
+                    : nil;
+            NSInteger status = httpResponse.statusCode;
+            if (error == nil && httpResponse != nil && status >= 200 &&
+                status < 300 && data != nil) {
                 result = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
             }
             dispatch_semaphore_signal(sem);
-        }] resume];
-    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW,
-                                               (int64_t)((timeout + 5) * NSEC_PER_SEC)));
+        }];
+    [task resume];
+    if (dispatch_semaphore_wait(
+            sem, dispatch_time(DISPATCH_TIME_NOW,
+                               (int64_t)((timeout + 5) * NSEC_PER_SEC))) != 0) {
+        [task cancel];
+        return nil;
+    }
     return result;
+}
+
+static NSString *PushyNormalizeEndpointBase(NSString *base) {
+    while ([base hasSuffix:@"/"]) {
+        base = [base substringToIndex:base.length - 1];
+    }
+    return base;
 }
 
 static BOOL PushyIsValidCheckResponse(NSString *responseText) {
@@ -1330,6 +1347,11 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
     if (appKey.length == 0) {
         return;
     }
+    NSString *packageVersion =
+        PushyFromStdString(config.Get("packageVersion").AsString());
+    if (packageVersion.length == 0) {
+        packageVersion = [RCTPushy packageVersion];
+    }
 
     __block NSString *currentVersion = nil;
     PushyWithStateLock(^{
@@ -1341,7 +1363,7 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
 
     flowjson::Value identity = flowjson::Value::Object();
     identity.Set("packageVersion",
-                 flowjson::Value::String(PushyToStdString([RCTPushy packageVersion])));
+                 flowjson::Value::String(PushyToStdString(packageVersion)));
     if (currentVersion != nil) {
         identity.Set("currentVersion",
                      flowjson::Value::String(PushyToStdString(currentVersion)));
@@ -1467,10 +1489,16 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
     flowjson::Value ordered =
         updateflow::OrderEndpointCandidates(config.Get("endpoints"), sample);
     NSMutableSet<NSString *> *tried = [NSMutableSet set];
+    const NSUInteger maxHttpAttempts = 8;
+    NSUInteger httpAttempts = 0;
     for (const auto &endpoint : ordered.elements()) {
-        NSString *base = PushyFromStdString(endpoint.AsString());
-        if (base == nil) {
+        NSString *base = PushyNormalizeEndpointBase(
+            PushyFromStdString(endpoint.AsString()));
+        if (base.length == 0) {
             continue;
+        }
+        if (httpAttempts++ >= maxHttpAttempts) {
+            return nil;
         }
         [tried addObject:base];
         NSString *response = PushyHttpRequest(
@@ -1485,6 +1513,9 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
         if (listUrl == nil) {
             continue;
         }
+        if (httpAttempts++ >= maxHttpAttempts) {
+            return nil;
+        }
         NSString *listText = PushyHttpRequest(listUrl, @"GET", nil, 10);
         if (listText == nil) {
             continue;
@@ -1495,9 +1526,13 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
             continue;
         }
         for (const auto &endpoint : remote.elements()) {
-            NSString *base = PushyFromStdString(endpoint.AsString());
-            if (base == nil || [tried containsObject:base]) {
+            NSString *base = PushyNormalizeEndpointBase(
+                PushyFromStdString(endpoint.AsString()));
+            if (base.length == 0 || [tried containsObject:base]) {
                 continue;
+            }
+            if (httpAttempts++ >= maxHttpAttempts) {
+                return nil;
             }
             [tried addObject:base];
             NSString *response = PushyHttpRequest(

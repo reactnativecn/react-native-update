@@ -112,6 +112,15 @@ describe('orderEndpointCandidates', () => {
     expect(orderEndpointCandidates([], 0.5)).toEqual([]);
     expect(orderEndpointCandidates(['a'], 0.5)).toEqual(['a']);
   });
+
+  test('clamps invalid or out-of-range samples before indexing', () => {
+    expect(orderEndpointCandidates(['a', 'b'], Number.NaN)).toEqual(['a', 'b']);
+    expect(
+      orderEndpointCandidates(['a', 'b'], Number.POSITIVE_INFINITY)
+    ).toEqual(['a', 'b']);
+    expect(orderEndpointCandidates(['a', 'b'], -1)).toEqual(['a', 'b']);
+    expect(orderEndpointCandidates(['a', 'b'], 2)).toEqual(['b', 'a']);
+  });
 });
 
 describe('decideDownload', () => {
@@ -194,13 +203,11 @@ describe('decideDownload', () => {
     expect(decision.attempts.map((a) => a.type)).toEqual(['pdiff', 'full']);
   });
 
-  test('yields no attempts when paths are empty', () => {
-    const decision = decideDownload(updateInfo({ paths: [] }), identity);
-    if (decision.action !== 'download') {
-      throw new Error('expected a download decision');
-    }
-    expect(decision.attempts).toEqual([]);
-    expect(decision.devNoop).toBe(false);
+  test('declines a release update when no artifact URL can be built', () => {
+    expect(decideDownload(updateInfo({ paths: [] }), identity)).toEqual({
+      action: 'none',
+      reason: 'noArtifact',
+    });
   });
 
   test('dev only attempts full', () => {

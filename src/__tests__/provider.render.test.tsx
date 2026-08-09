@@ -34,6 +34,7 @@ const createClient = (options: Record<string, any> = {}) => {
       autoMarkSuccess: false,
       ...options,
     },
+    getEffectivePackageVersion: () => options.overridePackageVersion || '1.0.0',
     assertDebug: () => true,
     checkUpdate: mock(
       async (): Promise<CheckResult | undefined> => ({ ...updateResult })

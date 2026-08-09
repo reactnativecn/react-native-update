@@ -1,6 +1,8 @@
 #!/bin/sh
 set -eu
 
+# Intentional one-command CDPATH assignment.
+# shellcheck disable=SC1007
 ROOT_DIR="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="$ROOT_DIR/.tmp/update-flow-core-tests"
 
@@ -14,6 +16,8 @@ if [ "${SANITIZE:-0}" = "1" ]; then
   echo "Building update flow core tests with AddressSanitizer + UBSan"
 fi
 
+# SANITIZE_FLAGS must split into compiler arguments.
+# shellcheck disable=SC2086
 c++ \
   -std=c++17 \
   -Wall \
