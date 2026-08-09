@@ -340,14 +340,15 @@ appKey、server endpoints、更新策略今天只活在 JS 的 `ClientOptions` �
 → action=download：按 attempts 顺序走现有下载器（diff→pdiff→full，
   testUrls 语义由原生逐个尝试实现）；成功 → setLocalHashInfo(info 的
   name/description/metaInfo) → 按 afterDownload 决定是否 setNeedUpdate
-→ 响应原文 + 时间戳落盘（§10.3）
+→ 原生处理完成后，将响应原文 + 时间戳 + 请求/配置指纹落盘（§10.3）
 ```
 
 ### 10.3 与 JS 的去重（§6 的落地形态）
 
-首版**原生只写缓存**：响应原文 + 时间戳落到固定文件。紧随其后的 JS 小改
-动：`checkUpdate` 先读该缓存，时间戳新鲜（暂定 2 分钟）则直接复用不发请
-求。改造前的过渡期是双检查——多一次网络请求，服务端有缓存，无害。
+首版**原生只写缓存**：响应原文 + 时间戳 + 请求/配置指纹落到固定文件。紧
+随其后的 JS 小改动：`checkUpdate` 先读该缓存，时间戳新鲜（暂定 2 分钟）
+则直接复用不发请求。改造前的过渡期是双检查——多一次网络请求，服务端有
+缓存，无害。
 
 ### 10.4 失败策略
 
@@ -390,6 +391,27 @@ afterDownload)`：本地 silent 策略 或 响应标记 forceBoot 即激活。
 - **first_time 崩溃保护对强制版本依然生效**:强制启动的版本若也是坏的,
   下次启动照常回滚,不存在"强制进入坏版本且无法回头"。
 
-服务端配合（pushy-server / cresc-server,另行实施）:根版本响应透传
-`config`（现只有 expVersion 携带）;控制台版本编辑与重绑界面加 forceBoot
-开关。
+**服务端存储位置的裁决（2026-08-09,推翻初稿）:forceBoot 存 `bindings.config`,
+不存 `versions.config`。** 两个 config 的意图沿革必须记清,防止再犯:
+
+- **`versions.config` 属旧灰度设计,已弃用且在被主动清洗**。旧设计把
+  rollout 存在版本上（`config.rollout[packageVersion]`）;新设计把 rollout
+  搬到 `bindings.rollout` 列,客户端协议里的 `config.rollout` 形状由服务端
+  **从绑定数据合成**。绑定事务里的 `removePackageRolloutConfig` 每次重绑都
+  会从 versions.config 清掉对应的 legacy rollout 键——决策层对
+  versions.config 刻意不读,响应里的 config 一律合成,这是现行铁律。
+- **初稿曾把 forceBoot 放进 versions.config 并让绑定路径透传它,已否决**:
+  透传会把未被清洗的 legacy rollout 连带泄漏回响应、让双 config 源复活、
+  与清洗机制逆行。相应改动在四个仓库均已回退。
+- **`bindings.config` 是新设计预留的"这次投放"配置位**（upsert API 全线
+  打通、快照本就 select 它）,forceBoot 正是投放属性:救砖 = 把包重绑到正
+  常版本这一动作。存绑定还带来正确的生命周期——重绑即替换绑定,救援结束
+  后标记自动消失,不会像挂在版本上那样永久残留;粒度也收敛到单个
+  packageVersion。
+- **客户端协议不变**:客户端仍读响应里 `info.config.forceBoot`,它从哪合成
+  客户端不感知。
+
+已实施（四仓库,本地提交待推送）:pushy-server / cresc-server 决策层从
+`binding.config.forceBoot` 合成进下发 config（灰度与全量两分支）,绑定列表
+接口补 select config;pushy-admin / cresc-admin 发布菜单加"全量+强制启动
+（救砖）",已绑定行显示⚡标记 + 切换项（重发同绑定翻转标记）。
