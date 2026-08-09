@@ -47,6 +47,7 @@ public class UpdateContext {
     private static final int STATE_OP_CLEAR_ROLLBACK_MARK = 5;
     private static final int STATE_OP_RESOLVE_LAUNCH = 6;
     private static final String KEY_FIRST_LOAD_MARKED = "firstLoadMarked";
+    static final String VERSION_COMPLETE_FILE = ".pushy-complete";
     
     // Singleton instance
     private static volatile UpdateContext sInstance;
@@ -531,11 +532,6 @@ public class UpdateContext {
     }
 
     public String getBundleUrl(String defaultAssetsUrl) {
-        // Integration guarantees getBundleUrl runs at every startup, which
-        // makes it the anchor for the once-per-process native update check.
-        // Cheap: an AtomicBoolean gate and a daemon thread spawn.
-        NativeCheckOrchestrator.schedule(this);
-
         isUsingBundleUrl = true;
         StateCoreResult currentState = getStateSnapshot();
         StateCoreResult launchState = runStateCore(
@@ -567,6 +563,7 @@ public class UpdateContext {
 
         String currentVersion = launchState.loadVersion;
         if (currentVersion == null) {
+            NativeCheckOrchestrator.schedule(this, launchState.rolledBackVersion);
             return defaultAssetsUrl;
         }
 
@@ -582,10 +579,21 @@ public class UpdateContext {
                 continue;
             }
             launchVersion = currentVersion;
+            NativeCheckOrchestrator.schedule(this, rolledBackVersion());
             return bundleFile.toString();
         }
 
+        NativeCheckOrchestrator.schedule(this, rolledBackVersion());
         return defaultAssetsUrl;
+    }
+
+    boolean hasCompletedVersion(String hash) {
+        if (!isSafePathComponent(hash)) {
+            return false;
+        }
+        File versionDir = new File(rootDir, hash);
+        return new File(versionDir, "index.bundlejs").isFile()
+            && new File(versionDir, VERSION_COMPLETE_FILE).isFile();
     }
 
     private String rollBack() {

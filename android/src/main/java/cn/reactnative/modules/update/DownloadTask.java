@@ -462,6 +462,25 @@ class DownloadTask implements Runnable {
             return;
         }
 
+        if (isPatchTask(taskType)) {
+            try {
+                File marker = new File(
+                    params.unzipDirectory,
+                    UpdateContext.VERSION_COMPLETE_FILE
+                );
+                if (!marker.createNewFile() && !marker.isFile()) {
+                    throw new IOException("Failed to mark completed update: " + marker);
+                }
+            } catch (Throwable error) {
+                Log.e(UpdateContext.TAG, "failed to mark completed update", error);
+                cleanUpAfterFailure(taskType);
+                if (params.listener != null) {
+                    params.listener.onDownloadFailed(error);
+                }
+                return;
+            }
+        }
+
         // The task itself succeeded. Run the completion callback outside the
         // try/catch above so an exception thrown by the callback (e.g. a
         // FileProvider misconfiguration during installApk) is not mistaken for

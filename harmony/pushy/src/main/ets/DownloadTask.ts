@@ -12,6 +12,8 @@ import NativePatchCore, {
   CopyGroupResult,
 } from './NativePatchCore';
 
+const VERSION_COMPLETE_FILE_NAME = '.pushy-complete';
+
 export interface PatchManifestArrays {
   copyFroms: string[];
   copyTos: string[];
@@ -817,6 +819,16 @@ export class DownloadTask {
           break;
         default:
           throw Error(`Unknown task type: ${params.type}`);
+      }
+      if (
+        params.type === DownloadTaskParams.TASK_TYPE_PATCH_FULL ||
+        params.type === DownloadTaskParams.TASK_TYPE_PATCH_FROM_APP ||
+        params.type === DownloadTaskParams.TASK_TYPE_PATCH_FROM_PPK
+      ) {
+        await this.writeFileContent(
+          `${params.unzipDirectory}/${VERSION_COMPLETE_FILE_NAME}`,
+          new Uint8Array(0),
+        );
       }
     } catch (error: any) {
       console.error('Task execution failed:', error.message);

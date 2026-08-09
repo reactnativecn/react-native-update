@@ -267,27 +267,21 @@ export class Pushy {
     this.syncNativeConfig();
   };
 
-  /**
-   * Persist the subset of options the native cold-start check needs
-   * (NATIVE_CHECKUPDATE_DESIGN §10.1). JS is the single config source; a
-   * native side without persisted config silently skips its check, so this
-   * is also the feature's rollout gate. Fire-and-forget: config sync must
-   * never affect the JS update flow.
-   */
-  private syncNativeConfig = () => {
+  /** Serialize the subset of options used by the native cold-start check. */
+  private getNativeConfigJson = (): string | undefined => {
     if (
       Platform.OS === 'web' ||
       typeof PushyModule.syncNativeConfig !== 'function'
     ) {
       // Older natives lack the method; on web PushyModule is a noop Proxy
       // and the feature-detect would false-positive.
-      return;
+      return undefined;
     }
     const { appKey, server, updateStrategy } = this.options;
     if (!appKey || !server?.main?.length) {
-      return;
+      return undefined;
     }
-    const config = {
+    return JSON.stringify({
       appKey,
       endpoints: server.main,
       queryUrls: server.queryUrls ?? [],
@@ -300,12 +294,61 @@ export class Pushy {
           : 'none',
       rnu: cInfo.rnu,
       rn: cInfo.rn,
-    };
-    Promise.resolve(PushyModule.syncNativeConfig(JSON.stringify(config))).catch(
+    });
+  };
+
+  private syncNativeConfig = () => {
+    const configJson = this.getNativeConfigJson();
+    if (!configJson) {
+      return;
+    }
+    Promise.resolve(PushyModule.syncNativeConfig(configJson)).catch(
       (e: any) => {
         log('syncNativeConfig failed:', e?.message || e);
       }
     );
+  };
+
+  private jsonStringsEqual = (left: string, right: string): boolean => {
+    const compare = (a: unknown, b: unknown): boolean => {
+      if (a === b) {
+        return true;
+      }
+      if (Array.isArray(a) || Array.isArray(b)) {
+        return (
+          Array.isArray(a) &&
+          Array.isArray(b) &&
+          a.length === b.length &&
+          a.every((value, index) => compare(value, b[index]))
+        );
+      }
+      if (
+        a === null ||
+        b === null ||
+        typeof a !== 'object' ||
+        typeof b !== 'object'
+      ) {
+        return false;
+      }
+      const leftObject = a as Record<string, unknown>;
+      const rightObject = b as Record<string, unknown>;
+      const leftKeys = Object.keys(leftObject).sort();
+      const rightKeys = Object.keys(rightObject).sort();
+      return (
+        leftKeys.length === rightKeys.length &&
+        leftKeys.every(
+          (key, index) =>
+            key === rightKeys[index] &&
+            compare(leftObject[key], rightObject[key])
+        )
+      );
+    };
+
+    try {
+      return compare(JSON.parse(left), JSON.parse(right));
+    } catch {
+      return false;
+    }
   };
 
   private providerMounted = false;
@@ -630,7 +673,9 @@ export class Pushy {
    * undefined whenever the cache is absent, stale, or unreadable — any
    * failure falls through to a normal network check.
    */
-  private readNativeCheckCache = async (): Promise<CheckResult | undefined> => {
+  private readNativeCheckCache = async (
+    requestBody: string
+  ): Promise<CheckResult | undefined> => {
     try {
       if (__DEV__ || typeof PushyModule.getNativeCheckCache !== 'function') {
         return undefined;
@@ -640,10 +685,20 @@ export class Pushy {
         return undefined;
       }
       const entry = JSON.parse(raw);
-      if (typeof entry?.ts !== 'number' || typeof entry?.body !== 'string') {
+      const configJson = this.getNativeConfigJson();
+      if (
+        typeof entry?.ts !== 'number' ||
+        typeof entry?.body !== 'string' ||
+        typeof entry?.request !== 'string' ||
+        !this.jsonStringsEqual(entry.request, requestBody) ||
+        !configJson ||
+        typeof entry?.config !== 'string' ||
+        !this.jsonStringsEqual(entry.config, configJson)
+      ) {
         return undefined;
       }
-      if (Date.now() / 1000 - entry.ts > 120) {
+      const ageSeconds = Date.now() / 1000 - entry.ts;
+      if (ageSeconds < 0 || ageSeconds > 120) {
         return undefined;
       }
       const result = JSON.parse(entry.body);
@@ -812,7 +867,7 @@ export class Pushy {
       // the promise so no await lands between the dedup window above and the
       // lastRespJson assignment below (the JS2-1 double-send lesson).
       const respJsonPromise = (async (): Promise<CheckResult> => {
-        const cached = await this.readNativeCheckCache();
+        const cached = await this.readNativeCheckCache(stringifyBody);
         return cached ?? (await this.fetchCheckResult(fetchPayload));
       })();
       this.lastRespJson = respJsonPromise;

@@ -25,9 +25,8 @@ export interface Spec extends TurboModule {
    */
   syncNativeConfig(config: string): Promise<void>;
   /**
-   * Raw response cached by the native cold-start check
-   * ('{"ts":<epoch seconds>,"body":<raw checkUpdate response>}'), so the JS
-   * side can reuse a fresh result instead of re-checking (§10.3). Resolves to
+   * Raw response cached by the native cold-start check, including the request
+   * and config fingerprints that scope reuse (§10.3). Resolves to
    * an empty string when absent; never rejects.
    */
   getNativeCheckCache(): Promise<string>;

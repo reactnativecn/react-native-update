@@ -45,7 +45,7 @@ static NSString *const keyBundleHashCache = @"REACTNATIVECN_PUSHY_BUNDLEHASH_KEY
 // update check; parsed on read by the orchestrator. Absent = check disabled.
 static NSString *const keyNativeConfig = @"REACTNATIVECN_PUSHY_NATIVE_CONFIG_KEY";
 // Raw response cache written by the native cold-start check for the JS side
-// to reuse (§10.3): {"ts": <epoch seconds>, "body": <raw response>}.
+// to reuse (§10.3), scoped to the request and config that produced it.
 static NSString *const keyNativeCheckCache = @"REACTNATIVECN_PUSHY_NATIVE_CHECK_RESP_KEY";
 static NSString *const PushyErrorDomain = @"cn.reactnative.pushy";
 
@@ -53,6 +53,7 @@ static NSString *const PushyErrorDomain = @"cn.reactnative.pushy";
 static NSString * const BUNDLE_FILE_NAME = @"index.bundlejs";
 static NSString * const SOURCE_PATCH_NAME = @"__diff.json";
 static NSString * const BUNDLE_PATCH_NAME = @"index.bundlejs.patch";
+static NSString * const VERSION_COMPLETE_FILE_NAME = @".pushy-complete";
 
 // error def — messages are human-readable; the stable cross-platform codes
 // live in cpp/patch_core/error_codes.h and travel in PushyErrorCodeKey.
@@ -85,6 +86,45 @@ static std::atomic<bool> ignoreRollback{false};
 // under a silent (no-restart) reset would break every image the running app
 // has not loaded yet. Guarded by the state lock.
 static NSString *pushyLaunchVersion = nil;
+
+// JS and the bridge-free cold-start engine use different RCTPushy instances,
+// but they must still share one download per target hash. Without this
+// process-wide registry two NSURLSessionDownloadTasks race over the same
+// archive path and the later unzip can delete the first task's valid output.
+static NSMutableDictionary<NSString *, NSMutableArray *> *PushyInFlightDownloads(void) {
+    static NSMutableDictionary<NSString *, NSMutableArray *> *downloads;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        downloads = [NSMutableDictionary dictionary];
+    });
+    return downloads;
+}
+
+static BOOL PushyRegisterDownload(NSString *hash, void (^callback)(NSError *)) {
+    NSMutableDictionary *downloads = PushyInFlightDownloads();
+    @synchronized (downloads) {
+        NSMutableArray *callbacks = downloads[hash];
+        if (callbacks != nil) {
+            [callbacks addObject:[callback copy]];
+            return NO;
+        }
+        downloads[hash] = [NSMutableArray arrayWithObject:[callback copy]];
+        return YES;
+    }
+}
+
+static void PushyFinishDownload(NSString *hash, NSError *error) {
+    NSMutableDictionary *downloads = PushyInFlightDownloads();
+    NSArray *callbacks = nil;
+    @synchronized (downloads) {
+        callbacks = [downloads[hash] copy];
+        [downloads removeObjectForKey:hash];
+    }
+    for (id value in callbacks) {
+        void (^callback)(NSError *) = (void (^)(NSError *))value;
+        callback(error);
+    }
+}
 
 // Serializes every read-modify-write of the persisted update state. The state
 // machine itself is a pure function (state_core), but callers run on different
@@ -305,7 +345,11 @@ static void PushyApplyStateToDefaults(NSUserDefaults *defaults, const pushy::sta
 // bundle — this is what lets a bricked hot update be replaced on the next
 // launch. Decisions come from cpp/update_flow_core; this class is IO glue.
 @interface RCTPushyOrchestrator : NSObject
-+ (void)scheduleFromColdStart;
++ (void)scheduleFromColdStart:(NSString *)launchRolledBackVersion;
++ (void)runOnce:(NSString *)launchRolledBackVersion;
++ (void)persistResponseCache:(NSString *)responseText
+                     request:(NSString *)requestBody
+                      config:(NSString *)configJson;
 @end
 
 // Shared by the getBundleHash RCT method and the native cold-start check.
@@ -351,12 +395,8 @@ RCT_EXPORT_MODULE(RCTPushy);
 
 + (NSURL *)bundleURL
 {
-    // Integration guarantees bundleURL runs at every startup, which makes it
-    // the natural anchor for the once-per-process native check. Cheap:
-    // dispatch_once + a delayed dispatch, outside the state lock.
-    [RCTPushyOrchestrator scheduleFromColdStart];
-
     __block NSURL *resolvedURL = nil;
+    __block NSString *launchRolledBackVersion = nil;
     PushyWithStateLock(^{
         NSUserDefaults *defaults = PushyDefaults();
 
@@ -412,7 +452,7 @@ RCT_EXPORT_MODULE(RCTPushy);
                 if ([[NSFileManager defaultManager] fileExistsAtPath:bundlePath isDirectory:NULL]) {
                     pushyLaunchVersion = loadVersion;
                     resolvedURL = [NSURL fileURLWithPath:bundlePath];
-                    return;
+                    break;
                 } else {
                     RCTLogError(@"RCTPushy -- bundle version %@ not found, rolling back", loadVersion);
                     state = pushy::state::Rollback(state);
@@ -421,8 +461,13 @@ RCT_EXPORT_MODULE(RCTPushy);
                 }
             }
         }
+        // Capture before constantsToExport consumes this one-shot marker.
+        // The delayed native check must never forceBoot the version that this
+        // launch just rolled back.
+        launchRolledBackVersion = PushyFromStdString(state.rolled_back_version);
     });
 
+    [RCTPushyOrchestrator scheduleFromColdStart:launchRolledBackVersion];
     return resolvedURL ?: [RCTPushy binaryBundleURL];
 }
 
@@ -805,6 +850,11 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
         return;
     }
 
+    if (!PushyRegisterDownload(hash, callback)) {
+        RCTLogInfo(@"RCTPushy -- join in-flight download for %@", hash);
+        return;
+    }
+
     NSString *zipFilePath = [dir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@%@",hash, [self zipExtension:type]]];
 
     // On failure, remove the partial version directory like Android/Harmony
@@ -813,12 +863,27 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
     // this can never resolve to the download root itself.
     NSString *unzipDir = [dir stringByAppendingPathComponent:hash];
     void (^completion)(NSError *) = ^(NSError *error) {
-        if (error != nil) {
-            dispatch_async(self->_fileQueue, ^{
+        // Settle every JS/native waiter only after cleanup or the atomic
+        // completion marker write has run on the process-wide file queue.
+        dispatch_async(self->_fileQueue, ^{
+            NSError *finalError = error;
+            if (finalError == nil) {
+                NSString *marker = [unzipDir stringByAppendingPathComponent:VERSION_COMPLETE_FILE_NAME];
+                NSError *markerError = nil;
+                BOOL marked = [[NSData data] writeToFile:marker
+                                                 options:NSDataWritingAtomic
+                                                   error:&markerError];
+                if (!marked) {
+                    finalError = markerError ?: PushyErrorWithCode(
+                        pushy::error_codes::kFileOperationFailed,
+                        @"failed to mark completed update");
+                }
+            }
+            if (finalError != nil) {
                 [[NSFileManager defaultManager] removeItemAtPath:unzipDir error:nil];
-            });
-        }
-        callback(error);
+            }
+            PushyFinishDownload(hash, finalError);
+        });
     };
 
     RCTLogInfo(@"RCTPushy -- download file %@", updateUrl);
@@ -1206,9 +1271,18 @@ static NSString *PushyHttpRequest(NSString *urlString, NSString *method,
     return result;
 }
 
+static BOOL PushyIsValidCheckResponse(NSString *responseText) {
+    if (responseText == nil) {
+        return NO;
+    }
+    bool ok = false;
+    flowjson::Value parsed = flowjson::Parse(PushyToStdString(responseText), &ok);
+    return ok && parsed.IsObject();
+}
+
 @implementation RCTPushyOrchestrator
 
-+ (void)scheduleFromColdStart {
++ (void)scheduleFromColdStart:(NSString *)launchRolledBackVersion {
 #if !DEBUG
     // Once per process; a few seconds of delay keeps the check away from the
     // cold-start critical path (§7 R5) — its result targets the NEXT launch.
@@ -1217,7 +1291,7 @@ static NSString *PushyHttpRequest(NSString *urlString, NSString *method,
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)),
                        dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
             @try {
-                [self runOnce];
+                [self runOnce:launchRolledBackVersion];
             } @catch (NSException *exception) {
                 // The rescue path must never take the app down with it.
                 RCTLogWarn(@"RCTPushy -- native check crashed: %@", exception.reason);
@@ -1239,7 +1313,7 @@ static NSString *PushyHttpRequest(NSString *urlString, NSString *method,
     return engine;
 }
 
-+ (void)runOnce {
++ (void)runOnce:(NSString *)launchRolledBackVersion {
     NSUserDefaults *defaults = PushyDefaults();
     NSString *configJson = [defaults stringForKey:keyNativeConfig];
     if (configJson.length == 0) {
@@ -1258,12 +1332,11 @@ static NSString *PushyHttpRequest(NSString *urlString, NSString *method,
     }
 
     __block NSString *currentVersion = nil;
-    __block NSString *rolledBackVersion = nil;
     PushyWithStateLock(^{
         pushy::state::State state = PushyStateFromDefaults(PushyDefaults());
         currentVersion = PushyFromStdString(state.current_version);
-        rolledBackVersion = PushyFromStdString(state.rolled_back_version);
     });
+    NSString *rolledBackVersion = launchRolledBackVersion;
     NSString *uuid = [defaults stringForKey:keyUuid] ?: @"";
 
     flowjson::Value identity = flowjson::Value::Object();
@@ -1309,22 +1382,11 @@ static NSString *PushyHttpRequest(NSString *urlString, NSString *method,
         return;
     }
 
-    // Persist the raw response for the JS side to reuse (§10.3), regardless
-    // of what the decision turns out to be.
-    NSDictionary *cacheEntry = @{
-        @"ts": @((long long)[[NSDate date] timeIntervalSince1970]),
-        @"body": responseText,
-    };
-    NSData *cacheData = [NSJSONSerialization dataWithJSONObject:cacheEntry options:0 error:nil];
-    if (cacheData != nil) {
-        [defaults setObject:[[NSString alloc] initWithData:cacheData encoding:NSUTF8StringEncoding]
-                     forKey:keyNativeCheckCache];
-    }
-
     flowjson::Value decision = updateflow::HandleCheckResponse(
         PushyToStdString(responseText), identity, false,
         config.Get("afterDownload").AsString());
     if (decision.Get("action").AsString() != "download") {
+        [self persistResponseCache:responseText request:body config:configJson];
         RCTLogInfo(@"RCTPushy -- native check: nothing to do (%s)",
                    decision.Get("reason").AsString().c_str());
         return;
@@ -1334,16 +1396,18 @@ static NSString *PushyHttpRequest(NSString *urlString, NSString *method,
         return;
     }
 
-    NSString *bundlePath = [[[RCTPushy downloadDir]
-        stringByAppendingPathComponent:hash]
-        stringByAppendingPathComponent:BUNDLE_FILE_NAME];
-    BOOL downloaded = [[NSFileManager defaultManager] fileExistsAtPath:bundlePath];
+    NSString *versionDir = [[RCTPushy downloadDir] stringByAppendingPathComponent:hash];
+    NSString *bundlePath = [versionDir stringByAppendingPathComponent:BUNDLE_FILE_NAME];
+    NSString *completePath = [versionDir stringByAppendingPathComponent:VERSION_COMPLETE_FILE_NAME];
+    BOOL downloaded = [[NSFileManager defaultManager] fileExistsAtPath:bundlePath]
+        && [[NSFileManager defaultManager] fileExistsAtPath:completePath];
     if (!downloaded) {
         downloaded = [self performAttempts:decision.Get("attempts")
                                       hash:hash
                                 originHash:currentVersion];
     }
     if (!downloaded) {
+        [self persistResponseCache:responseText request:body config:configJson];
         return;
     }
 
@@ -1373,6 +1437,23 @@ static NSString *PushyHttpRequest(NSString *urlString, NSString *method,
     } else {
         RCTLogInfo(@"RCTPushy -- native check: downloaded %@, activation left to JS", hash);
     }
+    [self persistResponseCache:responseText request:body config:configJson];
+}
+
++ (void)persistResponseCache:(NSString *)responseText
+                     request:(NSString *)requestBody
+                      config:(NSString *)configJson {
+    NSDictionary *cacheEntry = @{
+        @"ts": @((long long)[[NSDate date] timeIntervalSince1970]),
+        @"body": responseText,
+        @"request": requestBody,
+        @"config": configJson,
+    };
+    NSData *cacheData = [NSJSONSerialization dataWithJSONObject:cacheEntry options:0 error:nil];
+    if (cacheData != nil) {
+        [PushyDefaults() setObject:[[NSString alloc] initWithData:cacheData encoding:NSUTF8StringEncoding]
+                           forKey:keyNativeCheckCache];
+    }
 }
 
 // Sequential fallback over the ordered candidates (§5.1): one request at a
@@ -1395,7 +1476,7 @@ static NSString *PushyHttpRequest(NSString *urlString, NSString *method,
         NSString *response = PushyHttpRequest(
             [NSString stringWithFormat:@"%@/checkUpdate/%@", base, appKey],
             @"POST", body, 10);
-        if (response != nil) {
+        if (PushyIsValidCheckResponse(response)) {
             return response;
         }
     }
@@ -1422,7 +1503,7 @@ static NSString *PushyHttpRequest(NSString *urlString, NSString *method,
             NSString *response = PushyHttpRequest(
                 [NSString stringWithFormat:@"%@/checkUpdate/%@", base, appKey],
                 @"POST", body, 10);
-            if (response != nil) {
+            if (PushyIsValidCheckResponse(response)) {
                 return response;
             }
         }

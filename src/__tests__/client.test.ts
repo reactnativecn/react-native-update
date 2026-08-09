@@ -1418,17 +1418,37 @@ describe('syncNativeConfig', () => {
 });
 
 describe('native check cache reuse', () => {
+  const expectedRequestBody = JSON.stringify({
+    packageVersion: '1.0.0',
+    hash: 'hash',
+    buildTime: '2023-01-01',
+    cInfo: {
+      rnu: '10.0.0',
+      rn: '0.73.0',
+      os: 'ios',
+      uuid: 'uuid',
+    },
+    diffV: 2,
+  });
+
   test('a fresh cached response is reused without a network check', async () => {
     const cachedResult = { upToDate: true };
+    let configJson = '';
+    const syncNativeConfig = mock((value: string) => {
+      configJson = value;
+      return Promise.resolve();
+    });
     const getNativeCheckCache = mock(() =>
       Promise.resolve(
         JSON.stringify({
           ts: Math.floor(Date.now() / 1000) - 30,
           body: JSON.stringify(cachedResult),
+          request: expectedRequestBody,
+          config: configJson,
         })
       )
     );
-    setupClientMocks({ getNativeCheckCache });
+    setupClientMocks({ getNativeCheckCache, syncNativeConfig });
     // setup.ts's default fetch throws, so any network attempt would surface
     // as a failed check (undefined) instead of the cached result.
     const { Pushy } = await importFreshClient('native-cache-fresh');
@@ -1439,15 +1459,22 @@ describe('native check cache reuse', () => {
   });
 
   test('a stale cached response falls through to the network', async () => {
+    let configJson = '';
+    const syncNativeConfig = mock((value: string) => {
+      configJson = value;
+      return Promise.resolve();
+    });
     const getNativeCheckCache = mock(() =>
       Promise.resolve(
         JSON.stringify({
           ts: Math.floor(Date.now() / 1000) - 600,
           body: JSON.stringify({ upToDate: true }),
+          request: expectedRequestBody,
+          config: configJson,
         })
       )
     );
-    setupClientMocks({ getNativeCheckCache });
+    setupClientMocks({ getNativeCheckCache, syncNativeConfig });
     const networkResult = { update: true, hash: 'net-hash' };
     (globalThis as any).fetch = mock(async () =>
       createJsonResponse(networkResult)
@@ -1460,12 +1487,127 @@ describe('native check cache reuse', () => {
 
   test('an unreadable cache never breaks the check', async () => {
     const getNativeCheckCache = mock(() => Promise.resolve('not json'));
-    setupClientMocks({ getNativeCheckCache });
+    const syncNativeConfig = mock(() => Promise.resolve());
+    setupClientMocks({ getNativeCheckCache, syncNativeConfig });
     const networkResult = { upToDate: true };
     (globalThis as any).fetch = mock(async () =>
       createJsonResponse(networkResult)
     );
     const { Pushy } = await importFreshClient('native-cache-bad');
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    expect(await client.checkUpdate()).toEqual(networkResult);
+  });
+
+  test('a cache for a different request body is never reused', async () => {
+    let configJson = '';
+    const syncNativeConfig = mock((value: string) => {
+      configJson = value;
+      return Promise.resolve();
+    });
+    const getNativeCheckCache = mock(() =>
+      Promise.resolve(
+        JSON.stringify({
+          ts: Math.floor(Date.now() / 1000) - 10,
+          body: JSON.stringify({ hash: 'wrong-hash', update: true }),
+          request: expectedRequestBody,
+          config: configJson,
+        })
+      )
+    );
+    setupClientMocks({ getNativeCheckCache, syncNativeConfig });
+    const networkResult = { update: true, hash: 'requested-hash' };
+    (globalThis as any).fetch = mock(async () =>
+      createJsonResponse(networkResult)
+    );
+    const { Pushy } = await importFreshClient('native-cache-request-key');
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    expect(await client.checkUpdate({ toHash: 'requested-hash' })).toEqual(
+      networkResult
+    );
+  });
+
+  test('request key order does not prevent reuse of the same request', async () => {
+    const cachedResult = { upToDate: true };
+    let configJson = '';
+    const syncNativeConfig = mock((value: string) => {
+      configJson = value;
+      return Promise.resolve();
+    });
+    const getNativeCheckCache = mock(() =>
+      Promise.resolve(
+        JSON.stringify({
+          ts: Math.floor(Date.now() / 1000) - 10,
+          body: JSON.stringify(cachedResult),
+          request: JSON.stringify({
+            diffV: 2,
+            cInfo: {
+              uuid: 'uuid',
+              os: 'ios',
+              rn: '0.73.0',
+              rnu: '10.0.0',
+            },
+            buildTime: '2023-01-01',
+            hash: 'hash',
+            packageVersion: '1.0.0',
+          }),
+          config: configJson,
+        })
+      )
+    );
+    setupClientMocks({ getNativeCheckCache, syncNativeConfig });
+    const { Pushy } = await importFreshClient('native-cache-key-order');
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    expect(await client.checkUpdate()).toEqual(cachedResult);
+  });
+
+  test('a cache for a different native config is never reused', async () => {
+    const getNativeCheckCache = mock(() =>
+      Promise.resolve(
+        JSON.stringify({
+          ts: Math.floor(Date.now() / 1000) - 10,
+          body: JSON.stringify({ upToDate: true }),
+          request: expectedRequestBody,
+          config: JSON.stringify({ appKey: 'another-app' }),
+        })
+      )
+    );
+    const syncNativeConfig = mock(() => Promise.resolve());
+    setupClientMocks({ getNativeCheckCache, syncNativeConfig });
+    const networkResult = { update: true, hash: 'net-hash' };
+    (globalThis as any).fetch = mock(async () =>
+      createJsonResponse(networkResult)
+    );
+    const { Pushy } = await importFreshClient('native-cache-config-key');
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    expect(await client.checkUpdate()).toEqual(networkResult);
+  });
+
+  test('a cache timestamp from the future is never reused', async () => {
+    let configJson = '';
+    const syncNativeConfig = mock((value: string) => {
+      configJson = value;
+      return Promise.resolve();
+    });
+    const getNativeCheckCache = mock(() =>
+      Promise.resolve(
+        JSON.stringify({
+          ts: Math.floor(Date.now() / 1000) + 600,
+          body: JSON.stringify({ upToDate: true }),
+          request: expectedRequestBody,
+          config: configJson,
+        })
+      )
+    );
+    setupClientMocks({ getNativeCheckCache, syncNativeConfig });
+    const networkResult = { update: true, hash: 'net-hash' };
+    (globalThis as any).fetch = mock(async () =>
+      createJsonResponse(networkResult)
+    );
+    const { Pushy } = await importFreshClient('native-cache-future');
     const client = new Pushy({ appKey: 'demo-app' });
 
     expect(await client.checkUpdate()).toEqual(networkResult);

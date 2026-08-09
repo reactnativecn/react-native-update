@@ -2,7 +2,6 @@ package cn.reactnative.modules.update;
 
 import android.os.Build;
 import android.util.Log;
-import java.io.File;
 import java.util.HashSet;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -27,8 +26,8 @@ import org.json.JSONObject;
  */
 final class NativeCheckOrchestrator {
     static final String KEY_CONFIG = "nativeConfig";
-    // Raw response cache for the JS side to reuse (§10.3):
-    // {"ts": <epoch seconds>, "body": <raw checkUpdate response>}.
+    // Raw response cache for the JS side to reuse (§10.3), scoped to the
+    // exact logical request and native config that produced it.
     static final String KEY_RESP_CACHE = "nativeCheckResp";
 
     private static final AtomicBoolean scheduled = new AtomicBoolean(false);
@@ -36,7 +35,7 @@ final class NativeCheckOrchestrator {
     private NativeCheckOrchestrator() {
     }
 
-    static void schedule(final UpdateContext context) {
+    static void schedule(final UpdateContext context, final String launchRolledBackVersion) {
         if (UpdateContext.DEBUG) {
             return;
         }
@@ -50,7 +49,7 @@ final class NativeCheckOrchestrator {
                     // Keep the check away from the cold-start critical path
                     // (§7 R5) — its result targets the NEXT launch anyway.
                     Thread.sleep(5000);
-                    runOnce(context);
+                    runOnce(context, launchRolledBackVersion);
                 } catch (Throwable e) {
                     // The rescue path must never take the app down with it.
                     Log.w(UpdateContext.TAG, "native check failed: " + e);
@@ -62,7 +61,10 @@ final class NativeCheckOrchestrator {
         thread.start();
     }
 
-    private static void runOnce(UpdateContext context) throws JSONException {
+    private static void runOnce(
+        UpdateContext context,
+        String launchRolledBackVersion
+    ) throws JSONException {
         String configJson = context.getKv(KEY_CONFIG);
         if (configJson == null || configJson.isEmpty()) {
             // No persisted config (old integration / first ever launch): the
@@ -84,7 +86,11 @@ final class NativeCheckOrchestrator {
         }
 
         String currentVersion = context.getCurrentVersion();
-        String rolledBackVersion = context.rolledBackVersion();
+        // Snapshot captured on the launch path before getConstants consumes
+        // the one-shot rollback marker. Reading SharedPreferences here, five
+        // seconds later, would lose the guard and could forceBoot the version
+        // that this very launch just rolled back.
+        String rolledBackVersion = launchRolledBackVersion;
         String uuid = context.getKv("uuid");
         if (uuid == null) {
             uuid = "";
@@ -92,9 +98,10 @@ final class NativeCheckOrchestrator {
 
         JSONObject identity = new JSONObject();
         identity.put("packageVersion", context.getPackageVersion());
-        if (currentVersion != null) {
-            identity.put("currentVersion", currentVersion);
-        }
+        identity.put(
+            "currentVersion",
+            currentVersion == null ? JSONObject.NULL : currentVersion
+        );
         identity.put("uuid", uuid);
         if (rolledBackVersion != null) {
             identity.put("rolledBackVersion", rolledBackVersion);
@@ -103,14 +110,17 @@ final class NativeCheckOrchestrator {
         JSONObject cInfo = new JSONObject();
         cInfo.put("rnu", config.optString("rnu", ""));
         cInfo.put("rn", config.optString("rn", ""));
-        cInfo.put("os", "android " + Build.VERSION.RELEASE);
+        // React Native's Platform.Version is the Android SDK integer; use the
+        // same value so this request can be fingerprinted against the JS one.
+        cInfo.put("os", "android " + Build.VERSION.SDK_INT);
         cInfo.put("uuid", uuid);
 
         JSONObject input = new JSONObject();
         input.put("packageVersion", context.getPackageVersion());
-        if (currentVersion != null) {
-            input.put("currentVersion", currentVersion);
-        }
+        input.put(
+            "currentVersion",
+            currentVersion == null ? JSONObject.NULL : currentVersion
+        );
         input.put("buildTime", context.getBuildTime());
         input.put("cInfo", cInfo);
         input.put("supportedDiffVersion", NativeUpdateCore.supportedDiffVersion());
@@ -128,13 +138,6 @@ final class NativeCheckOrchestrator {
             return;
         }
 
-        // Persist the raw response for the JS side to reuse (§10.3),
-        // regardless of what the decision turns out to be.
-        JSONObject cacheEntry = new JSONObject();
-        cacheEntry.put("ts", System.currentTimeMillis() / 1000);
-        cacheEntry.put("body", responseText);
-        context.setKv(KEY_RESP_CACHE, cacheEntry.toString());
-
         String decisionJson = NativeUpdateFlow.handleCheckResponse(
             responseText, identity.toString(), config.optString("afterDownload", ""));
         if (decisionJson == null) {
@@ -142,6 +145,7 @@ final class NativeCheckOrchestrator {
         }
         JSONObject decision = new JSONObject(decisionJson);
         if (!"download".equals(decision.optString("action"))) {
+            persistResponseCache(context, configJson, body, responseText);
             Log.i(UpdateContext.TAG,
                 "native check: nothing to do (" + decision.optString("reason") + ")");
             return;
@@ -151,13 +155,15 @@ final class NativeCheckOrchestrator {
             return;
         }
 
-        boolean downloaded =
-            new File(context.getRootDir(), hash + "/index.bundlejs").exists();
+        boolean downloaded = context.hasCompletedVersion(hash);
         if (!downloaded) {
             downloaded = performAttempts(
                 context, decision.optJSONArray("attempts"), hash, currentVersion);
         }
         if (!downloaded) {
+            // The native attempt has finished, so JS may safely reuse the
+            // response and retry through its own strategy chain.
+            persistResponseCache(context, configJson, body, responseText);
             return;
         }
 
@@ -190,6 +196,23 @@ final class NativeCheckOrchestrator {
             Log.i(UpdateContext.TAG,
                 "native check: downloaded " + hash + ", activation left to JS");
         }
+        // Publish the response only after native file/state work is complete;
+        // otherwise JS can observe it and start a competing download.
+        persistResponseCache(context, configJson, body, responseText);
+    }
+
+    private static void persistResponseCache(
+        UpdateContext context,
+        String configJson,
+        String requestBody,
+        String responseText
+    ) throws JSONException {
+        JSONObject cacheEntry = new JSONObject();
+        cacheEntry.put("ts", System.currentTimeMillis() / 1000);
+        cacheEntry.put("body", responseText);
+        cacheEntry.put("request", requestBody);
+        cacheEntry.put("config", configJson);
+        context.setKv(KEY_RESP_CACHE, cacheEntry.toString());
     }
 
     private static final OkHttpClient httpClient = new OkHttpClient.Builder()
@@ -213,6 +236,18 @@ final class NativeCheckOrchestrator {
             }
         } catch (Exception e) {
             return null;
+        }
+    }
+
+    private static boolean isValidCheckResponse(String responseText) {
+        if (responseText == null) {
+            return false;
+        }
+        try {
+            new JSONObject(responseText);
+            return true;
+        } catch (JSONException e) {
+            return false;
         }
     }
 
@@ -241,7 +276,7 @@ final class NativeCheckOrchestrator {
             }
             tried.add(base);
             String response = httpRequest(base + "/checkUpdate/" + appKey, body);
-            if (response != null) {
+            if (isValidCheckResponse(response)) {
                 return response;
             }
         }
@@ -271,7 +306,7 @@ final class NativeCheckOrchestrator {
                 }
                 tried.add(base);
                 String response = httpRequest(base + "/checkUpdate/" + appKey, body);
-                if (response != null) {
+                if (isValidCheckResponse(response)) {
                     return response;
                 }
             }

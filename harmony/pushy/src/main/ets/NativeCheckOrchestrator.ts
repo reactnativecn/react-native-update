@@ -13,7 +13,7 @@ import type { UpdateContext } from './UpdateContext';
 // PushyFileJSBundleProvider.getBundleUrl 不会被调用。
 const TAG = 'NativeCheck';
 const KEY_CONFIG = 'nativeConfig';
-// 供 JS 侧复用的原始响应缓存(§10.3):{ ts: 秒级时间戳, body: 原始响应 }。
+// 供 JS 侧复用的原始响应缓存(§10.3),同时记录请求与配置指纹以限定命中范围。
 const KEY_RESP_CACHE = 'nativeCheckResp';
 const REQUEST_TIMEOUT_MS = 10000;
 const START_DELAY_MS = 5000;
@@ -76,25 +76,33 @@ interface Decision {
 interface RespCacheEntry {
   ts: number;
   body: string;
+  request: string;
+  config: string;
 }
 
 let scheduled = false;
 
-export function scheduleNativeCheck(context: UpdateContext): void {
+export function scheduleNativeCheck(
+  context: UpdateContext,
+  launchRolledBackVersion: string,
+): void {
   if (scheduled) {
     return;
   }
   scheduled = true;
   // 结果本来就是"下次启动生效",延迟几秒让开冷启动关键路径(§7 R5)。
   setTimeout(() => {
-    runOnce(context).catch((e: Object) => {
+    runOnce(context, launchRolledBackVersion).catch((e: Object) => {
       // 救援路径自身绝不能把应用拖垮。
       logger.error(TAG, `native check failed: ${e}`);
     });
   }, START_DELAY_MS);
 }
 
-async function runOnce(context: UpdateContext): Promise<void> {
+async function runOnce(
+  context: UpdateContext,
+  launchRolledBackVersion: string,
+): Promise<void> {
   const configJson = context.getKv(KEY_CONFIG);
   if (!configJson) {
     // 无落盘配置(老接入/首启):静默不跑——这就是灰度开关。
@@ -115,16 +123,16 @@ async function runOnce(context: UpdateContext): Promise<void> {
   }
 
   const currentVersion = context.getCurrentVersion();
-  const rolledBackVersion = context.rolledBackVersion();
+  // getConstants consumes the persisted rollback marker during startup; use
+  // the launch-path snapshot captured before that happens.
+  const rolledBackVersion = launchRolledBackVersion;
   const uuid = context.getKv('uuid') ?? '';
 
   const identity: FlowIdentity = {
     packageVersion: context.getPackageVersion(),
+    currentVersion,
     uuid,
   };
-  if (currentVersion) {
-    identity.currentVersion = currentVersion;
-  }
   if (rolledBackVersion) {
     identity.rolledBackVersion = rolledBackVersion;
   }
@@ -138,15 +146,12 @@ async function runOnce(context: UpdateContext): Promise<void> {
 
   const input: FlowCheckInput = {
     packageVersion: identity.packageVersion,
+    currentVersion,
     buildTime: context.getBuildTime(),
     cInfo,
     supportedDiffVersion: NativePatchCore.getSupportedDiffVersion(),
     bundleHash: await context.getBundleHash(),
   };
-  if (currentVersion) {
-    input.currentVersion = currentVersion;
-  }
-
   const body = NativePatchCore.buildCheckRequestBody(JSON.stringify(input));
   if (!body) {
     return;
@@ -158,13 +163,6 @@ async function runOnce(context: UpdateContext): Promise<void> {
     return;
   }
 
-  // 无论决策结果如何都落盘原始响应,供 JS 侧复用(§10.3)。
-  const cacheEntry: RespCacheEntry = {
-    ts: Math.floor(Date.now() / 1000),
-    body: responseText,
-  };
-  context.setKv(KEY_RESP_CACHE, JSON.stringify(cacheEntry));
-
   const decisionJson = NativePatchCore.handleCheckResponse(
     responseText,
     JSON.stringify(identity),
@@ -175,6 +173,7 @@ async function runOnce(context: UpdateContext): Promise<void> {
   }
   const decision = JSON.parse(decisionJson) as Decision;
   if (decision.action !== 'download') {
+    persistResponseCache(context, configJson, body, responseText);
     logger.debug(TAG, `nothing to do (${decision.reason ?? ''})`);
     return;
   }
@@ -193,6 +192,7 @@ async function runOnce(context: UpdateContext): Promise<void> {
     );
   }
   if (!downloaded) {
+    persistResponseCache(context, configJson, body, responseText);
     return;
   }
 
@@ -223,6 +223,35 @@ async function runOnce(context: UpdateContext): Promise<void> {
     }
   } else {
     logger.debug(TAG, `downloaded ${hash}, activation left to JS`);
+  }
+  // 仅在原生文件/状态工作结束后公开缓存,避免 JS 观察到响应后并发下载。
+  persistResponseCache(context, configJson, body, responseText);
+}
+
+function persistResponseCache(
+  context: UpdateContext,
+  configJson: string,
+  requestBody: string,
+  responseText: string,
+): void {
+  const cacheEntry: RespCacheEntry = {
+    ts: Math.floor(Date.now() / 1000),
+    body: responseText,
+    request: requestBody,
+    config: configJson,
+  };
+  context.setKv(KEY_RESP_CACHE, JSON.stringify(cacheEntry));
+}
+
+function isValidCheckResponse(responseText: string | undefined): boolean {
+  if (responseText === undefined) {
+    return false;
+  }
+  try {
+    const parsed = JSON.parse(responseText) as Object | null;
+    return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed);
+  } catch (e) {
+    return false;
   }
 }
 
@@ -284,7 +313,7 @@ async function runCheckRequest(
     }
     tried.add(base);
     const response = await httpRequest(`${base}/checkUpdate/${appKey}`, body);
-    if (response !== undefined) {
+    if (isValidCheckResponse(response)) {
       return response;
     }
   }
@@ -312,7 +341,7 @@ async function runCheckRequest(
       }
       tried.add(base);
       const response = await httpRequest(`${base}/checkUpdate/${appKey}`, body);
-      if (response !== undefined) {
+      if (isValidCheckResponse(response)) {
         return response;
       }
     }
