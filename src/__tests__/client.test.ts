@@ -843,6 +843,40 @@ describe('downloadUpdate fallback chain', () => {
     expect(downloadPatchFromPpk).toHaveBeenCalledTimes(1);
   });
 
+  test('reports a release response with no downloadable artifact', async () => {
+    const {
+      downloadPatchFromPpk,
+      downloadPatchFromPackage,
+      downloadFullUpdate,
+    } = setupDownloadMocks();
+    const logger = mock(() => {});
+    const { Pushy, sharedState } = await importFreshClient('dl-no-artifact');
+    sharedState.downloadedHash = undefined;
+    const client = new Pushy({
+      appKey: 'demo-app',
+      logger,
+      disableTelemetry: true,
+    });
+
+    expect(
+      await client.downloadUpdate({ ...updateInfo, paths: [] })
+    ).toBeUndefined();
+    await Promise.resolve();
+
+    expect(downloadPatchFromPpk).not.toHaveBeenCalled();
+    expect(downloadPatchFromPackage).not.toHaveBeenCalled();
+    expect(downloadFullUpdate).not.toHaveBeenCalled();
+    expect(logger).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'errorUpdate',
+        data: expect.objectContaining({
+          newVersion: 'new-hash',
+          message: 'update response contains no downloadable artifact',
+        }),
+      })
+    );
+  });
+
   test('adds computed progress to download progress callbacks', async () => {
     let progressListener:
       | ((data: { hash: string; received: number; total: number }) => void)
@@ -1470,6 +1504,43 @@ describe('syncNativeConfig', () => {
     resolvers[1]();
   });
 
+  test('persists a revert to the last synced value while a newer write is in flight', async () => {
+    const resolvers: Array<() => void> = [];
+    const syncNativeConfig = mock(
+      () =>
+        new Promise<void>((resolve) => {
+          resolvers.push(resolve);
+        })
+    );
+    setupClientMocks({ syncNativeConfig });
+    const { Pushy } = await importFreshClient('sync-config-revert-race');
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    // Finish the initial alert-strategy value (A).
+    resolvers[0]();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Start B, then revert to A before B finishes. A must remain pending even
+    // though it still equals the last completed value at this instant.
+    client.setOptions({ updateStrategy: 'silentAndNow' });
+    client.setOptions({ updateStrategy: 'alwaysAlert' });
+    expect(syncNativeConfig).toHaveBeenCalledTimes(2);
+
+    resolvers[1]();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(syncNativeConfig).toHaveBeenCalledTimes(3);
+    const reverted = JSON.parse(
+      (syncNativeConfig.mock.calls.at(-1) as unknown as string[])[0]
+    );
+    expect(reverted.afterDownload).toBe('none');
+    resolvers[2]();
+  });
+
   test('retries a config write that failed', async () => {
     let calls = 0;
     const syncNativeConfig = mock(() => {
@@ -1642,6 +1713,32 @@ describe('native check cache reuse', () => {
     const client = new Pushy({ appKey: 'demo-app' });
 
     expect(await client.checkUpdate()).toEqual(cachedResult);
+  });
+
+  test('undefined request extras omitted by JSON do not prevent cache reuse', async () => {
+    const cachedResult = { upToDate: true };
+    let configJson = '';
+    const syncNativeConfig = mock((value: string) => {
+      configJson = value;
+      return Promise.resolve();
+    });
+    const getNativeCheckCache = mock(() =>
+      Promise.resolve(
+        JSON.stringify({
+          ts: Math.floor(Date.now() / 1000) - 10,
+          body: JSON.stringify(cachedResult),
+          request: expectedRequestBody,
+          config: configJson,
+        })
+      )
+    );
+    setupClientMocks({ getNativeCheckCache, syncNativeConfig });
+    const { Pushy } = await importFreshClient('native-cache-undefined-extra');
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    expect(await client.checkUpdate({ omitted: undefined })).toEqual(
+      cachedResult
+    );
   });
 
   test('a cache for a different native config is never reused', async () => {

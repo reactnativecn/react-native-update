@@ -241,6 +241,12 @@ public class UpdateContext {
     }
 
     public void downloadFullUpdate(String url, String hash, DownloadFileListener listener) {
+        downloadFullUpdate(url, hash, listener, 0);
+    }
+
+    void downloadFullUpdate(
+        String url, String hash, DownloadFileListener listener, long deadlineNanos
+    ) {
         if (rejectUnsafeComponent(hash, listener)) {
             return;
         }
@@ -249,6 +255,7 @@ public class UpdateContext {
         params.url = url;
         params.hash = hash;
         params.listener = listener;
+        params.deadlineNanos = deadlineNanos;
         params.targetFile = new File(rootDir, hash + ".ppk");
         params.unzipDirectory = new File(rootDir, hash);
         enqueue(params);
@@ -276,6 +283,12 @@ public class UpdateContext {
     }
 
     public void downloadPatchFromApk(String url, String hash, DownloadFileListener listener) {
+        downloadPatchFromApk(url, hash, listener, 0);
+    }
+
+    void downloadPatchFromApk(
+        String url, String hash, DownloadFileListener listener, long deadlineNanos
+    ) {
         if (rejectUnsafeComponent(hash, listener)) {
             return;
         }
@@ -284,12 +297,23 @@ public class UpdateContext {
         params.url = url;
         params.hash = hash;
         params.listener = listener;
+        params.deadlineNanos = deadlineNanos;
         params.targetFile = new File(rootDir, hash + ".apk.patch");
         params.unzipDirectory = new File(rootDir, hash);
         enqueue(params);
     }
 
     public void downloadPatchFromPpk(String url, String hash, String originHash, DownloadFileListener listener) {
+        downloadPatchFromPpk(url, hash, originHash, listener, 0);
+    }
+
+    void downloadPatchFromPpk(
+        String url,
+        String hash,
+        String originHash,
+        DownloadFileListener listener,
+        long deadlineNanos
+    ) {
         if (rejectUnsafeComponent(hash, listener) || rejectUnsafeComponent(originHash, listener)) {
             return;
         }
@@ -299,6 +323,7 @@ public class UpdateContext {
         params.hash = hash;
         params.originHash = originHash;
         params.listener = listener;
+        params.deadlineNanos = deadlineNanos;
         params.targetFile = new File(rootDir, originHash + "-" + hash + ".ppk.patch");
         params.unzipDirectory = new File(rootDir, hash);
         params.originDirectory = new File(rootDir, originHash);
@@ -533,58 +558,67 @@ public class UpdateContext {
 
     public String getBundleUrl(String defaultAssetsUrl) {
         isUsingBundleUrl = true;
-        StateCoreResult currentState = getStateSnapshot();
-        StateCoreResult launchState = runStateCore(
-            STATE_OP_RESOLVE_LAUNCH,
-            currentState,
-            null,
-            ignoreRollback,
-            true
-        );
-        if (launchState.didRollback) {
-            // The crash-protection rollback: the new version never called
-            // markSuccess. Keep this visible in release logs.
-            Log.e(TAG, "Version " + currentState.currentVersion
-                + " was not marked as successful, rolling back to "
-                + launchState.currentVersion);
-        }
-        if (launchState.didRollback || launchState.consumedFirstTime) {
-            SharedPreferences.Editor editor = sp.edit();
-            applyState(editor, launchState);
+        String nativeCheckRolledBackVersion = null;
+        try {
+            StateCoreResult currentState = getStateSnapshot();
+            StateCoreResult launchState = runStateCore(
+                STATE_OP_RESOLVE_LAUNCH,
+                currentState,
+                null,
+                ignoreRollback,
+                true
+            );
+            nativeCheckRolledBackVersion = launchState.rolledBackVersion;
+            if (launchState.didRollback) {
+                // The crash-protection rollback: the new version never called
+                // markSuccess. Keep this visible in release logs.
+                Log.e(TAG, "Version " + currentState.currentVersion
+                    + " was not marked as successful, rolling back to "
+                    + launchState.currentVersion);
+            }
+            if (launchState.didRollback || launchState.consumedFirstTime) {
+                SharedPreferences.Editor editor = sp.edit();
+                applyState(editor, launchState);
+                if (launchState.consumedFirstTime) {
+                    editor.putBoolean(KEY_FIRST_LOAD_MARKED, true);
+                }
+                persistEditor(editor, "resolve launch");
+            }
             if (launchState.consumedFirstTime) {
-                editor.putBoolean(KEY_FIRST_LOAD_MARKED, true);
+                // bundleURL may be resolved multiple times in one process.
+                ignoreRollback = true;
             }
-            persistEditor(editor, "resolve launch");
-        }
-        if (launchState.consumedFirstTime) {
-            // bundleURL may be resolved multiple times in one process.
-            ignoreRollback = true;
-        }
 
-        String currentVersion = launchState.loadVersion;
-        if (currentVersion == null) {
-            NativeCheckOrchestrator.schedule(this, launchState.rolledBackVersion);
+            String currentVersion = launchState.loadVersion;
+            if (currentVersion == null) {
+                return defaultAssetsUrl;
+            }
+
+            // Guard the rollback chain against cycles: a corrupted state returning
+            // an already-visited version would otherwise spin this loop forever on
+            // the main thread.
+            java.util.HashSet<String> visitedVersions = new java.util.HashSet<>();
+            while (currentVersion != null && visitedVersions.add(currentVersion)) {
+                File bundleFile = new File(rootDir, currentVersion+"/index.bundlejs");
+                if (!bundleFile.exists()) {
+                    Log.e(TAG, "Bundle version " + currentVersion + " not found.");
+                    currentVersion = this.rollBack();
+                    nativeCheckRolledBackVersion = rolledBackVersion();
+                    continue;
+                }
+                launchVersion = currentVersion;
+                nativeCheckRolledBackVersion = rolledBackVersion();
+                return bundleFile.toString();
+            }
+
+            nativeCheckRolledBackVersion = rolledBackVersion();
             return defaultAssetsUrl;
+        } finally {
+            // Even corrupted state or a state-core exception must not disable
+            // the next-launch rescue check. A null snapshot simply omits the
+            // rollback guard for this exceptional launch.
+            NativeCheckOrchestrator.schedule(this, nativeCheckRolledBackVersion);
         }
-
-        // Guard the rollback chain against cycles: a corrupted state returning
-        // an already-visited version would otherwise spin this loop forever on
-        // the main thread.
-        java.util.HashSet<String> visitedVersions = new java.util.HashSet<>();
-        while (currentVersion != null && visitedVersions.add(currentVersion)) {
-            File bundleFile = new File(rootDir, currentVersion+"/index.bundlejs");
-            if (!bundleFile.exists()) {
-                Log.e(TAG, "Bundle version " + currentVersion + " not found.");
-                currentVersion = this.rollBack();
-                continue;
-            }
-            launchVersion = currentVersion;
-            NativeCheckOrchestrator.schedule(this, rolledBackVersion());
-            return bundleFile.toString();
-        }
-
-        NativeCheckOrchestrator.schedule(this, rolledBackVersion());
-        return defaultAssetsUrl;
     }
 
     boolean hasCompletedVersion(String hash) {

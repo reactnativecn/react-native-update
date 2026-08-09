@@ -97,6 +97,7 @@ const DIFF_MANIFEST_ENTRY = '__diff.json';
 const HARMONY_BUNDLE_PATCH_ENTRY = 'bundle.harmony.js.patch';
 const TEMP_ORIGIN_BUNDLE_ENTRY = '.origin.bundle.harmony.js';
 const FILE_COPY_BUFFER_SIZE = 64 * 1024;
+const DOWNLOAD_CALL_TIMEOUT_MS = 10 * 60 * 1000;
 
 export class DownloadTask {
   private context: common.Context;
@@ -345,6 +346,12 @@ export class DownloadTask {
     let writeQueue = Promise.resolve();
     let lastReportedPercentage = -1;
     let lastReportedBytes = 0;
+    const deadlineAtMs = params.deadlineAtMs > 0
+      ? params.deadlineAtMs
+      : Date.now() + DOWNLOAD_CALL_TIMEOUT_MS;
+    if (deadlineAtMs <= Date.now()) {
+      throw Error('Download deadline expired before start');
+    }
 
     // Emit at most one progress event per whole-percent change (or per 256KB
     // when the total is unknown), and only from the dataReceive handler, so the
@@ -376,6 +383,7 @@ export class DownloadTask {
     // Promise (and the JS caller) forever.
     const INACTIVITY_TIMEOUT_MS = 60000;
     let watchdogTimer: number | null = null;
+    let deadlineTimer: number | null = null;
     let inactivityReject: ((error: Error) => void) | null = null;
     const clearWatchdog = () => {
       if (watchdogTimer !== null) {
@@ -484,14 +492,22 @@ export class DownloadTask {
         },
       );
 
-      const responseCode = await httpRequest.requestInStream(params.url, {
-        method: http.RequestMethod.GET,
-        readTimeout: 60000,
-        connectTimeout: 60000,
-        header: {
-          'Content-Type': 'application/octet-stream',
-        },
+      const deadlinePromise = new Promise<never>((_, reject) => {
+        deadlineTimer = setTimeout(() => {
+          reject(Error('Download exceeded its whole-call deadline'));
+        }, Math.max(1, deadlineAtMs - Date.now()));
       });
+      const responseCode = await Promise.race([
+        httpRequest.requestInStream(params.url, {
+          method: http.RequestMethod.GET,
+          readTimeout: 60000,
+          connectTimeout: 60000,
+          header: {
+            'Content-Type': 'application/octet-stream',
+          },
+        }),
+        deadlinePromise,
+      ]);
       if (responseCode > 299) {
         throw Error(`Server error: ${responseCode}`);
       }
@@ -501,7 +517,7 @@ export class DownloadTask {
       // 时 reject（unhandled rejection），且 promise 一经 reject 无法复活——
       // 即使随后数据正常流入，race 也必然以 "Download stalled" 失败。
       refreshWatchdog();
-      await Promise.race([dataEndPromise, inactivityPromise]);
+      await Promise.race([dataEndPromise, inactivityPromise, deadlinePromise]);
       const stats = await fileIo.stat(params.targetFile);
       const fileSize = stats.size;
       if (contentLength > 0 && fileSize !== contentLength) {
@@ -514,6 +530,9 @@ export class DownloadTask {
       throw error;
     } finally {
       clearWatchdog();
+      if (deadlineTimer !== null) {
+        clearTimeout(deadlineTimer);
+      }
       try {
         await closeWriter();
       } catch (closeError) {
@@ -800,6 +819,10 @@ export class DownloadTask {
   }
 
   public async execute(params: DownloadTaskParams): Promise<void> {
+    const isPatchTask =
+      params.type === DownloadTaskParams.TASK_TYPE_PATCH_FULL ||
+      params.type === DownloadTaskParams.TASK_TYPE_PATCH_FROM_APP ||
+      params.type === DownloadTaskParams.TASK_TYPE_PATCH_FROM_PPK;
     try {
       switch (params.type) {
         case DownloadTaskParams.TASK_TYPE_PATCH_FULL:
@@ -820,11 +843,7 @@ export class DownloadTask {
         default:
           throw Error(`Unknown task type: ${params.type}`);
       }
-      if (
-        params.type === DownloadTaskParams.TASK_TYPE_PATCH_FULL ||
-        params.type === DownloadTaskParams.TASK_TYPE_PATCH_FROM_APP ||
-        params.type === DownloadTaskParams.TASK_TYPE_PATCH_FROM_PPK
-      ) {
+      if (isPatchTask) {
         await this.writeFileContent(
           `${params.unzipDirectory}/${VERSION_COMPLETE_FILE_NAME}`,
           new Uint8Array(0),
@@ -836,7 +855,14 @@ export class DownloadTask {
         try {
           if (params.type === DownloadTaskParams.TASK_TYPE_PLAIN_DOWNLOAD) {
             await fileIo.unlink(params.targetFile);
-          } else {
+          } else if (
+            !fileIo.accessSync(
+              `${params.unzipDirectory}/${VERSION_COMPLETE_FILE_NAME}`,
+            ) ||
+            !fileIo.accessSync(`${params.unzipDirectory}/bundle.harmony.js`)
+          ) {
+            // Never let a failed duplicate task remove an install already
+            // handed off by an earlier task via marker + bundle.
             await this.removeDirectory(params.unzipDirectory);
           }
         } catch (cleanupError: any) {

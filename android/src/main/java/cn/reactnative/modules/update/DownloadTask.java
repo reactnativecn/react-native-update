@@ -107,14 +107,25 @@ class DownloadTask implements Runnable {
         this.hash = params.hash;
         String url = params.url;
         File writePath = params.targetFile;
-        UpdateFileUtils.ensureParentDirectory(writePath);
         Request request = new Request.Builder().url(url).build();
 
+        OkHttpClient requestClient = HTTP_CLIENT;
+        if (params.deadlineNanos > 0) {
+            long remainingNanos = params.deadlineNanos - System.nanoTime();
+            if (remainingNanos <= 0) {
+                throw new IOException("Download deadline expired before start");
+            }
+            requestClient = HTTP_CLIENT.newBuilder()
+                .callTimeout(remainingNanos, java.util.concurrent.TimeUnit.NANOSECONDS)
+                .build();
+        }
+
+        UpdateFileUtils.ensureParentDirectory(writePath);
         if (writePath.exists() && !writePath.delete()) {
             throw new IOException("Failed to replace existing file: " + writePath);
         }
 
-        try (Response response = HTTP_CLIENT.newCall(request).execute()) {
+        try (Response response = requestClient.newCall(request).execute()) {
             if (!response.isSuccessful()) {
                 throw new IOException("Server error: " + response.code() + " " + response.message());
             }
@@ -418,32 +429,53 @@ class DownloadTask implements Runnable {
             || taskType == DownloadTaskParams.TASK_TYPE_PATCH_FROM_PPK;
     }
 
+    private boolean hasCompletedPatchDirectory() {
+        return params.unzipDirectory != null
+            && new File(params.unzipDirectory, "index.bundlejs").isFile()
+            && new File(
+                params.unzipDirectory,
+                UpdateContext.VERSION_COMPLETE_FILE
+            ).isFile();
+    }
+
     @Override
     public void run() {
         int taskType = params.type;
+        final boolean alreadyCompleted = isPatchTask(taskType)
+            && hasCompletedPatchDirectory();
         try {
-            switch (taskType) {
-                case DownloadTaskParams.TASK_TYPE_PATCH_FULL:
-                    doFullPatch();
-                    break;
-                case DownloadTaskParams.TASK_TYPE_PATCH_FROM_APK:
-                    doPatchFromApk();
-                    break;
-                case DownloadTaskParams.TASK_TYPE_PATCH_FROM_PPK:
-                    doPatchFromPpk();
-                    break;
-                case DownloadTaskParams.TASK_TYPE_CLEANUP:
-                    doCleanUp();
-                    break;
-                case DownloadTaskParams.TASK_TYPE_PLAIN_DOWNLOAD:
-                    downloadFile();
-                    break;
-                default:
-                    break;
+            if (alreadyCompleted) {
+                Log.i(UpdateContext.TAG,
+                    "download task: version " + params.hash + " already completed");
+            } else {
+                switch (taskType) {
+                    case DownloadTaskParams.TASK_TYPE_PATCH_FULL:
+                        doFullPatch();
+                        break;
+                    case DownloadTaskParams.TASK_TYPE_PATCH_FROM_APK:
+                        doPatchFromApk();
+                        break;
+                    case DownloadTaskParams.TASK_TYPE_PATCH_FROM_PPK:
+                        doPatchFromPpk();
+                        break;
+                    case DownloadTaskParams.TASK_TYPE_CLEANUP:
+                        doCleanUp();
+                        break;
+                    case DownloadTaskParams.TASK_TYPE_PLAIN_DOWNLOAD:
+                        downloadFile();
+                        break;
+                    default:
+                        break;
+                }
             }
         } catch (Throwable error) {
             Log.e(UpdateContext.TAG, "download task failed", error);
-            cleanUpAfterFailure(taskType);
+            // A duplicate task must never delete a version completed by an
+            // earlier queued task. The marker + bundle pair is the ownership
+            // handoff: once present, this failure did not create that install.
+            if (!hasCompletedPatchDirectory()) {
+                cleanUpAfterFailure(taskType);
+            }
 
             if (params.listener != null) {
                 // A patch task that failed after its artifact was fully
@@ -462,7 +494,7 @@ class DownloadTask implements Runnable {
             return;
         }
 
-        if (isPatchTask(taskType)) {
+        if (isPatchTask(taskType) && !alreadyCompleted) {
             try {
                 File marker = new File(
                     params.unzipDirectory,

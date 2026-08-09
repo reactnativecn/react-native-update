@@ -17,8 +17,10 @@ export const KEY_CONFIG = 'nativeConfig';
 // 供 JS 侧复用的原始响应缓存(§10.3),同时记录请求与配置指纹以限定命中范围。
 export const KEY_RESP_CACHE = 'nativeCheckResp';
 const REQUEST_TIMEOUT_MS = 10000;
+const REQUEST_CALL_TIMEOUT_MS = 15000;
 const MAX_CHECK_HTTP_ATTEMPTS = 8;
 const START_DELAY_MS = 5000;
+const DOWNLOAD_PHASE_TIMEOUT_MS = 10 * 60 * 1000;
 const DOWNLOAD_TYPE_DIFF = 'diff';
 const DOWNLOAD_TYPE_PDIFF = 'pdiff';
 
@@ -168,6 +170,8 @@ async function runOnce(
     logger.debug(TAG, 'no endpoint reachable, giving up until next launch');
     return;
   }
+  // Anchor cache freshness to response arrival, before download/patch work.
+  const responseAtSeconds = Math.floor(Date.now() / 1000);
 
   const decisionJson = NativePatchCore.handleCheckResponse(
     responseText,
@@ -179,7 +183,13 @@ async function runOnce(
   }
   const decision = JSON.parse(decisionJson) as Decision;
   if (decision.action !== 'download') {
-    persistResponseCache(context, configJson, body, responseText);
+    persistResponseCache(
+      context,
+      configJson,
+      body,
+      responseText,
+      responseAtSeconds,
+    );
     logger.debug(TAG, `nothing to do (${decision.reason ?? ''})`);
     return;
   }
@@ -198,7 +208,13 @@ async function runOnce(
     );
   }
   if (!downloaded) {
-    persistResponseCache(context, configJson, body, responseText);
+    persistResponseCache(
+      context,
+      configJson,
+      body,
+      responseText,
+      responseAtSeconds,
+    );
     return;
   }
 
@@ -231,7 +247,13 @@ async function runOnce(
     logger.debug(TAG, `downloaded ${hash}, activation left to JS`);
   }
   // 仅在原生文件/状态工作结束后公开缓存,避免 JS 观察到响应后并发下载。
-  persistResponseCache(context, configJson, body, responseText);
+  persistResponseCache(
+    context,
+    configJson,
+    body,
+    responseText,
+    responseAtSeconds,
+  );
 }
 
 function persistResponseCache(
@@ -239,9 +261,10 @@ function persistResponseCache(
   configJson: string,
   requestBody: string,
   responseText: string,
+  responseAtSeconds: number,
 ): void {
   const cacheEntry: RespCacheEntry = {
-    ts: Math.floor(Date.now() / 1000),
+    ts: responseAtSeconds,
     body: responseText,
     request: requestBody,
     config: configJson,
@@ -266,12 +289,13 @@ async function httpRequest(
   postBody?: string,
 ): Promise<string | undefined> {
   const client = http.createHttp();
+  let callTimer: number | null = null;
   try {
     const header: Record<string, string> = { Accept: 'application/json' };
     if (postBody !== undefined) {
       header['Content-Type'] = 'application/json';
     }
-    const response = await client.request(url, {
+    const requestPromise = client.request(url, {
       method: postBody !== undefined
         ? http.RequestMethod.POST
         : http.RequestMethod.GET,
@@ -281,6 +305,12 @@ async function httpRequest(
       readTimeout: REQUEST_TIMEOUT_MS,
       expectDataType: http.HttpDataType.STRING,
     });
+    const timeoutPromise = new Promise<http.HttpResponse>((_, reject) => {
+      callTimer = setTimeout(() => {
+        reject(Error(`HTTP request exceeded ${REQUEST_CALL_TIMEOUT_MS}ms`));
+      }, REQUEST_CALL_TIMEOUT_MS);
+    });
+    const response = await Promise.race([requestPromise, timeoutPromise]);
     if (
       response.responseCode >= 200 &&
       response.responseCode < 300 &&
@@ -292,6 +322,9 @@ async function httpRequest(
   } catch (e) {
     return undefined;
   } finally {
+    if (callTimer !== null) {
+      clearTimeout(callTimer);
+    }
     client.destroy();
   }
 }
@@ -316,7 +349,7 @@ async function runCheckRequest(
   let httpAttempts = 0;
   for (const rawBase of ordered) {
     const base = normalizeEndpointBase(rawBase);
-    if (!base) {
+    if (!base || tried.has(base)) {
       continue;
     }
     if (httpAttempts++ >= MAX_CHECK_HTTP_ATTEMPTS) {
@@ -382,23 +415,39 @@ async function performAttempts(
   hash: string,
   originHash: string,
 ): Promise<boolean> {
+  const incrementalDeadline = Date.now() + DOWNLOAD_PHASE_TIMEOUT_MS;
+  let fullDeadline = 0;
   for (const attempt of attempts) {
     const type = attempt.type ?? '';
     if (type === DOWNLOAD_TYPE_DIFF && !originHash) {
       // diff 以当前运行版本为源;没有运行中的热更版本就跳过。
       continue;
     }
+    const isFullAttempt =
+      type !== DOWNLOAD_TYPE_DIFF && type !== DOWNLOAD_TYPE_PDIFF;
+    if (isFullAttempt && fullDeadline === 0) {
+      // Preserve a full 10min rescue budget even when diff/pdiff exhausted
+      // their own phase window.
+      fullDeadline = Date.now() + DOWNLOAD_PHASE_TIMEOUT_MS;
+    }
+    const deadline = isFullAttempt ? fullDeadline : incrementalDeadline;
     for (const url of attempt.urls ?? []) {
       if (!url) {
         continue;
       }
+      if (Date.now() >= deadline) {
+        if (isFullAttempt) {
+          return false;
+        }
+        break;
+      }
       try {
         if (type === DOWNLOAD_TYPE_DIFF) {
-          await context.downloadPatchFromPpk(url, hash, originHash);
+          await context.downloadPatchFromPpk(url, hash, originHash, deadline);
         } else if (type === DOWNLOAD_TYPE_PDIFF) {
-          await context.downloadPatchFromPackage(url, hash);
+          await context.downloadPatchFromPackage(url, hash, deadline);
         } else {
-          await context.downloadFullUpdate(url, hash);
+          await context.downloadFullUpdate(url, hash, deadline);
         }
         return true;
       } catch (e) {

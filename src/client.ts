@@ -270,8 +270,8 @@ export class Pushy {
     this.syncNativeConfig();
   };
 
-  /** Serialize the subset of options used by the native cold-start check. */
-  private getNativeConfigJson = (): string | undefined => {
+  /** Build the subset of options used by the native cold-start check. */
+  private getNativeConfig = (): Record<string, unknown> | undefined => {
     if (
       Platform.OS === 'web' ||
       typeof PushyModule.syncNativeConfig !== 'function'
@@ -284,7 +284,7 @@ export class Pushy {
     if (!appKey || !server?.main?.length) {
       return undefined;
     }
-    return JSON.stringify({
+    return {
       appKey,
       packageVersion: this.getEffectivePackageVersion(),
       endpoints: server.main,
@@ -298,7 +298,12 @@ export class Pushy {
           : 'none',
       rnu: cInfo.rnu,
       rn: cInfo.rn,
-    });
+    };
+  };
+
+  private getNativeConfigJson = (): string | undefined => {
+    const config = this.getNativeConfig();
+    return config ? JSON.stringify(config) : undefined;
   };
 
   private flushNativeConfig = () => {
@@ -317,7 +322,6 @@ export class Pushy {
     } catch (e: any) {
       this.nativeConfigSyncInFlight = false;
       log('syncNativeConfig failed:', e?.message || e);
-      this.flushNativeConfig();
       return;
     }
     syncResult
@@ -335,9 +339,13 @@ export class Pushy {
 
   private syncNativeConfig = () => {
     const configJson = this.getNativeConfigJson();
-    if (!configJson || configJson === this.syncedNativeConfigJson) {
+    if (!configJson) {
       return;
     }
+    // Always record the latest desired value, even when it matches the last
+    // completed write. Example: A synced -> B in flight -> options revert to
+    // A. Comparing only with synced(A) would drop the revert and leave native
+    // storage at B after that in-flight write completes.
     // Coalesce rapid setOptions calls, but serialize bridge writes so an older
     // completion can never overwrite the newest desired configuration.
     this.pendingNativeConfigJson = configJson;
@@ -348,7 +356,7 @@ export class Pushy {
   getEffectivePackageVersion = () =>
     this.options.overridePackageVersion || packageVersion;
 
-  private jsonStringsEqual = (left: string, right: string): boolean => {
+  private jsonValuesEqual = (left: unknown, right: unknown): boolean => {
     const compare = (a: unknown, b: unknown): boolean => {
       if (a === b) {
         return true;
@@ -371,8 +379,14 @@ export class Pushy {
       }
       const leftObject = a as Record<string, unknown>;
       const rightObject = b as Record<string, unknown>;
-      const leftKeys = Object.keys(leftObject).sort();
-      const rightKeys = Object.keys(rightObject).sort();
+      // Match JSON.stringify semantics for request extras: object properties
+      // whose value is undefined are omitted from the wire fingerprint.
+      const leftKeys = Object.keys(leftObject)
+        .filter((key) => leftObject[key] !== undefined)
+        .sort();
+      const rightKeys = Object.keys(rightObject)
+        .filter((key) => rightObject[key] !== undefined)
+        .sort();
       return (
         leftKeys.length === rightKeys.length &&
         leftKeys.every(
@@ -383,11 +397,7 @@ export class Pushy {
       );
     };
 
-    try {
-      return compare(JSON.parse(left), JSON.parse(right));
-    } catch {
-      return false;
-    }
+    return compare(left, right);
   };
 
   private providerMounted = false;
@@ -712,7 +722,7 @@ export class Pushy {
    * failure falls through to a normal network check.
    */
   private readNativeCheckCache = async (
-    requestBody: string
+    requestBody: Record<string, any>
   ): Promise<CheckResult | undefined> => {
     try {
       if (__DEV__ || typeof PushyModule.getNativeCheckCache !== 'function') {
@@ -723,15 +733,21 @@ export class Pushy {
         return undefined;
       }
       const entry = JSON.parse(raw);
-      const configJson = this.getNativeConfigJson();
+      const config = this.getNativeConfig();
+      const cachedRequest =
+        typeof entry?.request === 'string'
+          ? JSON.parse(entry.request)
+          : undefined;
+      const cachedConfig =
+        typeof entry?.config === 'string'
+          ? JSON.parse(entry.config)
+          : undefined;
       if (
         typeof entry?.ts !== 'number' ||
         typeof entry?.body !== 'string' ||
-        typeof entry?.request !== 'string' ||
-        !this.jsonStringsEqual(entry.request, requestBody) ||
-        !configJson ||
-        typeof entry?.config !== 'string' ||
-        !this.jsonStringsEqual(entry.config, configJson)
+        !this.jsonValuesEqual(cachedRequest, requestBody) ||
+        !config ||
+        !this.jsonValuesEqual(cachedConfig, config)
       ) {
         return undefined;
       }
@@ -905,7 +921,11 @@ export class Pushy {
       // the promise so no await lands between the dedup window above and the
       // lastRespJson assignment below (the JS2-1 double-send lesson).
       const respJsonPromise = (async (): Promise<CheckResult> => {
-        const cached = await this.readNativeCheckCache(stringifyBody);
+        // While bundleHash prefetch is still pending, the JS request omits
+        // that key whereas the native request always includes its synchronously
+        // computed value. That narrow first-launch window intentionally misses
+        // the cache rather than delaying checkUpdate for hashing.
+        const cached = await this.readNativeCheckCache(fetchBody);
         return cached ?? (await this.fetchCheckResult(fetchPayload));
       })();
       this.lastRespJson = respJsonPromise;
@@ -960,6 +980,16 @@ export class Pushy {
         log(`current hash ${currentVersion}, ignored`);
       } else if (decision.reason === 'rolledBack') {
         log(`rolledback hash ${rolledBackVersion}, ignored`);
+      } else if (decision.reason === 'noArtifact') {
+        // A server response that advertises an update but provides no usable
+        // artifact is a bad release signal, not an ordinary no-update result.
+        // Keep the user flow silent, but restore the diagnostic/telemetry event
+        // that the old empty-attempt path emitted.
+        this.report({
+          type: 'errorUpdate',
+          data: { newVersion: updateInfo.hash || '' },
+          message: 'update response contains no downloadable artifact',
+        });
       }
       return;
     }

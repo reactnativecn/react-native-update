@@ -40,6 +40,7 @@ const createClient = (options: Record<string, any> = {}) => {
       async (): Promise<CheckResult | undefined> => ({ ...updateResult })
     ),
     notifyAfterCheckUpdate: mock(() => {}),
+    report: mock(() => {}),
     markSuccess: mock(() => {}),
     switchVersion: mock(async () => {}),
     switchVersionLater: mock(async () => {}),
@@ -126,6 +127,23 @@ describe('UpdateProvider rendering', () => {
       await flush();
     });
     expect(client.switchVersion).toHaveBeenCalledWith('next-hash');
+  });
+
+  test('a hash-less update is reported but never shown as an actionable alert', async () => {
+    const client = createClient({ updateStrategy: 'alwaysAlert' });
+    client.checkUpdate.mockImplementation(async () => ({
+      update: true,
+      name: 'broken rollout entry',
+    }));
+
+    await renderProvider(client);
+
+    expect(client.report).toHaveBeenCalledWith({
+      type: 'errorUpdate',
+      message: 'update response is missing a version hash',
+    });
+    expect(client.downloadUpdate).not.toHaveBeenCalled();
+    expect(mockAlert).not.toHaveBeenCalled();
   });
 
   test('silentAndNow strategy downloads and switches without alerts', async () => {

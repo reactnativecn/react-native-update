@@ -223,7 +223,7 @@ export const UpdateProvider = ({
         // known updateInfo instead of overwriting it with an empty object.
         return;
       }
-      const info = resolveCheckResult(
+      let info = resolveCheckResult(
         rootInfo,
         {
           packageVersion: client.getEffectivePackageVersion(),
@@ -232,6 +232,19 @@ export const UpdateProvider = ({
         },
         log
       );
+      if (
+        info.update &&
+        (typeof info.hash !== 'string' || info.hash.length === 0)
+      ) {
+        // A malformed rollout/root entry must not produce an alert whose
+        // confirm button can never download anything. Surface it to the
+        // developer telemetry/logger and present it to the app as no update.
+        client.report({
+          type: 'errorUpdate',
+          message: 'update response is missing a version hash',
+        });
+        info = { upToDate: true };
+      }
       if (info.update) {
         info.description = info.description ?? '';
       }

@@ -335,18 +335,22 @@ appKey、server endpoints、更新策略今天只活在 JS 的 `ClientOptions` �
   packageVersion / buildTime / uuid / supportedDiffVersion / bundleHash 缓存）
 → BuildCheckRequestBody（bundleHash 同步读缓存，缺省省略字段）
 → OrderEndpointCandidates(endpoints, 原生随机数)
-→ 顺序请求，单个超时 10s、整轮 HTTP 最多 8 次；全失败 → 拉 queryUrls
+→ 顺序请求，单个 connect/read 超时 10s、whole-call 15s、整轮 HTTP 最多
+  8 次；全失败 → 拉 queryUrls
   （任一成功即用）合并新候选，排除已失败的，再顺序一轮；仍失败 → 本轮放弃
 → HandleCheckResponse(响应原文, identity, isDev=false)（已实现，含 info 透出）
 → action=download：按 attempts 顺序走现有下载器（diff→pdiff→full，
-  testUrls 语义由原生逐个尝试实现）；成功 → setLocalHashInfo(info 的
+  testUrls 语义由原生逐个尝试实现）；diff/pdiff 共享 600s 绝对 deadline，
+  full 另有 600s 救砖预算；同 hash 完整版本在任务真正开跑时再次跳过，失败
+  清理不得删除已有 `.pushy-complete` 安装；成功 → setLocalHashInfo(info 的
   name/description/metaInfo) → 按 afterDownload 决定是否 setNeedUpdate
-→ 原生处理完成后，将响应原文 + 时间戳 + 请求/配置指纹落盘（§10.3）
+→ 原生处理完成后，将响应原文 + **响应到达时刻** + 请求/配置指纹落盘
+  （§10.3；下载耗时不得让旧响应获得新的时间戳）
 ```
 
 ### 10.3 与 JS 的去重（§6 的落地形态）
 
-首版**原生只写缓存**：响应原文 + 时间戳 + 请求/配置指纹落到固定文件。紧
+首版**原生只写缓存**：响应原文 + 响应到达时间戳 + 请求/配置指纹落到固定文件。紧
 随其后的 JS 小改动：`checkUpdate` 先读该缓存，时间戳新鲜（暂定 2 分钟）
 则直接复用不发请求。改造前的过渡期是双检查——多一次网络请求，服务端有
 缓存，无害。

@@ -324,6 +324,15 @@ export class UpdateContext {
 
   private async executeTask(params: DownloadTaskParams): Promise<void> {
     await this.enqueueSerialTask(() => {
+      const isPatchTask =
+        params.type === DownloadTaskParams.TASK_TYPE_PATCH_FULL ||
+        params.type === DownloadTaskParams.TASK_TYPE_PATCH_FROM_APP ||
+        params.type === DownloadTaskParams.TASK_TYPE_PATCH_FROM_PPK;
+      // Re-check only when this queued job actually starts. A JS download may
+      // have completed while the cold-start duplicate waited behind it.
+      if (isPatchTask && this.hasDownloadedVersion(params.hash)) {
+        return Promise.resolve();
+      }
       const downloadTask = new DownloadTask(this.context);
       return downloadTask.execute(params);
     });
@@ -455,7 +464,11 @@ export class UpdateContext {
     this.trace('resetToPackagedBundle:after');
   }
 
-  public async downloadFullUpdate(url: string, hash: string): Promise<void> {
+  public async downloadFullUpdate(
+    url: string,
+    hash: string,
+    deadlineAtMs: number = 0,
+  ): Promise<void> {
     try {
       const params = this.createTaskParams(
         DownloadTaskParams.TASK_TYPE_PATCH_FULL,
@@ -464,6 +477,7 @@ export class UpdateContext {
       );
       params.targetFile = `${this.rootDir}/${hash}.ppk`;
       params.unzipDirectory = `${this.rootDir}/${hash}`;
+      params.deadlineAtMs = deadlineAtMs;
       await this.executeTask(params);
     } catch (e) {
       console.error('Failed to download full update:', e);
@@ -489,6 +503,7 @@ export class UpdateContext {
     url: string,
     hash: string,
     originHash: string,
+    deadlineAtMs: number = 0,
   ): Promise<void> {
     const params = this.createTaskParams(
       DownloadTaskParams.TASK_TYPE_PATCH_FROM_PPK,
@@ -499,12 +514,14 @@ export class UpdateContext {
     params.targetFile = `${this.rootDir}/${originHash}_${hash}.ppk.patch`;
     params.unzipDirectory = `${this.rootDir}/${hash}`;
     params.originDirectory = `${this.rootDir}/${params.originHash}`;
+    params.deadlineAtMs = deadlineAtMs;
     await this.executeTask(params);
   }
 
   public async downloadPatchFromPackage(
     url: string,
     hash: string,
+    deadlineAtMs: number = 0,
   ): Promise<void> {
     try {
       const params = this.createTaskParams(
@@ -514,6 +531,7 @@ export class UpdateContext {
       );
       params.targetFile = `${this.rootDir}/${hash}.app.patch`;
       params.unzipDirectory = `${this.rootDir}/${hash}`;
+      params.deadlineAtMs = deadlineAtMs;
       return await this.executeTask(params);
     } catch (e) {
       console.error('Failed to download package patch:', e);
@@ -565,60 +583,70 @@ export class UpdateContext {
   public getBundleUrl() {
     UpdateContext.isUsingBundleUrl = true;
     this.trace('getBundleUrl:enter');
-    const stateBeforeLaunch = this.getStateSnapshot();
-    const launchState = NativePatchCore.runStateCore(
-      STATE_OP_RESOLVE_LAUNCH,
-      stateBeforeLaunch,
-      '',
-      UpdateContext.ignoreRollback,
-      true,
-    );
-    if (launchState.didRollback) {
-      // The crash-protection rollback: the new version never called
-      // markSuccess. Keep this visible in release logs.
-      console.error(
-        `Version ${stateBeforeLaunch.currentVersion} was not marked as successful,` +
-          ` rolled back to ${launchState.currentVersion}`,
+    let nativeCheckRolledBackVersion = '';
+    try {
+      const stateBeforeLaunch = this.getStateSnapshot();
+      const launchState = NativePatchCore.runStateCore(
+        STATE_OP_RESOLVE_LAUNCH,
+        stateBeforeLaunch,
+        '',
+        UpdateContext.ignoreRollback,
+        true,
       );
-    }
-    if (launchState.didRollback || launchState.consumedFirstTime) {
-      this.persistState(launchState, {
-        markFirstLoadMarker: launchState.consumedFirstTime,
-      });
-    }
-    if (launchState.consumedFirstTime) {
-      UpdateContext.ignoreRollback = true;
-    }
-    this.trace(
-      `getBundleUrl:load=${launchState.loadVersion}` +
-        ` consumed=${launchState.consumedFirstTime}` +
-        ` rollback=${launchState.didRollback}`,
-    );
-
-    let version = launchState.loadVersion || '';
-    // Guard the rollback chain against cycles: a corrupted state returning an
-    // already-visited version would otherwise spin this loop forever during
-    // startup (Android has the same guard).
-    const visitedVersions = new Set<string>();
-    while (version && !visitedVersions.has(version)) {
-      visitedVersions.add(version);
-      const bundleFile = this.getBundlePath(version);
-      try {
-        if (!fileIo.accessSync(bundleFile)) {
-          console.error(`Bundle version ${version} not found.`);
-          version = this.rollBack();
-          continue;
-        }
-        UpdateContext.launchVersion = version;
-        scheduleNativeCheck(this, this.rolledBackVersion());
-        return bundleFile;
-      } catch (e) {
-        console.error('Failed to access bundle file:', e);
-        version = this.rollBack();
+      nativeCheckRolledBackVersion = launchState.rolledBackVersion || '';
+      if (launchState.didRollback) {
+        // The crash-protection rollback: the new version never called
+        // markSuccess. Keep this visible in release logs.
+        console.error(
+          `Version ${stateBeforeLaunch.currentVersion} was not marked as successful,` +
+            ` rolled back to ${launchState.currentVersion}`,
+        );
       }
+      if (launchState.didRollback || launchState.consumedFirstTime) {
+        this.persistState(launchState, {
+          markFirstLoadMarker: launchState.consumedFirstTime,
+        });
+      }
+      if (launchState.consumedFirstTime) {
+        UpdateContext.ignoreRollback = true;
+      }
+      this.trace(
+        `getBundleUrl:load=${launchState.loadVersion}` +
+          ` consumed=${launchState.consumedFirstTime}` +
+          ` rollback=${launchState.didRollback}`,
+      );
+
+      let version = launchState.loadVersion || '';
+      // Guard the rollback chain against cycles: a corrupted state returning an
+      // already-visited version would otherwise spin this loop forever during
+      // startup (Android has the same guard).
+      const visitedVersions = new Set<string>();
+      while (version && !visitedVersions.has(version)) {
+        visitedVersions.add(version);
+        const bundleFile = this.getBundlePath(version);
+        try {
+          if (!fileIo.accessSync(bundleFile)) {
+            console.error(`Bundle version ${version} not found.`);
+            version = this.rollBack();
+            nativeCheckRolledBackVersion = this.rolledBackVersion();
+            continue;
+          }
+          UpdateContext.launchVersion = version;
+          nativeCheckRolledBackVersion = this.rolledBackVersion();
+          return bundleFile;
+        } catch (e) {
+          console.error('Failed to access bundle file:', e);
+          version = this.rollBack();
+          nativeCheckRolledBackVersion = this.rolledBackVersion();
+        }
+      }
+      nativeCheckRolledBackVersion = this.rolledBackVersion();
+      return '';
+    } finally {
+      // State corruption is exactly when the native rescue check is needed;
+      // schedule even if state parsing/rollback throws before a normal exit.
+      scheduleNativeCheck(this, nativeCheckRolledBackVersion);
     }
-    scheduleNativeCheck(this, this.rolledBackVersion());
-    return '';
   }
 
   public getCurrentVersion(): string {

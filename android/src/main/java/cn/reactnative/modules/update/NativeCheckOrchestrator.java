@@ -30,7 +30,7 @@ final class NativeCheckOrchestrator {
     // exact logical request and native config that produced it.
     static final String KEY_RESP_CACHE = "nativeCheckResp";
     private static final int MAX_CHECK_HTTP_ATTEMPTS = 8;
-    private static final long DOWNLOAD_ROUND_TIMEOUT_SECONDS = 600;
+    private static final long DOWNLOAD_PHASE_TIMEOUT_SECONDS = 600;
 
     private static final AtomicBoolean scheduled = new AtomicBoolean(false);
 
@@ -144,6 +144,9 @@ final class NativeCheckOrchestrator {
                 "native check: no endpoint reachable, giving up until next launch");
             return;
         }
+        // Cache freshness is anchored to when the server response arrived,
+        // not to when a potentially long download/patch/activation finished.
+        final long responseAtSeconds = System.currentTimeMillis() / 1000;
 
         String decisionJson = NativeUpdateFlow.handleCheckResponse(
             responseText, identity.toString(), config.optString("afterDownload", ""));
@@ -152,7 +155,8 @@ final class NativeCheckOrchestrator {
         }
         JSONObject decision = new JSONObject(decisionJson);
         if (!"download".equals(decision.optString("action"))) {
-            persistResponseCache(context, configJson, body, responseText);
+            persistResponseCache(
+                context, configJson, body, responseText, responseAtSeconds);
             Log.i(UpdateContext.TAG,
                 "native check: nothing to do (" + decision.optString("reason") + ")");
             return;
@@ -170,7 +174,8 @@ final class NativeCheckOrchestrator {
         if (!downloaded) {
             // The native attempt has finished, so JS may safely reuse the
             // response and retry through its own strategy chain.
-            persistResponseCache(context, configJson, body, responseText);
+            persistResponseCache(
+                context, configJson, body, responseText, responseAtSeconds);
             return;
         }
 
@@ -205,17 +210,19 @@ final class NativeCheckOrchestrator {
         }
         // Publish the response only after native file/state work is complete;
         // otherwise JS can observe it and start a competing download.
-        persistResponseCache(context, configJson, body, responseText);
+        persistResponseCache(
+            context, configJson, body, responseText, responseAtSeconds);
     }
 
     private static void persistResponseCache(
         UpdateContext context,
         String configJson,
         String requestBody,
-        String responseText
+        String responseText,
+        long responseAtSeconds
     ) throws JSONException {
         JSONObject cacheEntry = new JSONObject();
-        cacheEntry.put("ts", System.currentTimeMillis() / 1000);
+        cacheEntry.put("ts", responseAtSeconds);
         cacheEntry.put("body", responseText);
         cacheEntry.put("request", requestBody);
         cacheEntry.put("config", configJson);
@@ -287,13 +294,12 @@ final class NativeCheckOrchestrator {
         int httpAttempts = 0;
         for (int i = 0; i < ordered.length(); i++) {
             String base = normalizeEndpointBase(ordered.optString(i, ""));
-            if (base.isEmpty()) {
+            if (base.isEmpty() || !tried.add(base)) {
                 continue;
             }
             if (httpAttempts++ >= MAX_CHECK_HTTP_ATTEMPTS) {
                 return null;
             }
-            tried.add(base);
             String response = httpRequest(base + "/checkUpdate/" + appKey, body);
             if (isValidCheckResponse(response)) {
                 return response;
@@ -347,8 +353,9 @@ final class NativeCheckOrchestrator {
         if (attempts == null) {
             return false;
         }
-        final long deadlineNanos = System.nanoTime()
-            + TimeUnit.SECONDS.toNanos(DOWNLOAD_ROUND_TIMEOUT_SECONDS);
+        final long incrementalDeadlineNanos = System.nanoTime()
+            + TimeUnit.SECONDS.toNanos(DOWNLOAD_PHASE_TIMEOUT_SECONDS);
+        long fullDeadlineNanos = 0;
         for (int i = 0; i < attempts.length(); i++) {
             JSONObject attempt = attempts.optJSONObject(i);
             if (attempt == null) {
@@ -359,6 +366,15 @@ final class NativeCheckOrchestrator {
                 // diff patches from the running version; none is running.
                 continue;
             }
+            final boolean isFullAttempt = "full".equals(type);
+            if (isFullAttempt && fullDeadlineNanos == 0) {
+                // Incremental failures must not consume the last-resort full
+                // download's budget. Each phase gets one bounded 10min window.
+                fullDeadlineNanos = System.nanoTime()
+                    + TimeUnit.SECONDS.toNanos(DOWNLOAD_PHASE_TIMEOUT_SECONDS);
+            }
+            final long deadlineNanos = isFullAttempt
+                ? fullDeadlineNanos : incrementalDeadlineNanos;
             JSONArray urls = attempt.optJSONArray("urls");
             if (urls == null) {
                 continue;
@@ -367,6 +383,15 @@ final class NativeCheckOrchestrator {
                 String url = urls.optString(j, "");
                 if (url.isEmpty()) {
                     continue;
+                }
+                // Check before enqueueing: once the phase budget is gone we
+                // must not launch an orphan download that outlives the round.
+                long remainingNanos = deadlineNanos - System.nanoTime();
+                if (remainingNanos <= 0) {
+                    if (isFullAttempt) {
+                        return false;
+                    }
+                    break;
                 }
                 final CountDownLatch latch = new CountDownLatch(1);
                 final AtomicBoolean succeeded = new AtomicBoolean(false);
@@ -387,21 +412,23 @@ final class NativeCheckOrchestrator {
                         }
                     };
                 if ("diff".equals(type)) {
-                    context.downloadPatchFromPpk(url, hash, originHash, listener);
+                    context.downloadPatchFromPpk(
+                        url, hash, originHash, listener, deadlineNanos);
                 } else if ("pdiff".equals(type)) {
-                    context.downloadPatchFromApk(url, hash, listener);
+                    context.downloadPatchFromApk(
+                        url, hash, listener, deadlineNanos);
                 } else {
-                    context.downloadFullUpdate(url, hash, listener);
+                    context.downloadFullUpdate(
+                        url, hash, listener, deadlineNanos);
                 }
                 try {
-                    // One deadline covers the complete diff→pdiff→full round;
-                    // each DownloadTask also has its own per-call timeout.
-                    long remainingNanos = deadlineNanos - System.nanoTime();
-                    if (remainingNanos <= 0
-                        || !latch.await(remainingNanos, TimeUnit.NANOSECONDS)) {
+                    if (!latch.await(remainingNanos, TimeUnit.NANOSECONDS)) {
                         Log.w(UpdateContext.TAG,
-                            "native check: download round timed out during " + type);
-                        return false;
+                            "native check: download phase timed out during " + type);
+                        if (isFullAttempt) {
+                            return false;
+                        }
+                        break;
                     }
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();

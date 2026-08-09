@@ -20,6 +20,9 @@ class DownloadTaskParams {
     String      originHash;
     // TASK_TYPE_CLEANUP only: entries younger than this survive; 0 = delete all
     int         maxAgeDays = 3;
+    // Absolute System.nanoTime deadline for orchestrated cold-start downloads;
+    // 0 keeps the normal public API's 10-minute per-call timeout.
+    long        deadlineNanos;
     File        targetFile;
     File        unzipDirectory;
     File        originDirectory;

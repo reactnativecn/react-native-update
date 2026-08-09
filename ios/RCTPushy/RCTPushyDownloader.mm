@@ -17,6 +17,7 @@ static NSString *const RCTPushyDownloaderErrorDomain = @"cn.reactnative.pushy";
 @implementation RCTPushyDownloader
 
 + (void)download:(NSString *)downloadPath savePath:(NSString *)savePath
+timeoutInterval:(NSTimeInterval)timeoutInterval
 progressHandler:(void (^)(long long receivedBytes, long long totalBytes))progressHandler
 completionHandler:(void (^)(NSString *path, NSError *error))completionHandler
 {
@@ -28,10 +29,10 @@ completionHandler:(void (^)(NSString *path, NSError *error))completionHandler
     downloader.completionHandler = completionHandler;
     downloader.savePath = savePath;
 
-    [downloader startDownload:downloadPath];
+    [downloader startDownload:downloadPath timeoutInterval:timeoutInterval];
 }
 
-- (void)startDownload:(NSString *)path
+- (void)startDownload:(NSString *)path timeoutInterval:(NSTimeInterval)timeoutInterval
 {
     NSURL *url = [NSURL URLWithString:path];
     if (url == nil) {
@@ -50,7 +51,7 @@ completionHandler:(void (^)(NSString *path, NSError *error))completionHandler
     // Android's 10min callTimeout — 300s made a 30MB full package on a slow
     // (<100KB/s) network fail on iOS while succeeding on Android.
     sessionConfig.timeoutIntervalForRequest = 30;
-    sessionConfig.timeoutIntervalForResource = 600;
+    sessionConfig.timeoutIntervalForResource = MAX(1, timeoutInterval);
     self.session = [NSURLSession sessionWithConfiguration:sessionConfig
                                                  delegate:self
                                             delegateQueue:nil];

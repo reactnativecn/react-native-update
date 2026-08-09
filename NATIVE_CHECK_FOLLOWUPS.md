@@ -3,9 +3,31 @@
 > 来源:`agent/harden-native-check-update` 分支两轮评审
 > （f679e11 初评 10 项 → 181952a 修 4 缓解 1;181952a 复评又出 10 项,
 > 其中 6 项为修复自身引入,已并入下文）。
-> 本文只记**仍开放**的项;已修复项不再列。按优先级排序,每项含现状、
-> 风险与建议修法。发版(10.51.0)前建议至少处理 P1;P2 可随小版本;
-> P3/P4 显式拍板"接受"也算关闭。
+> 本文最初只记录开放项。2026-08-10 已完成代码项复核与修复；下文保留
+> 原始问题描述用于追溯，处理结论以紧随其后的状态表为准。发版动作仍保留在
+> 文末清单中，不因代码合入而自动视为完成。
+
+## 2026-08-10 处理结论
+
+| 项目 | 结论 | 落地方式 |
+|---|---|---|
+| P1 Android/Harmony 重复下载 | 已修复 | 任务真正开始时复查 `.pushy-complete` + bundle；失败清理检测到完整安装时不删目录。iOS 注册表同时升级为按 hash + artifact type 合流/排队 |
+| P2 缓存 `ts` 锚点 | 已修复 | 三端在 check 响应到达时捕获时间，下载、补丁和激活结束后仍写该时间 |
+| P2 下载轮次 deadline | 已修复 | 三端统一为 diff/pdiff 共享 600s、full 独享 600s；发起前检查绝对 deadline，下载任务在真正开跑时按剩余预算设置 whole-call timeout |
+| P2 JS 配置回退竞态 | 已修复 | 在途写入期间仍记录与 `synced` 相同的最新期望值；B 完成后会继续把 A 写回；删除同步 throw 路径的无效递归 |
+| P2 iOS 合流语义 | 已修复 | 同类型下载共享结果并向所有 join 者广播进度；不同类型按 hash 排队，避免把 diff 的失败错误归给 full |
+| P3 `.pushy-complete` 迁移 | 接受一次性重下 | 不把仅有 bundle 的旧目录推断为完整安装，避免把半解压目录误标为成功；10.51.0 发布说明仍需明确这一流量成本 |
+| P3 状态解析异常不调度 | 已修复 | 三端启动解析改为 finally 调度；正常路径保留最终 rollback 快照，异常路径使用空快照 |
+| P3 无 hash 死弹窗 | 已修复 | Provider 将无 hash 的 update 降级为开发者日志/遥测与 `upToDate`，不再展示不可执行的确认按钮 |
+| P3 `noArtifact` 静默 | 已修复 | 保持终端用户无感，同时恢复 `errorUpdate` 报告并携带目标 hash |
+| P4 bundleHash 窗口 | 接受并记录 | `readNativeCheckCache` 已注明首启预取未完成时有意 cache miss，不为 hash 阻塞检查 |
+| P4 缓存冗余解析 | 已修复 | 直接传入现成 `fetchBody`/native config 对象，只解析缓存中的字符串一侧 |
+| P4 endpoint 斜杠重复 | 已修复 | 三端首轮请求也先查规范化后的 `tried` 集合，重复项不计入 8 次上限 |
+| P4 Harmony 整请求超时 | 已修复 | check HTTP 增加 15s whole-call cap；更新下载增加绝对 deadline 并在超时后销毁请求 |
+
+代码验证基线：JS 完整回归 172 项、Biome/TypeScript/Harmony strict 类型检查、
+77 项 flow core ASan/UBSan、29 项 patch core、Android Release Java 编译、
+iOS Release simulator 构建均通过。
 
 ---
 

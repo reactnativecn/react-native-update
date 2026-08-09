@@ -91,8 +91,8 @@ static NSString *pushyLaunchVersion = nil;
 // but they must still share one download per target hash. Without this
 // process-wide registry two NSURLSessionDownloadTasks race over the same
 // archive path and the later unzip can delete the first task's valid output.
-static NSMutableDictionary<NSString *, NSMutableArray *> *PushyInFlightDownloads(void) {
-    static NSMutableDictionary<NSString *, NSMutableArray *> *downloads;
+static NSMutableDictionary<NSString *, NSMutableDictionary *> *PushyInFlightDownloads(void) {
+    static NSMutableDictionary<NSString *, NSMutableDictionary *> *downloads;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         downloads = [NSMutableDictionary dictionary];
@@ -100,25 +100,79 @@ static NSMutableDictionary<NSString *, NSMutableArray *> *PushyInFlightDownloads
     return downloads;
 }
 
-static BOOL PushyRegisterDownload(NSString *hash, void (^callback)(NSError *)) {
+typedef NS_ENUM(NSInteger, PushyDownloadRegistration) {
+    PushyDownloadRegistrationOwner,
+    PushyDownloadRegistrationJoined,
+    PushyDownloadRegistrationDeferred,
+};
+
+static PushyDownloadRegistration PushyRegisterDownload(
+    NSString *hash,
+    NSInteger type,
+    void (^callback)(NSError *),
+    void (^progress)(long long, long long),
+    void (^deferredStart)(void)
+) {
     NSMutableDictionary *downloads = PushyInFlightDownloads();
     @synchronized (downloads) {
-        NSMutableArray *callbacks = downloads[hash];
-        if (callbacks != nil) {
-            [callbacks addObject:[callback copy]];
-            return NO;
+        NSMutableDictionary *entry = downloads[hash];
+        if (entry != nil) {
+            if ([entry[@"type"] integerValue] == type) {
+                [entry[@"callbacks"] addObject:[callback copy]];
+                if (progress != nil) {
+                    [entry[@"progress"] addObject:[progress copy]];
+                }
+                return PushyDownloadRegistrationJoined;
+            }
+            // A diff failure must not settle a joined full request. Queue the
+            // different artifact type behind the owner; once restarted it
+            // registers normally (and re-checks the completion marker).
+            [entry[@"deferred"] addObject:[deferredStart copy]];
+            return PushyDownloadRegistrationDeferred;
         }
-        downloads[hash] = [NSMutableArray arrayWithObject:[callback copy]];
-        return YES;
+        NSMutableArray *progressHandlers = [NSMutableArray array];
+        if (progress != nil) {
+            [progressHandlers addObject:[progress copy]];
+        }
+        downloads[hash] = [@{
+            @"type": @(type),
+            @"callbacks": [NSMutableArray arrayWithObject:[callback copy]],
+            @"progress": progressHandlers,
+            @"deferred": [NSMutableArray array],
+        } mutableCopy];
+        return PushyDownloadRegistrationOwner;
+    }
+}
+
+static void PushyReportDownloadProgress(
+    NSString *hash, long long received, long long total
+) {
+    NSMutableDictionary *downloads = PushyInFlightDownloads();
+    NSArray *handlers = nil;
+    @synchronized (downloads) {
+        handlers = [downloads[hash][@"progress"] copy];
+    }
+    for (id value in handlers) {
+        void (^handler)(long long, long long) =
+            (void (^)(long long, long long))value;
+        handler(received, total);
     }
 }
 
 static void PushyFinishDownload(NSString *hash, NSError *error) {
     NSMutableDictionary *downloads = PushyInFlightDownloads();
     NSArray *callbacks = nil;
+    NSArray *deferred = nil;
     @synchronized (downloads) {
-        callbacks = [downloads[hash] copy];
+        callbacks = [downloads[hash][@"callbacks"] copy];
+        deferred = [downloads[hash][@"deferred"] copy];
         [downloads removeObjectForKey:hash];
+    }
+    // Establish the next (different-type) owner before waking the completed
+    // owner's callbacks; otherwise its strategy loop could race the waiter.
+    for (id value in deferred) {
+        void (^start)(void) = (void (^)(void))value;
+        start();
     }
     for (id value in callbacks) {
         void (^callback)(NSError *) = (void (^)(NSError *))value;
@@ -135,8 +189,11 @@ static os_unfair_lock pushyStateLock = OS_UNFAIR_LOCK_INIT;
 
 static void PushyWithStateLock(void (NS_NOESCAPE ^block)(void)) {
     os_unfair_lock_lock(&pushyStateLock);
-    block();
-    os_unfair_lock_unlock(&pushyStateLock);
+    @try {
+        block();
+    } @finally {
+        os_unfair_lock_unlock(&pushyStateLock);
+    }
 }
 
 static std::string PushyToStdString(NSString *value) {
@@ -349,7 +406,8 @@ static void PushyApplyStateToDefaults(NSUserDefaults *defaults, const pushy::sta
 + (void)runOnce:(NSString *)launchRolledBackVersion;
 + (void)persistResponseCache:(NSString *)responseText
                      request:(NSString *)requestBody
-                      config:(NSString *)configJson;
+                      config:(NSString *)configJson
+                  responseAt:(long long)responseAtSeconds;
 @end
 
 // Shared by the getBundleHash RCT method and the native cold-start check.
@@ -397,8 +455,9 @@ RCT_EXPORT_MODULE(RCTPushy);
 {
     __block NSURL *resolvedURL = nil;
     __block NSString *launchRolledBackVersion = nil;
-    PushyWithStateLock(^{
-        NSUserDefaults *defaults = PushyDefaults();
+    @try {
+        PushyWithStateLock(^{
+            NSUserDefaults *defaults = PushyDefaults();
 
         NSString *curPackageVersion = [RCTPushy packageVersion];
         NSString *curBuildTime = [RCTPushy buildTime];
@@ -464,11 +523,15 @@ RCT_EXPORT_MODULE(RCTPushy);
         // Capture before constantsToExport consumes this one-shot marker.
         // The delayed native check must never forceBoot the version that this
         // launch just rolled back.
-        launchRolledBackVersion = PushyFromStdString(state.rolled_back_version);
-    });
-
-    [RCTPushyOrchestrator scheduleFromColdStart:launchRolledBackVersion];
-    return resolvedURL ?: [RCTPushy binaryBundleURL];
+            launchRolledBackVersion = PushyFromStdString(state.rolled_back_version);
+        });
+        return resolvedURL ?: [RCTPushy binaryBundleURL];
+    } @finally {
+        // State corruption is exactly when the rescue path matters most. If
+        // resolution throws before a snapshot exists, nil safely omits only
+        // this launch's rollback guard instead of disabling the check.
+        [RCTPushyOrchestrator scheduleFromColdStart:launchRolledBackVersion];
+    }
 }
 
 + (NSString *) rollback {
@@ -850,8 +913,34 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
         return;
     }
 
-    if (!PushyRegisterDownload(hash, callback)) {
-        RCTLogInfo(@"RCTPushy -- join in-flight download for %@", hash);
+    NSString *unzipDir = [dir stringByAppendingPathComponent:hash];
+    NSString *completedBundle = [unzipDir stringByAppendingPathComponent:BUNDLE_FILE_NAME];
+    NSString *completedMarker = [unzipDir stringByAppendingPathComponent:VERSION_COMPLETE_FILE_NAME];
+    if ([[NSFileManager defaultManager] fileExistsAtPath:completedBundle]
+        && [[NSFileManager defaultManager] fileExistsAtPath:completedMarker]) {
+        callback(nil);
+        return;
+    }
+
+    void (^progress)(long long, long long) = ^(long long receivedBytes, long long totalBytes) {
+        if (self->hasListeners) {
+            [self sendEventWithName:EVENT_PROGRESS_DOWNLOAD body:@{
+                PARAM_PROGRESS_HASH:hash,
+                PARAM_PROGRESS_RECEIVED:@(receivedBytes),
+                PARAM_PROGRESS_TOTAL:@(totalBytes),
+            }];
+        }
+    };
+    void (^deferredStart)(void) = ^{
+        [self performUpdate:type options:options callback:callback];
+    };
+    PushyDownloadRegistration registration = PushyRegisterDownload(
+        hash, type, callback, progress, deferredStart);
+    if (registration != PushyDownloadRegistrationOwner) {
+        RCTLogInfo(
+            @"RCTPushy -- %@ in-flight download for %@",
+            registration == PushyDownloadRegistrationJoined ? @"join" : @"defer",
+            hash);
         return;
     }
 
@@ -861,7 +950,6 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
     // do: a half-unzipped/half-patched dir leaks disk and could later be
     // mistaken for a complete version. hash is validated non-blank above, so
     // this can never resolve to the download root itself.
-    NSString *unzipDir = [dir stringByAppendingPathComponent:hash];
     void (^completion)(NSError *) = ^(NSError *error) {
         // Settle every JS/native waiter only after cleanup or the atomic
         // completion marker write has run on the process-wide file queue.
@@ -887,14 +975,26 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
     };
 
     RCTLogInfo(@"RCTPushy -- download file %@", updateUrl);
-    [RCTPushyDownloader download:updateUrl savePath:zipFilePath progressHandler:^(long long receivedBytes, long long totalBytes) {
-        if (self->hasListeners) {
-            [self sendEventWithName:EVENT_PROGRESS_DOWNLOAD body:@{
-                PARAM_PROGRESS_HASH:hash,
-                PARAM_PROGRESS_RECEIVED:[NSNumber numberWithLongLong:receivedBytes],
-                PARAM_PROGRESS_TOTAL:[NSNumber numberWithLongLong:totalBytes]
-            }];
+    NSTimeInterval timeoutSeconds = 600;
+    NSNumber *deadlineAt = options[@"deadlineAt"];
+    if ([deadlineAt isKindOfClass:[NSNumber class]]) {
+        timeoutSeconds = deadlineAt.doubleValue
+            - [[NSDate date] timeIntervalSince1970];
+        if (timeoutSeconds <= 0) {
+            completion([NSError errorWithDomain:PushyErrorDomain
+                                            code:-1
+                                        userInfo:@{
+                NSLocalizedDescriptionKey: @"download deadline expired before start",
+                PushyErrorCodeKey: PushyCode(pushy::error_codes::kDownloadFailed),
+            }]);
+            return;
         }
+    }
+    [RCTPushyDownloader download:updateUrl
+                            savePath:zipFilePath
+                     timeoutInterval:timeoutSeconds
+                     progressHandler:^(long long receivedBytes, long long totalBytes) {
+        PushyReportDownloadProgress(hash, receivedBytes, totalBytes);
     } completionHandler:^(NSString *path, NSError *error) {
         if (error != nil) {
             completion(error);
@@ -1403,12 +1503,14 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
         RCTLogInfo(@"RCTPushy -- native check: no endpoint reachable, giving up until next launch");
         return;
     }
+    long long responseAtSeconds = (long long)[[NSDate date] timeIntervalSince1970];
 
     flowjson::Value decision = updateflow::HandleCheckResponse(
         PushyToStdString(responseText), identity, false,
         config.Get("afterDownload").AsString());
     if (decision.Get("action").AsString() != "download") {
-        [self persistResponseCache:responseText request:body config:configJson];
+        [self persistResponseCache:responseText request:body config:configJson
+                        responseAt:responseAtSeconds];
         RCTLogInfo(@"RCTPushy -- native check: nothing to do (%s)",
                    decision.Get("reason").AsString().c_str());
         return;
@@ -1429,7 +1531,8 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
                                 originHash:currentVersion];
     }
     if (!downloaded) {
-        [self persistResponseCache:responseText request:body config:configJson];
+        [self persistResponseCache:responseText request:body config:configJson
+                        responseAt:responseAtSeconds];
         return;
     }
 
@@ -1459,14 +1562,16 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
     } else {
         RCTLogInfo(@"RCTPushy -- native check: downloaded %@, activation left to JS", hash);
     }
-    [self persistResponseCache:responseText request:body config:configJson];
+    [self persistResponseCache:responseText request:body config:configJson
+                    responseAt:responseAtSeconds];
 }
 
 + (void)persistResponseCache:(NSString *)responseText
                      request:(NSString *)requestBody
-                      config:(NSString *)configJson {
+                      config:(NSString *)configJson
+                  responseAt:(long long)responseAtSeconds {
     NSDictionary *cacheEntry = @{
-        @"ts": @((long long)[[NSDate date] timeIntervalSince1970]),
+        @"ts": @(responseAtSeconds),
         @"body": responseText,
         @"request": requestBody,
         @"config": configJson,
@@ -1494,7 +1599,7 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
     for (const auto &endpoint : ordered.elements()) {
         NSString *base = PushyNormalizeEndpointBase(
             PushyFromStdString(endpoint.AsString()));
-        if (base.length == 0) {
+        if (base.length == 0 || [tried containsObject:base]) {
             continue;
         }
         if (httpAttempts++ >= maxHttpAttempts) {
@@ -1551,6 +1656,8 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
                    hash:(NSString *)hash
              originHash:(NSString *)originHash {
     RCTPushy *engine = [self engine];
+    NSDate *incrementalDeadline = [NSDate dateWithTimeIntervalSinceNow:600];
+    NSDate *fullDeadline = nil;
     for (const auto &attempt : attempts.elements()) {
         const std::string &type = attempt.Get("type").AsString();
         PushyType pushyType = type == "diff" ? PushyTypePatchFromPpk
@@ -1559,13 +1666,30 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
         if (pushyType == PushyTypePatchFromPpk && originHash.length == 0) {
             continue;  // diff patches from the running version; none running
         }
+        BOOL isFullAttempt = pushyType == PushyTypeFullDownload;
+        if (isFullAttempt && fullDeadline == nil) {
+            // diff/pdiff cannot starve the last-resort full download.
+            fullDeadline = [NSDate dateWithTimeIntervalSinceNow:600];
+        }
+        NSDate *deadline = isFullAttempt ? fullDeadline : incrementalDeadline;
         for (const auto &urlValue : attempt.Get("urls").elements()) {
             NSString *url = PushyFromStdString(urlValue.AsString());
             if (url == nil) {
                 continue;
             }
+            NSTimeInterval remaining = [deadline timeIntervalSinceNow];
+            if (remaining <= 0) {
+                if (isFullAttempt) {
+                    return NO;
+                }
+                break;
+            }
             NSMutableDictionary *options =
-                [@{@"updateUrl": url, @"hash": hash} mutableCopy];
+                [@{
+                    @"updateUrl": url,
+                    @"hash": hash,
+                    @"deadlineAt": @([[NSDate date] timeIntervalSince1970] + remaining),
+                } mutableCopy];
             if (pushyType == PushyTypePatchFromPpk) {
                 options[@"originHash"] = originHash;
             }
@@ -1575,12 +1699,13 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
                 resultError = error;
                 dispatch_semaphore_signal(sem);
             }];
-            // Backstop only — the downloader and patch pipeline carry their
-            // own timeouts/failures.
             if (dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW,
-                    (int64_t)(600 * NSEC_PER_SEC))) != 0) {
+                    (int64_t)(remaining * NSEC_PER_SEC))) != 0) {
                 RCTLogWarn(@"RCTPushy -- native check: %s attempt timed out", type.c_str());
-                return NO;
+                if (isFullAttempt) {
+                    return NO;
+                }
+                break;
             }
             if (resultError == nil) {
                 return YES;
