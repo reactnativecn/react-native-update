@@ -1,7 +1,8 @@
 # 原生冷启动检测:遗留改进项
 
 > 来源:`agent/harden-native-check-update` 分支两轮评审
-> （f679e11 初次评审 10 项 → 181952a 修复 4 项、缓解 1 项）。
+> （f679e11 初评 10 项 → 181952a 修 4 缓解 1;181952a 复评又出 10 项,
+> 其中 6 项为修复自身引入,已并入下文）。
 > 本文只记**仍开放**的项;已修复项不再列。按优先级排序,每项含现状、
 > 风险与建议修法。发版(10.51.0)前建议至少处理 P1;P2 可随小版本;
 > P3/P4 显式拍板"接受"也算关闭。
@@ -44,8 +45,33 @@ Android 与 Harmony 只有任务串行化,没有按 hash 去重,也不保护已�
 已撤回版本。
 
 **建议修法**:响应到达时捕获 `responseAtSeconds`,作为参数传入
-`persistResponseCache` 写进 `ts`(三端各一行改动,JS 读侧无需变);顺手把
-600s 整轮 deadline 补齐到 iOS/Harmony,消除三端 parity 缺口。
+`persistResponseCache` 写进 `ts`(三端各一行改动,JS 读侧无需变)。
+
+**复评补充(181952a 引入/暴露)——下载轮次时限应作为一个整体设计统一三端**:
+1. 整轮 600s deadline 只落了 Android;iOS 仍逐 URL 600s(上界
+   attempts×urls×600s,可达 90 分钟),Harmony 完全没有(慢滴 CDN 每
+   <60s 一字节即可绕过下载任务的不活动看门狗,轮次可跑数小时);
+2. Android 的 deadline 在下一个下载**已发起后**才检查——超时轮次仍会
+   多启动一个孤儿下载,浪费带宽且可能与 JS 重试并发写版本文件
+   (修法:发起前先查);
+3. 整轮预算会被 diff/pdiff 的失败耗尽,挤压救砖最后手段 full 的时间
+   (原先 full 独享 600s)——建议 full 单独保底额度。
+
+---
+
+## P2 — JS 配置同步的回退竞态(181952a 引入)
+
+**现状**:`syncNativeConfig` 的去重把当前配置与**最后一次已完成**的写入
+(`syncedNativeConfigJson`)比较。
+
+**风险**:已同步 A → setOptions 改为 B(写入在途)→ B 完成前又回退为 A:
+回退因等于 `synced`(仍是 A)被直接丢弃,随后 B 完成、`synced=B`、pending
+为空——原生 KV 永久持有错误的策略/endpoints(如 app 已切回 alert 却按
+silent 激活),直到未来某次不同值的 setOptions 才被纠正。
+
+**建议修法**(改动极小):去重时把在途/待写值一并纳入比较,或写入完成回调里
+与"最新期望值"复核不符则重新入队。顺手删掉 `flushNativeConfig` 同步抛
+catch 里的死代码递归"重试"(pending 已清空,必然早退,误导维护者)。
 
 ---
 
@@ -94,6 +120,36 @@ Android 与 Harmony 只有任务串行化,没有按 hash 去重,也不保护已�
 
 ---
 
+## P3 — 无 hash 的灰度条目从"静默忽略"变成"死弹窗"(181952a 语义变更的副作用)
+
+**现状**:`resolveCheckResult` 的非空 hash 守卫移除了旧的
+`undefined === undefined` 等价:服务端误配出无 hash 的灰度条目时,内置包
+设备(currentVersion 为空)从静默 upToDate 变为返回 `update:true` 且无
+hash——已被再生成的金标向量固化。
+
+**风险**:alert 策略下每次检查都弹"发现新版本",点确认后 `decideDownload`
+因 `!hash` 判 noUpdate——死弹窗,按钮无效,每次检查重现。
+
+**建议修法**:若新语义有意(暴露服务端错配),在 provider 层把无 hash 的
+update 降级为日志 + 遥测而非弹窗;若无意,恢复"无 hash 条目不视为可更新"。
+与下一条(noArtifact)同属"坏发布该以遥测暴露而非 UI 弹窗/静默"。
+
+---
+
+## P3 — `noArtifact` 分支静默返回,丢失 errorUpdate 遥测(181952a 引入)
+
+**现状**:decideDownload 新增的 noArtifact 拒绝让 `downloadUpdate` 无日志、
+无错误事件、无遥测地返回;旧的空 attempts 路径会上报
+`{type:'errorUpdate'}`。
+
+**风险**:服务端发出 update:true 有 hash 但无任何产物 URL 的坏发布,从
+"控制台可见"退化为"客户端静默无事发生",坏发布隐形。
+
+**建议修法**:noArtifact 分支恢复 report({type:'errorUpdate', ...}),保持
+用户无感但平台可见。
+
+---
+
 ## P4 — bundleHash 未就绪窗口的请求指纹失配(记录即可)
 
 **现状**:JS 预取 bundleHash 未 settle 时构造的请求体缺 `bundleHash` 键,
@@ -113,6 +169,17 @@ Android 与 Harmony 只有任务串行化,没有按 hash 去重,也不保护已�
 开销。
 
 **建议**:把现成的 `fetchBody` 对象传入,只 parse `entry.request` 一侧。
+
+---
+
+## P4 — 若干小项(复评新增)
+
+- **斜杠变体 endpoint 重复请求**:尾斜杠归一化发生在 C++ 去重之后,且首轮
+  循环只 add 不查 `tried`——`https://u.example.com` 与 `…com/` 会对同一
+  URL POST 两次,还白占 8 次 HTTP 上限中的两次。修法:归一化提前进纯层
+  (`orderEndpointCandidates` 前),或首轮也查 `tried`。
+- **Harmony 检查请求缺整请求封顶**:只有 connect/read 超时,没有 Android
+  `callTimeout(15s)` / iOS 超时取消的对应物,慢滴响应可拖长每次尝试。
 
 ---
 
