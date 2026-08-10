@@ -861,6 +861,9 @@ describe('downloadUpdate fallback chain', () => {
     expect(
       await client.downloadUpdate({ ...updateInfo, paths: [] })
     ).toBeUndefined();
+    expect(
+      await client.downloadUpdate({ ...updateInfo, paths: [] })
+    ).toBeUndefined();
     await Promise.resolve();
 
     expect(downloadPatchFromPpk).not.toHaveBeenCalled();
@@ -875,6 +878,7 @@ describe('downloadUpdate fallback chain', () => {
         }),
       })
     );
+    expect(logger).toHaveBeenCalledTimes(1);
   });
 
   test('adds computed progress to download progress callbacks', async () => {

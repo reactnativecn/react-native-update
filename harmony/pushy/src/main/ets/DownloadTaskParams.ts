@@ -16,7 +16,7 @@ export class DownloadTaskParams {
   targetFile: string = ''; // 目标文件路径
   unzipDirectory: string = ''; // 解压目录路径
   originDirectory: string = ''; // 原始文件目录路径
-  // Native cold-start orchestrator's absolute wall-clock deadline. Zero uses
-  // the normal public download API's 10-minute whole-call cap.
-  deadlineAtMs: number = 0;
+  // Native cold-start orchestrator's absolute monotonic-uptime deadline. Zero
+  // uses the normal public download API's 10-minute whole-call cap.
+  deadlineUptimeMs: number = 0;
 }

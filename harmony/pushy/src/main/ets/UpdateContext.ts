@@ -467,7 +467,7 @@ export class UpdateContext {
   public async downloadFullUpdate(
     url: string,
     hash: string,
-    deadlineAtMs: number = 0,
+    deadlineUptimeMs: number = 0,
   ): Promise<void> {
     try {
       const params = this.createTaskParams(
@@ -477,7 +477,7 @@ export class UpdateContext {
       );
       params.targetFile = `${this.rootDir}/${hash}.ppk`;
       params.unzipDirectory = `${this.rootDir}/${hash}`;
-      params.deadlineAtMs = deadlineAtMs;
+      params.deadlineUptimeMs = deadlineUptimeMs;
       await this.executeTask(params);
     } catch (e) {
       console.error('Failed to download full update:', e);
@@ -503,7 +503,7 @@ export class UpdateContext {
     url: string,
     hash: string,
     originHash: string,
-    deadlineAtMs: number = 0,
+    deadlineUptimeMs: number = 0,
   ): Promise<void> {
     const params = this.createTaskParams(
       DownloadTaskParams.TASK_TYPE_PATCH_FROM_PPK,
@@ -514,14 +514,14 @@ export class UpdateContext {
     params.targetFile = `${this.rootDir}/${originHash}_${hash}.ppk.patch`;
     params.unzipDirectory = `${this.rootDir}/${hash}`;
     params.originDirectory = `${this.rootDir}/${params.originHash}`;
-    params.deadlineAtMs = deadlineAtMs;
+    params.deadlineUptimeMs = deadlineUptimeMs;
     await this.executeTask(params);
   }
 
   public async downloadPatchFromPackage(
     url: string,
     hash: string,
-    deadlineAtMs: number = 0,
+    deadlineUptimeMs: number = 0,
   ): Promise<void> {
     try {
       const params = this.createTaskParams(
@@ -531,7 +531,7 @@ export class UpdateContext {
       );
       params.targetFile = `${this.rootDir}/${hash}.app.patch`;
       params.unzipDirectory = `${this.rootDir}/${hash}`;
-      params.deadlineAtMs = deadlineAtMs;
+      params.deadlineUptimeMs = deadlineUptimeMs;
       return await this.executeTask(params);
     } catch (e) {
       console.error('Failed to download package patch:', e);

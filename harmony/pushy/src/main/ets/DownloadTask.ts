@@ -11,6 +11,7 @@ import NativePatchCore, {
   ARCHIVE_PATCH_TYPE_FROM_PPK,
   CopyGroupResult,
 } from './NativePatchCore';
+import { monotonicNowMs } from './MonotonicClock';
 
 export const VERSION_COMPLETE_FILE_NAME = '.pushy-complete';
 
@@ -346,10 +347,10 @@ export class DownloadTask {
     let writeQueue = Promise.resolve();
     let lastReportedPercentage = -1;
     let lastReportedBytes = 0;
-    const deadlineAtMs = params.deadlineAtMs > 0
-      ? params.deadlineAtMs
-      : Date.now() + DOWNLOAD_CALL_TIMEOUT_MS;
-    if (deadlineAtMs <= Date.now()) {
+    const deadlineUptimeMs = params.deadlineUptimeMs > 0
+      ? params.deadlineUptimeMs
+      : monotonicNowMs() + DOWNLOAD_CALL_TIMEOUT_MS;
+    if (deadlineUptimeMs <= monotonicNowMs()) {
       throw Error('Download deadline expired before start');
     }
 
@@ -495,7 +496,7 @@ export class DownloadTask {
       const deadlinePromise = new Promise<never>((_, reject) => {
         deadlineTimer = setTimeout(() => {
           reject(Error('Download exceeded its whole-call deadline'));
-        }, Math.max(1, deadlineAtMs - Date.now()));
+        }, Math.max(1, deadlineUptimeMs - monotonicNowMs()));
       });
       const responseCode = await Promise.race([
         httpRequest.requestInStream(params.url, {

@@ -23,9 +23,10 @@ import {
   currentVersionInfo,
   getCurrentVersionInfo,
   packageVersion,
+  rolledBackVersion,
 } from './core';
 import type { CheckResult, ProgressData, UpdateTestPayload } from './type';
-import { resolveCheckResult } from './updateFlowCore';
+import { decideDownload, resolveCheckResult } from './updateFlowCore';
 import { assertWeb, log, noop } from './utils';
 
 export const UpdateProvider = ({
@@ -239,11 +240,20 @@ export const UpdateProvider = ({
         // A malformed rollout/root entry must not produce an alert whose
         // confirm button can never download anything. Surface it to the
         // developer telemetry/logger and present it to the app as no update.
-        client.report({
-          type: 'errorUpdate',
-          message: 'update response is missing a version hash',
-        });
+        client.reportInvalidUpdateOnce('missingHash');
         info = { upToDate: true };
+      }
+      if (info.update && !info.expired) {
+        const decision = decideDownload(
+          info,
+          { currentVersion, rolledBackVersion },
+          __DEV__
+        );
+        if (decision.action === 'none' && decision.reason === 'noArtifact') {
+          // Do not show an alert whose confirm action can only return silently.
+          client.reportInvalidUpdateOnce('noArtifact', info.hash || '');
+          info = { upToDate: true };
+        }
       }
       if (info.update) {
         info.description = info.description ?? '';

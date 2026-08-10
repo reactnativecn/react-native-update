@@ -21,6 +21,8 @@ const updateResult: CheckResult = {
   name: '1.0.1',
   hash: 'next-hash',
   description: 'bugfix',
+  full: 'next.ppk',
+  paths: ['https://cdn.example.com'],
 };
 
 const createClient = (options: Record<string, any> = {}) => {
@@ -41,6 +43,7 @@ const createClient = (options: Record<string, any> = {}) => {
     ),
     notifyAfterCheckUpdate: mock(() => {}),
     report: mock(() => {}),
+    reportInvalidUpdateOnce: mock(() => {}),
     markSuccess: mock(() => {}),
     switchVersion: mock(async () => {}),
     switchVersionLater: mock(async () => {}),
@@ -138,10 +141,26 @@ describe('UpdateProvider rendering', () => {
 
     await renderProvider(client);
 
-    expect(client.report).toHaveBeenCalledWith({
-      type: 'errorUpdate',
-      message: 'update response is missing a version hash',
-    });
+    expect(client.reportInvalidUpdateOnce).toHaveBeenCalledWith('missingHash');
+    expect(client.downloadUpdate).not.toHaveBeenCalled();
+    expect(mockAlert).not.toHaveBeenCalled();
+  });
+
+  test('an update without a downloadable artifact is never shown as actionable', async () => {
+    const client = createClient({ updateStrategy: 'alwaysAlert' });
+    client.checkUpdate.mockImplementation(async () => ({
+      update: true,
+      hash: 'broken-artifact-hash',
+      name: 'broken release',
+      paths: [],
+    }));
+
+    await renderProvider(client);
+
+    expect(client.reportInvalidUpdateOnce).toHaveBeenCalledWith(
+      'noArtifact',
+      'broken-artifact-hash'
+    );
     expect(client.downloadUpdate).not.toHaveBeenCalled();
     expect(mockAlert).not.toHaveBeenCalled();
   });

@@ -25,9 +25,9 @@
 | P4 endpoint 斜杠重复 | 已修复 | 三端首轮请求也先查规范化后的 `tried` 集合，重复项不计入 8 次上限 |
 | P4 Harmony 整请求超时 | 已修复 | check HTTP 增加 15s whole-call cap；更新下载增加绝对 deadline 并在超时后销毁请求 |
 
-代码验证基线：JS 完整回归 172 项、Biome/TypeScript/Harmony strict 类型检查、
-77 项 flow core ASan/UBSan、29 项 patch core、Android Release Java 编译、
-iOS Release simulator 构建均通过。
+代码验证基线：JS 完整回归 173 项、Biome/TypeScript/Harmony strict 类型检查、
+77 项 flow core ASan/UBSan、29 项 patch core、Harmony debug HAR、Android
+Release Java 编译、iOS Release simulator 静态库构建均通过。
 
 ---
 
@@ -35,6 +35,20 @@ iOS Release simulator 构建均通过。
 
 上表 13 项的修复经复评确认全部属实;以下为修复自身引入/暴露的新开放项
 (详情与逐条修法见评审面板)。
+
+复核后处理结论：
+
+| 项 | 结论 | 落地方式 |
+|---|---|---|
+| 1 iOS joiner 预算 | 已修复 | 注册表记录 owner 的单调时钟 deadline；预算更长的 waiter 观察当前进度但 deferred，owner 成功时由完成标记立即命中，失败时以自己的完整预算重启 |
+| 2 Harmony 外层时限 | 已修复 | `performAttempts` 用绝对单调 deadline 包住排队、HTTP、解压和 hpatch 的完整 Promise；底层串行任务即使晚结束也不再阻止编排器落响应缓存 |
+| 3 壁钟 deadline | 已修复并修正文档结论 | iOS 改用 `systemUptime`，Harmony 改用 `systemDateTime.getUptime`；full 预算进入 full 阶段才创建，因此原文“增量阶段校时会同时耗尽尚未创建的 full 预算”不成立 |
+| 4 Android full 判定 | 已修复 | 与分发逻辑及 iOS/Harmony 一致，非 diff/pdiff 统一视为 full；上游当前只生成三种合法类型，此项属于防御性收口 |
+| 5 坏发布遥测膨胀 | 已修复 | 缺 hash 与 noArtifact 共用按 appKey/reason/hash 的进程内去重，保留一次服务端可见的坏发布信号 |
+| 6 有 hash 无产物弹窗 | 已修复 | Provider 在展示/静默下载前复用 `decideDownload`，noArtifact 降级为 `upToDate` 与一次开发者遥测 |
+| 7 deferred UX/deadline | 已修复 | deferred waiter 订阅当前同 hash 进度；旧 deadline 在重新注册前校验，过期的编排器请求不会成为 owner 或结算后来的 JS 请求 |
+| 8 owner-only 进度事件 | 不采纳 | 支持路径在 JS 已按 hash 维持单一原生监听；常见 join 是无监听器的冷启动 engine + JS bridge。限制为 owner 发事件会在 engine 先成为 owner 时丢失 JS 进度 |
+| 9 iOS 完成判定重复 | 已修复 | 抽取 `PushyHasCompletedVersionAtPath`，预检与冷启动编排器共用同一 bundle+marker 判定 |
 
 **P2(三端时限模型的二阶问题,建议一并收口)**
 1. **iOS 合流者继承 owner 剩余预算**:JS 同 hash 同类型合流到编排器下载时,

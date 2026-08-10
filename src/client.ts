@@ -169,6 +169,7 @@ export class Pushy {
   private syncedNativeConfigJson?: string;
   private pendingNativeConfigJson?: string;
   private nativeConfigSyncInFlight = false;
+  private reportedInvalidUpdates = new Set<string>();
 
   version = cInfo.rnu;
   loggerPromise = (() => {
@@ -428,6 +429,25 @@ export class Pushy {
    */
   t = (key: string, values?: Record<string, string | number>) => {
     return i18n.t(key as any, values);
+  };
+
+  reportInvalidUpdateOnce = (
+    reason: 'missingHash' | 'noArtifact',
+    hash = ''
+  ) => {
+    const key = `${this.options.appKey}:${reason}:${hash}`;
+    if (this.reportedInvalidUpdates.has(key)) {
+      return;
+    }
+    this.reportedInvalidUpdates.add(key);
+    this.report({
+      type: 'errorUpdate',
+      message:
+        reason === 'missingHash'
+          ? 'update response is missing a version hash'
+          : 'update response contains no downloadable artifact',
+      ...(hash ? { data: { newVersion: hash } } : {}),
+    });
   };
 
   report = async ({
@@ -983,13 +1003,9 @@ export class Pushy {
       } else if (decision.reason === 'noArtifact') {
         // A server response that advertises an update but provides no usable
         // artifact is a bad release signal, not an ordinary no-update result.
-        // Keep the user flow silent, but restore the diagnostic/telemetry event
-        // that the old empty-attempt path emitted.
-        this.report({
-          type: 'errorUpdate',
-          data: { newVersion: updateInfo.hash || '' },
-          message: 'update response contains no downloadable artifact',
-        });
+        // Keep the user flow silent and report at most once per bad release in
+        // this process: repeated checks must not inflate download_fail health.
+        this.reportInvalidUpdateOnce('noArtifact', updateInfo.hash || '');
       }
       return;
     }

@@ -366,7 +366,7 @@ final class NativeCheckOrchestrator {
                 // diff patches from the running version; none is running.
                 continue;
             }
-            final boolean isFullAttempt = "full".equals(type);
+            final boolean isFullAttempt = !"diff".equals(type) && !"pdiff".equals(type);
             if (isFullAttempt && fullDeadlineNanos == 0) {
                 // Incremental failures must not consume the last-resort full
                 // download's budget. Each phase gets one bounded 10min window.

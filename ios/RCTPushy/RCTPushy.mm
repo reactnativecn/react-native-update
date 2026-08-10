@@ -71,6 +71,26 @@ static NSString * const PARAM_PROGRESS_HASH = @"hash";
 static NSString * const PARAM_PROGRESS_RECEIVED = @"received";
 static NSString * const PARAM_PROGRESS_TOTAL = @"total";
 
+static NSTimeInterval PushyMonotonicNow(void) {
+    return [NSProcessInfo processInfo].systemUptime;
+}
+
+static BOOL PushyHasCompletedVersionAtPath(NSString *versionDir) {
+    NSString *bundlePath = [versionDir stringByAppendingPathComponent:BUNDLE_FILE_NAME];
+    NSString *markerPath = [versionDir stringByAppendingPathComponent:VERSION_COMPLETE_FILE_NAME];
+    return [[NSFileManager defaultManager] fileExistsAtPath:bundlePath]
+        && [[NSFileManager defaultManager] fileExistsAtPath:markerPath];
+}
+
+static NSError *PushyDownloadDeadlineExpiredError(void) {
+    return [NSError errorWithDomain:PushyErrorDomain
+                               code:-1
+                           userInfo:@{
+        NSLocalizedDescriptionKey: @"download deadline expired before start",
+        PushyErrorCodeKey: PushyCode(pushy::error_codes::kDownloadFailed),
+    }];
+}
+
 
 typedef NS_ENUM(NSInteger, PushyType) {
     PushyTypeFullDownload = 1,
@@ -109,6 +129,7 @@ typedef NS_ENUM(NSInteger, PushyDownloadRegistration) {
 static PushyDownloadRegistration PushyRegisterDownload(
     NSString *hash,
     NSInteger type,
+    NSTimeInterval deadlineUptime,
     void (^callback)(NSError *),
     void (^progress)(long long, long long),
     void (^deferredStart)(void)
@@ -118,6 +139,18 @@ static PushyDownloadRegistration PushyRegisterDownload(
         NSMutableDictionary *entry = downloads[hash];
         if (entry != nil) {
             if ([entry[@"type"] integerValue] == type) {
+                NSTimeInterval ownerDeadline = [entry[@"deadlineUptime"] doubleValue];
+                // A caller with more time remaining must not inherit an
+                // owner's shorter timeout. Let it observe the current
+                // transfer, then restart after the owner settles; the
+                // completion-marker preflight makes a successful owner free.
+                if (deadlineUptime > ownerDeadline) {
+                    if (progress != nil) {
+                        [entry[@"progress"] addObject:[progress copy]];
+                    }
+                    [entry[@"deferred"] addObject:[deferredStart copy]];
+                    return PushyDownloadRegistrationDeferred;
+                }
                 [entry[@"callbacks"] addObject:[callback copy]];
                 if (progress != nil) {
                     [entry[@"progress"] addObject:[progress copy]];
@@ -127,6 +160,12 @@ static PushyDownloadRegistration PushyRegisterDownload(
             // A diff failure must not settle a joined full request. Queue the
             // different artifact type behind the owner; once restarted it
             // registers normally (and re-checks the completion marker).
+            if (progress != nil) {
+                // The artifact type differs, but it still installs the same
+                // target hash. Keep the waiting JS UI moving while its own
+                // transfer is queued behind the current owner.
+                [entry[@"progress"] addObject:[progress copy]];
+            }
             [entry[@"deferred"] addObject:[deferredStart copy]];
             return PushyDownloadRegistrationDeferred;
         }
@@ -136,6 +175,7 @@ static PushyDownloadRegistration PushyRegisterDownload(
         }
         downloads[hash] = [@{
             @"type": @(type),
+            @"deadlineUptime": @(deadlineUptime),
             @"callbacks": [NSMutableArray arrayWithObject:[callback copy]],
             @"progress": progressHandlers,
             @"deferred": [NSMutableArray array],
@@ -914,11 +954,18 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
     }
 
     NSString *unzipDir = [dir stringByAppendingPathComponent:hash];
-    NSString *completedBundle = [unzipDir stringByAppendingPathComponent:BUNDLE_FILE_NAME];
-    NSString *completedMarker = [unzipDir stringByAppendingPathComponent:VERSION_COMPLETE_FILE_NAME];
-    if ([[NSFileManager defaultManager] fileExistsAtPath:completedBundle]
-        && [[NSFileManager defaultManager] fileExistsAtPath:completedMarker]) {
+    if (PushyHasCompletedVersionAtPath(unzipDir)) {
         callback(nil);
+        return;
+    }
+
+    NSTimeInterval deadlineUptime = PushyMonotonicNow() + 600;
+    NSNumber *configuredDeadline = options[@"deadlineUptime"];
+    if ([configuredDeadline isKindOfClass:[NSNumber class]]) {
+        deadlineUptime = configuredDeadline.doubleValue;
+    }
+    if (deadlineUptime <= PushyMonotonicNow()) {
+        callback(PushyDownloadDeadlineExpiredError());
         return;
     }
 
@@ -935,7 +982,7 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
         [self performUpdate:type options:options callback:callback];
     };
     PushyDownloadRegistration registration = PushyRegisterDownload(
-        hash, type, callback, progress, deferredStart);
+        hash, type, deadlineUptime, callback, progress, deferredStart);
     if (registration != PushyDownloadRegistrationOwner) {
         RCTLogInfo(
             @"RCTPushy -- %@ in-flight download for %@",
@@ -975,20 +1022,10 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
     };
 
     RCTLogInfo(@"RCTPushy -- download file %@", updateUrl);
-    NSTimeInterval timeoutSeconds = 600;
-    NSNumber *deadlineAt = options[@"deadlineAt"];
-    if ([deadlineAt isKindOfClass:[NSNumber class]]) {
-        timeoutSeconds = deadlineAt.doubleValue
-            - [[NSDate date] timeIntervalSince1970];
-        if (timeoutSeconds <= 0) {
-            completion([NSError errorWithDomain:PushyErrorDomain
-                                            code:-1
-                                        userInfo:@{
-                NSLocalizedDescriptionKey: @"download deadline expired before start",
-                PushyErrorCodeKey: PushyCode(pushy::error_codes::kDownloadFailed),
-            }]);
-            return;
-        }
+    NSTimeInterval timeoutSeconds = deadlineUptime - PushyMonotonicNow();
+    if (timeoutSeconds <= 0) {
+        completion(PushyDownloadDeadlineExpiredError());
+        return;
     }
     [RCTPushyDownloader download:updateUrl
                             savePath:zipFilePath
@@ -1521,10 +1558,7 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
     }
 
     NSString *versionDir = [[RCTPushy downloadDir] stringByAppendingPathComponent:hash];
-    NSString *bundlePath = [versionDir stringByAppendingPathComponent:BUNDLE_FILE_NAME];
-    NSString *completePath = [versionDir stringByAppendingPathComponent:VERSION_COMPLETE_FILE_NAME];
-    BOOL downloaded = [[NSFileManager defaultManager] fileExistsAtPath:bundlePath]
-        && [[NSFileManager defaultManager] fileExistsAtPath:completePath];
+    BOOL downloaded = PushyHasCompletedVersionAtPath(versionDir);
     if (!downloaded) {
         downloaded = [self performAttempts:decision.Get("attempts")
                                       hash:hash
@@ -1656,8 +1690,8 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
                    hash:(NSString *)hash
              originHash:(NSString *)originHash {
     RCTPushy *engine = [self engine];
-    NSDate *incrementalDeadline = [NSDate dateWithTimeIntervalSinceNow:600];
-    NSDate *fullDeadline = nil;
+    NSTimeInterval incrementalDeadline = PushyMonotonicNow() + 600;
+    NSTimeInterval fullDeadline = 0;
     for (const auto &attempt : attempts.elements()) {
         const std::string &type = attempt.Get("type").AsString();
         PushyType pushyType = type == "diff" ? PushyTypePatchFromPpk
@@ -1667,17 +1701,17 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
             continue;  // diff patches from the running version; none running
         }
         BOOL isFullAttempt = pushyType == PushyTypeFullDownload;
-        if (isFullAttempt && fullDeadline == nil) {
+        if (isFullAttempt && fullDeadline == 0) {
             // diff/pdiff cannot starve the last-resort full download.
-            fullDeadline = [NSDate dateWithTimeIntervalSinceNow:600];
+            fullDeadline = PushyMonotonicNow() + 600;
         }
-        NSDate *deadline = isFullAttempt ? fullDeadline : incrementalDeadline;
+        NSTimeInterval deadline = isFullAttempt ? fullDeadline : incrementalDeadline;
         for (const auto &urlValue : attempt.Get("urls").elements()) {
             NSString *url = PushyFromStdString(urlValue.AsString());
             if (url == nil) {
                 continue;
             }
-            NSTimeInterval remaining = [deadline timeIntervalSinceNow];
+            NSTimeInterval remaining = deadline - PushyMonotonicNow();
             if (remaining <= 0) {
                 if (isFullAttempt) {
                     return NO;
@@ -1688,7 +1722,7 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
                 [@{
                     @"updateUrl": url,
                     @"hash": hash,
-                    @"deadlineAt": @([[NSDate date] timeIntervalSince1970] + remaining),
+                    @"deadlineUptime": @(deadline),
                 } mutableCopy];
             if (pushyType == PushyTypePatchFromPpk) {
                 options[@"originHash"] = originHash;

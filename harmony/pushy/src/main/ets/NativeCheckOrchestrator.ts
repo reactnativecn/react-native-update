@@ -4,6 +4,7 @@ import logger from './Logger';
 import NativePatchCore from './NativePatchCore';
 import type { UpdateContext } from './UpdateContext';
 import { isSafePathComponent } from './PathUtils';
+import { monotonicNowMs } from './MonotonicClock';
 
 // 原生冷启动检测(NATIVE_CHECKUPDATE_DESIGN §10):每进程一次,getBundleUrl
 // 后延迟数秒运行,完全不依赖 app bundle——坏热更把 JS 砸挂后,下次启动仍能
@@ -409,13 +410,37 @@ function normalizeEndpointBase(base: string): string {
   return base.replace(/\/+$/, '');
 }
 
+async function runWithinDeadline(
+  start: () => Promise<void>,
+  deadlineUptimeMs: number,
+): Promise<void> {
+  const remainingMs = deadlineUptimeMs - monotonicNowMs();
+  if (remainingMs <= 0) {
+    throw Error('Download phase deadline expired before start');
+  }
+  let deadlineTimer = 0;
+  const deadlinePromise = new Promise<void>((_, reject) => {
+    deadlineTimer = setTimeout(() => {
+      reject(Error('Download phase deadline exceeded'));
+    }, remainingMs);
+  });
+  try {
+    // This bounds queueing, HTTP, decompression and native hpatch work from
+    // the orchestrator's perspective. The serialized task may still finish
+    // later, but it can no longer prevent the response cache from settling.
+    await Promise.race([start(), deadlinePromise]);
+  } finally {
+    clearTimeout(deadlineTimer);
+  }
+}
+
 async function performAttempts(
   context: UpdateContext,
   attempts: DecisionAttempt[],
   hash: string,
   originHash: string,
 ): Promise<boolean> {
-  const incrementalDeadline = Date.now() + DOWNLOAD_PHASE_TIMEOUT_MS;
+  const incrementalDeadline = monotonicNowMs() + DOWNLOAD_PHASE_TIMEOUT_MS;
   let fullDeadline = 0;
   for (const attempt of attempts) {
     const type = attempt.type ?? '';
@@ -428,14 +453,14 @@ async function performAttempts(
     if (isFullAttempt && fullDeadline === 0) {
       // Preserve a full 10min rescue budget even when diff/pdiff exhausted
       // their own phase window.
-      fullDeadline = Date.now() + DOWNLOAD_PHASE_TIMEOUT_MS;
+      fullDeadline = monotonicNowMs() + DOWNLOAD_PHASE_TIMEOUT_MS;
     }
     const deadline = isFullAttempt ? fullDeadline : incrementalDeadline;
     for (const url of attempt.urls ?? []) {
       if (!url) {
         continue;
       }
-      if (Date.now() >= deadline) {
+      if (monotonicNowMs() >= deadline) {
         if (isFullAttempt) {
           return false;
         }
@@ -443,11 +468,20 @@ async function performAttempts(
       }
       try {
         if (type === DOWNLOAD_TYPE_DIFF) {
-          await context.downloadPatchFromPpk(url, hash, originHash, deadline);
+          await runWithinDeadline(
+            () => context.downloadPatchFromPpk(url, hash, originHash, deadline),
+            deadline,
+          );
         } else if (type === DOWNLOAD_TYPE_PDIFF) {
-          await context.downloadPatchFromPackage(url, hash, deadline);
+          await runWithinDeadline(
+            () => context.downloadPatchFromPackage(url, hash, deadline),
+            deadline,
+          );
         } else {
-          await context.downloadFullUpdate(url, hash, deadline);
+          await runWithinDeadline(
+            () => context.downloadFullUpdate(url, hash, deadline),
+            deadline,
+          );
         }
         return true;
       } catch (e) {
