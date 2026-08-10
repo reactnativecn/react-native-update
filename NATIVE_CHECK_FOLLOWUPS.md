@@ -31,6 +31,46 @@ iOS Release simulator 构建均通过。
 
 ---
 
+## 2026-08-10 第三轮评审(283dfd4)开放项
+
+上表 13 项的修复经复评确认全部属实;以下为修复自身引入/暴露的新开放项
+(详情与逐条修法见评审面板)。
+
+**P2(三端时限模型的二阶问题,建议一并收口)**
+1. **iOS 合流者继承 owner 剩余预算**:JS 同 hash 同类型合流到编排器下载时,
+   共享会话带的是编排器所剩阶段预算(可能只剩几十秒),其超时会结算全部
+   合流者——修改前 JS 独立下载固定 600s 的不变量对合流路径失效。
+2. **Harmony await 无外层时限**:统一预算只管住 HTTP 流;解压/hpatch 卡死
+   或串行链被长任务占用时 `await context.downloadX` 永不返回,救援轮次挂满
+   进程生命周期,响应缓存也不落盘。修法:performAttempts 层对每个 await 包
+   Promise.race 绝对 deadline。
+3. **壁钟 vs 单调钟**:iOS/Harmony 的 deadline 锚壁钟(epoch/Date.now),
+   Android 锚 nanoTime——首次联网触发 NTP 前跳(恰是救援检测时刻)会让
+   iOS/Harmony 全部预算(含 full 保底)瞬时过期。修法:iOS 用
+   systemUptime/mach 时基,Harmony 用相对定时器。
+
+**P3**
+4. **Android 按字面 "full" 判保底预算**,分发 else 分支却把任意非 diff/pdiff
+   类型当 full 下载;iOS/Harmony 用排除法——三端对"谁享有 full 保底"不再
+   一致,Android 改排除法即齐。
+5. **noArtifact 遥测重复膨胀**:映射到 download_fail 聚合且每次
+   downloadUpdate 调用都上报(静默策略下每个检查周期一条),需按 hash
+   会话内去重或换不入聚合的事件类型。
+6. **有 hash 无产物的死弹窗变体**:provider 只降级了无 hash 的 update;
+   有 hash 但无任何产物 URL 的坏发布仍弹确认框、确认后静默。
+7. **iOS deferred 的 UX 与陈旧 deadline**:异类型 deferred 请求无进度、
+   延迟开始(UI 冻结);重启时携带编排器的旧 deadlineAt,排队期间过期则
+   瞬时失败并连带结算 JS 合流者。JS 发起的请求不应携带编排器 deadline。
+
+**P4**
+8. **iOS 合流者进度块重复发事件**(N 合流者 = N 倍 RN 事件,事件发送应只由
+   owner 承担)。
+9. **完成判定(bundle+marker)在 iOS 两处手写**,抽 PushyHasCompletedVersion
+   helper 防漂移。
+
+
+---
+
 ## P1 — Android/Harmony 重复下载竞态,失败路径可删除已安装版本
 
 **现状**:iOS 在 f679e11 引入了进程级在途下载注册表
