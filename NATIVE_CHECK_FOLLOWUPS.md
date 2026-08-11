@@ -259,6 +259,68 @@ update 降级为日志 + 遥测而非弹窗;若无意,恢复"无 hash 条目不�
 
 ---
 
+## 2026-08-11 第四轮评审(60f5fd2..5f5d0cb)开放项
+
+上一轮 9 项闭环全部属实(第 8 项"owner-only 进度事件"维护者明确不采纳,理由
+成立)。以下为仍开放项;**前三条建议合入前处理**,其余可随小版本。
+
+### 合并阻断
+
+1. **原生检测无视 `checkStrategy`,并能撞销 `resetToPackagedBundle`**
+   (CI 已红)。`getNativeConfig` 只用 `updateStrategy` 折算 `afterDownload`,
+   从不读 `checkStrategy`;三端也没有 reset↔检测 的任何联动(无 generation、
+   无取消,reset 也不清 `nativeCheckResp`)。e2e app 明写 `checkStrategy: null`
+   却仍被原生自动下载+激活;`resetToPackagedBundle` 可被在飞的检测撤销。
+   **证据**:e2e-ios 在 `0f4651e` 与 `5f5d0cb` 两次运行均挂在 `beforeEach`
+   的 `bundleLabel: BINARY_BASE`,且两次挂的是不同用例(竞态签名);失败态
+   `currentHash: e2e-full-v1` 恰是"reset 后从零检查会拿到的第一个版本";
+   master 上 e2e-ios 为绿 → 本分支引入的回归。本分支新增的
+   `hasCompletedVersion` 快路径(版本已落盘则跳过下载直接 switchVersion)
+   把竞态窗口从"下载完"压到"5 秒后瞬间",是这轮才炸的原因。
+   **修法**:`afterDownload` 计算纳入 `checkStrategy`(为 null 时降为
+   `'none'`——只下载不激活,`forceBoot` 仍可救砖);`resetToPackagedBundle`
+   bump 进程级 generation,编排器在 `switchVersion`/落缓存前比对,变了就
+   放弃,并清掉响应缓存。
+
+2. **iOS 同类型 join 分支实际不可达**。`deadlineUptime > ownerDeadline` 是
+   严格大于,而 JS 发起的请求总晚于 owner 的计算时刻,因此永远走 deferred:
+   P1"一个 hash 共享一次下载"的意图失效,退化为串行重下;CDN 黑洞时用户
+   弹窗可转近 20 分钟(改前是合流后一次失败并回退下一候选 URL)。修法:比较
+   加容忍阈值,或 JS 发起的请求不参与 deadline 比较。
+
+3. **Harmony 用 `TimeType.STARTUP`**(计深度睡眠),而 iOS `systemUptime` /
+   Android `nanoTime` 睡眠时停走——"三端统一单调钟"不成立。锁屏休眠数分钟
+   即让预算过期、救援中止,同网络的另两端能续传完成。一行改
+   `TimeType.ACTIVE`。
+
+### 后续小版本
+
+4. Harmony 超时只放弃编排器的 `await`,卡死的 DownloadTask 仍占 `taskChain`,
+   后续 attempt 只是排队并空烧自己的新鲜预算(有效 full 产物 + 完整预算都在
+   却仍救不回)。修法:超时真正取消底层任务,或救援轮次用独立链。
+5. iOS/Harmony 的 `switchVersion` 仍可激活半完成安装(Android 本轮加了无标记
+   拒绝守卫,三端 parity 分歧)。
+6. iOS deferred 异类型 waiter 订阅了 owner 的进度流,收到的是另一种产物的
+   字节数(进度条先到 100% 再回 0%)。修法:只向同类型合流者广播。
+7. 缺 hash 守卫新加的 `!info.expired` 让 `{expired:true, update:true}` 且无
+   hash 的畸形响应既不降级也不上报,却仍把 `update:true` 发给业务侧。
+8. `getNativeConfigJson() ?? '{"disabled":true}'` 会把瞬时为空的
+   `appKey`/`server.main` 变成持久 disabled 写入,覆盖上一份可用配置并长期
+   关掉救砖能力。修法:仅在确实不可用(web/旧原生)时写 disabled。
+9. `noArtifact` 上报位置从 `client.downloadUpdate`(实际尝试下载)移到
+   `provider.checkUpdate`(只要检查就发),映射到服务端 `download_fail` 聚合
+   后会把一次坏发布放大成全量设备级的健康下降。
+10. 两处 cleanup:Android `switchVersion` 重写了同文件已有的
+    `hasCompletedVersion` 谓词;provider 为一个是非问题重跑完整
+    `decideDownload`(分配 URL 计划后丢弃)。
+
+### 累计
+
+四轮共 40 条发现:27 修复、2 显式接受、1 不采纳、10 开放(其中 3 条建议合入
+前处理)。
+
+---
+
 ## 发版清单(非代码缺陷,勿遗漏)
 
 - [ ] e2e:坏 bundle → 原生拉修复版 → 下次启动复活的端到端用例
