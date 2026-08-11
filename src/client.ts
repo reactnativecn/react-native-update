@@ -286,10 +286,16 @@ export class Pushy {
       // and the feature-detect would false-positive.
       return undefined;
     }
-    const { appKey, server, updateStrategy } = this.options;
+    const { appKey, server, updateStrategy, checkStrategy } = this.options;
     if (!appKey || !server?.main?.length) {
       return undefined;
     }
+    // An app that turned automatic checks off (checkStrategy: null) must not
+    // be handed a version switch it never asked for. The cold-start check
+    // still runs and still downloads — that is what keeps a bricked device
+    // rescuable — but activation waits for the JS side, or for the server's
+    // explicit per-version forceBoot directive (shouldActivateAfterDownload).
+    const autoCheckEnabled = checkStrategy != null;
     return {
       appKey,
       packageVersion: this.getEffectivePackageVersion(),
@@ -299,7 +305,9 @@ export class Pushy {
       // only under the silent strategies; alert-style strategies keep
       // activation with the JS side (§6/§10.1).
       afterDownload:
-        updateStrategy === 'silentAndNow' || updateStrategy === 'silentAndLater'
+        autoCheckEnabled &&
+        (updateStrategy === 'silentAndNow' ||
+          updateStrategy === 'silentAndLater')
           ? 'setNeedUpdate'
           : 'none',
       rnu: cInfo.rnu,

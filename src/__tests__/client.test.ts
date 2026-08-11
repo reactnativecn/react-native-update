@@ -1423,6 +1423,42 @@ describe('syncNativeConfig', () => {
     expect(config.packageVersion).toBe('1.0.0');
   });
 
+  test('disabling automatic checks keeps activation with JS too', async () => {
+    // checkStrategy: null means "never check on your own". The native
+    // cold-start check still runs (that is what rescues a bricked device),
+    // but it must not hand the app a version switch it never asked for —
+    // only the server's explicit forceBoot may still activate.
+    const syncNativeConfig = mock(() => Promise.resolve());
+    setupClientMocks({ syncNativeConfig });
+    const { Pushy } = await importFreshClient('sync-config-no-autocheck');
+    new Pushy({
+      appKey: 'demo-app',
+      updateStrategy: 'silentAndNow',
+      checkStrategy: null,
+    });
+
+    const config = JSON.parse(
+      (syncNativeConfig.mock.calls.at(-1) as unknown as string[])[0]
+    );
+    expect(config.afterDownload).toBe('none');
+  });
+
+  test('silent strategy with automatic checks still activates', async () => {
+    const syncNativeConfig = mock(() => Promise.resolve());
+    setupClientMocks({ syncNativeConfig });
+    const { Pushy } = await importFreshClient('sync-config-autocheck');
+    new Pushy({
+      appKey: 'demo-app',
+      updateStrategy: 'silentAndNow',
+      checkStrategy: 'onAppStart',
+    });
+
+    const config = JSON.parse(
+      (syncNativeConfig.mock.calls.at(-1) as unknown as string[])[0]
+    );
+    expect(config.afterDownload).toBe('setNeedUpdate');
+  });
+
   test('alert strategies keep activation with JS (afterDownload none)', async () => {
     const syncNativeConfig = mock(() => Promise.resolve());
     setupClientMocks({ syncNativeConfig });

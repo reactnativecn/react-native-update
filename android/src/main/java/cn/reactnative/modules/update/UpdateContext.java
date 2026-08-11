@@ -48,6 +48,13 @@ public class UpdateContext {
     private static final int STATE_OP_RESOLVE_LAUNCH = 6;
     private static final String KEY_FIRST_LOAD_MARKED = "firstLoadMarked";
     static final String VERSION_COMPLETE_FILE = ".pushy-complete";
+    // Bumped by resetToPackagedBundle. The cold-start check runs for minutes
+    // and may already hold a decision when the app resets to the packaged
+    // bundle; the orchestrator samples this counter and abandons activation
+    // (and its response cache) when the value moved, so an in-flight rescue
+    // can never resurrect the version the app just reset away from.
+    private static final java.util.concurrent.atomic.AtomicLong resetGeneration =
+        new java.util.concurrent.atomic.AtomicLong(0);
     
     // Singleton instance
     private static volatile UpdateContext sInstance;
@@ -498,6 +505,9 @@ public class UpdateContext {
         }
         persistEditor(editor, "reset to packaged bundle");
         ignoreRollback = false;
+        // editor.clear() above already dropped the cached check response; it
+        // still advertised the version this reset removed.
+        resetGeneration.incrementAndGet();
         Log.i(TAG, "Reset to packaged bundle");
 
         DownloadTaskParams params = new DownloadTaskParams();
@@ -630,6 +640,11 @@ public class UpdateContext {
             // rollback guard for this exceptional launch.
             NativeCheckOrchestrator.schedule(this, nativeCheckRolledBackVersion);
         }
+    }
+
+    /** Sampled/compared by the native check orchestrator; see resetGeneration. */
+    static long getResetGeneration() {
+        return resetGeneration.get();
     }
 
     boolean hasCompletedVersion(String hash) {

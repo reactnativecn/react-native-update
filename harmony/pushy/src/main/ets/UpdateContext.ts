@@ -38,6 +38,10 @@ export class UpdateContext {
   // resetToPackagedBundle 不能删它的目录：热更包内的图片等资源是运行时按需
   // 读盘的，静默（不重启）reset 若删掉会导致后续所有未加载过的资源失败。
   private static launchVersion: string = '';
+  // 由 resetToPackagedBundle 递增。原生冷启动检测可能跑数分钟并已握有决策,
+  // 期间发生的 reset 必须赢:编排器采样该值,发现变化即放弃激活与响应缓存,
+  // 在飞的救援不会把刚被重置掉的版本装回去。
+  private static resetGeneration: number = 0;
   private static cachedPackageVersion: string = '';
   private static cachedBuildTime: string = '';
   // 单例：确保 bundle provider 与 TurboModule 共用同一份 preferences 内存状态，
@@ -447,7 +451,14 @@ export class UpdateContext {
       }
     }
     this.persistState(resetState, { clearFirstLoadMarker: true });
+    // 缓存里的响应仍在宣告本次 reset 刚删掉的版本,一并丢弃,避免 JS 侧复用。
+    try {
+      this.preferences.deleteSync('nativeCheckResp');
+    } catch (e: any) {
+      console.error('Failed to clear native check cache on reset:', e);
+    }
     UpdateContext.ignoreRollback = false;
+    UpdateContext.resetGeneration += 1;
 
     // maxAgeDays=0：删除下载目录内容，仅保留当前运行版本的目录（残留目录由
     // 下次常规清理回收）。挂到串行任务链尾，避免与在飞的解压/打补丁并发。
@@ -462,6 +473,11 @@ export class UpdateContext {
       console.error('reset cleanup failed:', error);
     });
     this.trace('resetToPackagedBundle:after');
+  }
+
+  /** 供原生检测编排器采样/比对的 reset 代数(见 resetGeneration 注释)。 */
+  public getResetGeneration(): number {
+    return UpdateContext.resetGeneration;
   }
 
   public async downloadFullUpdate(

@@ -264,7 +264,9 @@ update 降级为日志 + 遥测而非弹窗;若无意,恢复"无 hash 条目不�
 上一轮 9 项闭环全部属实(第 8 项"owner-only 进度事件"维护者明确不采纳,理由
 成立)。以下为仍开放项;**前三条建议合入前处理**,其余可随小版本。
 
-### 合并阻断
+### 合并阻断 —— 已于 2026-08-11 修复(见下方"修复说明")
+
+#### 原始问题描述
 
 1. **原生检测无视 `checkStrategy`,并能撞销 `resetToPackagedBundle`**
    (CI 已红)。`getNativeConfig` 只用 `updateStrategy` 折算 `afterDownload`,
@@ -292,6 +294,25 @@ update 降级为日志 + 遥测而非弹窗;若无意,恢复"无 hash 条目不�
    Android `nanoTime` 睡眠时停走——"三端统一单调钟"不成立。锁屏休眠数分钟
    即让预算过期、救援中止,同网络的另两端能续传完成。一行改
    `TimeType.ACTIVE`。
+
+#### 修复说明(2026-08-11)
+
+1. **checkStrategy + reset 竞态**:`getNativeConfig` 的 `afterDownload` 现在
+   要求 `checkStrategy != null` —— 关掉自动检查的应用不会再被塞一次它没要
+   过的版本切换;检测本身照跑(救砖能力不变),`forceBoot` 仍可激活。另加
+   **reset 代数守卫**:`resetToPackagedBundle` 递增进程级计数并清掉响应缓存,
+   编排器在开跑前采样、在激活与落缓存前比对,不一致即整轮丢弃。三端同构
+   (iOS `std::atomic<uint64_t>`、Android `AtomicLong`、Harmony 静态计数)。
+2. **iOS join 分支不可达**:比较从"绝对 deadline 严格大于"改为"剩余预算",
+   仅当 owner 剩余不足新来者的一半时才 defer —— 正常情况(JS 晚几秒发起)
+   恢复合流,只有真正濒临耗尽的 owner 才让位。
+3. **Harmony 单调钟**:`TimeType.STARTUP` → `TimeType.ACTIVE`,与 iOS
+   `systemUptime` / Android `nanoTime` 的"睡眠时停走"语义对齐。
+
+验证:JS 178 项(新增 2 项 checkStrategy 折算用例)、Biome/tsc/DevEco
+strict、77 金标向量 + ASan/UBSan、`.so` 符号与 16KB 对齐、iOS clang
+(DEBUG=0/1)、Android javac(main+oldarch)。本轮不触 `cpp/`,无需重生成
+向量或重编 `.so`。
 
 ### 后续小版本
 

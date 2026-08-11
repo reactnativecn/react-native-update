@@ -100,6 +100,12 @@ typedef NS_ENUM(NSInteger, PushyType) {
 };
 
 static std::atomic<bool> ignoreRollback{false};
+// Bumped by resetToPackagedBundle. The cold-start check runs for minutes and
+// may already hold a decision when the app resets to the packaged bundle; it
+// samples this counter and abandons activation (and its response cache) when
+// the value moved, so an in-flight rescue can never resurrect the version the
+// app just reset away from.
+static std::atomic<uint64_t> pushyResetGeneration{0};
 // The version whose bundle this process actually loaded (resolved in
 // +bundleURL). resetToPackagedBundle must not delete its directory: update
 // assets (images/fonts) are read from it on demand at runtime, so wiping it
@@ -140,11 +146,18 @@ static PushyDownloadRegistration PushyRegisterDownload(
         if (entry != nil) {
             if ([entry[@"type"] integerValue] == type) {
                 NSTimeInterval ownerDeadline = [entry[@"deadlineUptime"] doubleValue];
-                // A caller with more time remaining must not inherit an
-                // owner's shorter timeout. Let it observe the current
-                // transfer, then restart after the owner settles; the
-                // completion-marker preflight makes a successful owner free.
-                if (deadlineUptime > ownerDeadline) {
+                // A caller with substantially more time must not inherit an
+                // owner's nearly-exhausted timeout: it observes the current
+                // transfer and restarts after the owner settles (the
+                // completion-marker preflight makes a successful owner free).
+                // The comparison is on remaining budget, not on the absolute
+                // deadline: a JS caller always computes now+600 a few seconds
+                // after the owner did, so a strict `>` would defer every
+                // second caller and turn the shared download back into
+                // serialized re-downloads. Only a genuinely starved owner
+                // (less than half the newcomer's budget left) defers.
+                const NSTimeInterval now = PushyMonotonicNow();
+                if (2 * (ownerDeadline - now) < (deadlineUptime - now)) {
                     if (progress != nil) {
                         [entry[@"progress"] addObject:[progress copy]];
                     }
@@ -861,7 +874,12 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
         }
         [defaults removeObjectForKey:keyFirstLoadMarked];
         [defaults removeObjectForKey:KeyPackageUpdatedMarked];
+        // A cached response still advertises the version this reset just
+        // removed; dropping it stops the JS side from reusing that answer.
+        [defaults removeObjectForKey:keyNativeCheckCache];
         ignoreRollback = false;
+        // Invalidate any cold-start check that is already in flight.
+        pushyResetGeneration.fetch_add(1);
     });
 
     dispatch_async(_fileQueue, ^{
@@ -1468,6 +1486,9 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
 }
 
 + (void)runOnce:(NSString *)launchRolledBackVersion {
+    // Sampled before any IO: resetToPackagedBundle bumps it, and a reset that
+    // lands while this round is running must win over the round's decision.
+    const uint64_t resetGeneration = pushyResetGeneration.load();
     NSUserDefaults *defaults = PushyDefaults();
     NSString *configJson = [defaults stringForKey:keyNativeConfig];
     if (configJson.length == 0) {
@@ -1550,8 +1571,10 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
         PushyToStdString(responseText), identity, false,
         config.Get("afterDownload").AsString());
     if (decision.Get("action").AsString() != "download") {
-        [self persistResponseCache:responseText request:body config:configJson
-                        responseAt:responseAtSeconds];
+        if (pushyResetGeneration.load() == resetGeneration) {
+            [self persistResponseCache:responseText request:body config:configJson
+                            responseAt:responseAtSeconds];
+        }
         RCTLogInfo(@"RCTPushy -- native check: nothing to do (%s)",
                    decision.Get("reason").AsString().c_str());
         return;
@@ -1569,8 +1592,10 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
                                 originHash:currentVersion];
     }
     if (!downloaded) {
-        [self persistResponseCache:responseText request:body config:configJson
-                        responseAt:responseAtSeconds];
+        if (pushyResetGeneration.load() == resetGeneration) {
+            [self persistResponseCache:responseText request:body config:configJson
+                            responseAt:responseAtSeconds];
+        }
         return;
     }
 
@@ -1585,6 +1610,11 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
     }
     [defaults setObject:[NSString stringWithUTF8String:flowjson::Stringify(hashInfo).c_str()]
                  forKey:PushyHashInfoKey(hash)];
+
+    if (pushyResetGeneration.load() != resetGeneration) {
+        RCTLogInfo(@"RCTPushy -- native check: reset during round, dropping result");
+        return;
+    }
 
     if (decision.Get("activate").Truthy()) {
         // Silent strategies or a server-marked forceBoot version (per-version

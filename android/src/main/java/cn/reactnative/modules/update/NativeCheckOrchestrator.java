@@ -67,6 +67,9 @@ final class NativeCheckOrchestrator {
         UpdateContext context,
         String launchRolledBackVersion
     ) throws JSONException {
+        // Sampled before any IO: a reset landing while this round runs must
+        // win over the round's decision.
+        final long resetGeneration = UpdateContext.getResetGeneration();
         String configJson = context.getKv(KEY_CONFIG);
         if (configJson == null || configJson.isEmpty()) {
             // No persisted config (old integration / first ever launch): the
@@ -155,8 +158,10 @@ final class NativeCheckOrchestrator {
         }
         JSONObject decision = new JSONObject(decisionJson);
         if (!"download".equals(decision.optString("action"))) {
-            persistResponseCache(
-                context, configJson, body, responseText, responseAtSeconds);
+            if (UpdateContext.getResetGeneration() == resetGeneration) {
+                persistResponseCache(
+                    context, configJson, body, responseText, responseAtSeconds);
+            }
             Log.i(UpdateContext.TAG,
                 "native check: nothing to do (" + decision.optString("reason") + ")");
             return;
@@ -174,8 +179,10 @@ final class NativeCheckOrchestrator {
         if (!downloaded) {
             // The native attempt has finished, so JS may safely reuse the
             // response and retry through its own strategy chain.
-            persistResponseCache(
-                context, configJson, body, responseText, responseAtSeconds);
+            if (UpdateContext.getResetGeneration() == resetGeneration) {
+                persistResponseCache(
+                    context, configJson, body, responseText, responseAtSeconds);
+            }
             return;
         }
 
@@ -191,6 +198,11 @@ final class NativeCheckOrchestrator {
                 }
             }
             context.setKv("hash_" + hash, hashInfo.toString());
+        }
+
+        if (UpdateContext.getResetGeneration() != resetGeneration) {
+            Log.i(UpdateContext.TAG, "native check: reset during round, dropping result");
+            return;
         }
 
         if (decision.optBoolean("activate", false)) {

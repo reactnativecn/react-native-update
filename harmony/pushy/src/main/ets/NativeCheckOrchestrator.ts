@@ -109,6 +109,9 @@ async function runOnce(
   context: UpdateContext,
   launchRolledBackVersion: string,
 ): Promise<void> {
+  // 在任何 IO 之前采样:resetToPackagedBundle 会递增它,本轮运行期间发生的
+  // reset 必须赢过本轮的决策。
+  const resetGeneration = context.getResetGeneration();
   const configJson = context.getKv(KEY_CONFIG);
   if (!configJson) {
     // 无落盘配置(老接入/首启):静默不跑——这就是灰度开关。
@@ -184,13 +187,15 @@ async function runOnce(
   }
   const decision = JSON.parse(decisionJson) as Decision;
   if (decision.action !== 'download') {
-    persistResponseCache(
-      context,
-      configJson,
-      body,
-      responseText,
-      responseAtSeconds,
-    );
+    if (context.getResetGeneration() === resetGeneration) {
+      persistResponseCache(
+        context,
+        configJson,
+        body,
+        responseText,
+        responseAtSeconds,
+      );
+    }
     logger.debug(TAG, `nothing to do (${decision.reason ?? ''})`);
     return;
   }
@@ -209,13 +214,15 @@ async function runOnce(
     );
   }
   if (!downloaded) {
-    persistResponseCache(
-      context,
-      configJson,
-      body,
-      responseText,
-      responseAtSeconds,
-    );
+    if (context.getResetGeneration() === resetGeneration) {
+      persistResponseCache(
+        context,
+        configJson,
+        body,
+        responseText,
+        responseAtSeconds,
+      );
+    }
     return;
   }
 
@@ -233,6 +240,11 @@ async function runOnce(
       hashInfo.metaInfo = info.metaInfo;
     }
     context.setKv(`hash_${hash}`, JSON.stringify(hashInfo));
+  }
+
+  if (context.getResetGeneration() !== resetGeneration) {
+    logger.debug(TAG, 'reset during round, dropping result');
+    return;
   }
 
   if (decision.activate === true) {
