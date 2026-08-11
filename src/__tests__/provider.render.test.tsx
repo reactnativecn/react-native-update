@@ -193,6 +193,7 @@ describe('UpdateProvider rendering', () => {
 
     await renderProvider(client);
 
+    expect(client.checkUpdate).toHaveBeenCalled();
     expect(client.reportInvalidUpdateOnce).not.toHaveBeenCalled();
     expect(client.downloadUpdate).not.toHaveBeenCalled();
     expect(mockAlert).not.toHaveBeenCalled();
