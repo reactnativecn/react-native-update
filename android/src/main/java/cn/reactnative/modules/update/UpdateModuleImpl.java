@@ -224,8 +224,52 @@ public class UpdateModuleImpl {
         });
     }
 
+    /**
+     * Raw response cached by the native cold-start check, for the JS side to
+     * reuse instead of re-checking (§10.3). Empty string when absent; never
+     * rejects.
+     */
+    public static void getNativeCheckCache(
+        final UpdateContext updateContext,
+        final Promise promise
+    ) {
+        String cached = updateContext.getKv(NativeCheckOrchestrator.KEY_RESP_CACHE);
+        promise.resolve(cached == null ? "" : cached);
+    }
+
     private static void setUuidInternal(UpdateContext updateContext, String uuid) {
         updateContext.setKv("uuid", uuid);
+    }
+
+    /**
+     * Provisioning for the native cold-start update check
+     * (NATIVE_CHECKUPDATE_DESIGN §10.1): the raw JSON persists as-is and is
+     * parsed on read by the orchestrator; absent config = check disabled.
+     * Validated at write time — a corrupt config would otherwise silently
+     * disable the native check forever with no signal.
+     */
+    public static void syncNativeConfig(
+        final UpdateContext updateContext,
+        final String config,
+        final Promise promise
+    ) {
+        if (config == null || config.isEmpty()) {
+            promise.reject(ErrorCodes.INVALID_OPTIONS, "config must be a JSON object string");
+            return;
+        }
+        try {
+            new JSONObject(config);
+        } catch (JSONException e) {
+            promise.reject(ErrorCodes.INVALID_OPTIONS, "config must be a JSON object string", e);
+            return;
+        }
+        StateSerialRunner.run(promise, ErrorCodes.FILE_OPERATION_FAILED, "syncNativeConfig", new StateSerialRunner.Operation() {
+            @Override
+            public void run() {
+                updateContext.setKv(NativeCheckOrchestrator.KEY_CONFIG, config);
+                promise.resolve(true);
+            }
+        });
     }
 
     public static void setUuid(

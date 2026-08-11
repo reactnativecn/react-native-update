@@ -9,6 +9,14 @@ export interface VersionInfo {
     rollout: {
       [packageVersion: string]: number;
     };
+    /**
+     * Server-set per-version override: the native cold-start check activates
+     * this version for the next launch regardless of the client's
+     * updateStrategy (the brick-rescue directive). Native-only — the JS
+     * interactive flow ignores it. The device-local rolledBack guard still
+     * wins, and first_time crash protection still applies.
+     */
+    forceBoot?: boolean;
     [key: string]: any;
   };
   pdiff?: string;

@@ -1,4 +1,7 @@
 #include <napi/native_api.h>
+
+#include "flow_json.h"
+#include "update_flow_core.h"
 #include <js_native_api.h>
 #include <js_native_api_types.h>
 
@@ -992,6 +995,102 @@ static napi_value GetSupportedDiffVersion(napi_env env, napi_callback_info) {
   return result;
 }
 
+// ---- update-flow decision layer (NATIVE_CHECKUPDATE_DESIGN §10) ----
+// String-in/string-out JSON, matching the decision layer's own boundary.
+// Returning undefined (nullptr without a pending exception) means "input did
+// not parse"; the ArkTS orchestrator skips the check round.
+
+static napi_value MakeUtf8String(napi_env env, const std::string& value) {
+  napi_value result = nullptr;
+  if (napi_create_string_utf8(env, value.c_str(), value.size(), &result) !=
+      napi_ok) {
+    ThrowError(env, "Failed to create string");
+    return nullptr;
+  }
+  return result;
+}
+
+static napi_value FlowBuildCheckRequestBody(napi_env env,
+                                            napi_callback_info info) {
+  size_t argc = 1;
+  napi_value args[1] = {nullptr};
+  if (!GetArgCount(env, info, &argc, args) || argc < 1) {
+    ThrowError(env, "buildCheckRequestBody: missing input argument");
+    return nullptr;
+  }
+  bool ok = false;
+  std::string input_json = GetString(env, args[0], &ok);
+  if (!ok) {
+    return nullptr;
+  }
+  bool parsed = false;
+  flowjson::Value input = flowjson::Parse(input_json, &parsed);
+  if (!parsed || !input.IsObject()) {
+    return nullptr;
+  }
+  return MakeUtf8String(
+      env, flowjson::Stringify(updateflow::BuildCheckRequestBody(input)));
+}
+
+static napi_value FlowOrderEndpointCandidates(napi_env env,
+                                              napi_callback_info info) {
+  size_t argc = 2;
+  napi_value args[2] = {nullptr, nullptr};
+  if (!GetArgCount(env, info, &argc, args) || argc < 2) {
+    ThrowError(env, "orderEndpointCandidates: missing arguments");
+    return nullptr;
+  }
+  bool ok = false;
+  std::string endpoints_json = GetString(env, args[0], &ok);
+  if (!ok) {
+    return nullptr;
+  }
+  double sample = 0;
+  if (napi_get_value_double(env, args[1], &sample) != napi_ok) {
+    ThrowError(env, "orderEndpointCandidates: expected number sample");
+    return nullptr;
+  }
+  bool parsed = false;
+  flowjson::Value endpoints = flowjson::Parse(endpoints_json, &parsed);
+  if (!parsed || !endpoints.IsArray()) {
+    return nullptr;
+  }
+  return MakeUtf8String(env,
+                        flowjson::Stringify(updateflow::OrderEndpointCandidates(
+                            endpoints, sample)));
+}
+
+static napi_value FlowHandleCheckResponse(napi_env env,
+                                          napi_callback_info info) {
+  size_t argc = 3;
+  napi_value args[3] = {nullptr, nullptr, nullptr};
+  if (!GetArgCount(env, info, &argc, args) || argc < 3) {
+    ThrowError(env, "handleCheckResponse: missing arguments");
+    return nullptr;
+  }
+  bool ok = false;
+  std::string response_text = GetString(env, args[0], &ok);
+  if (!ok) {
+    return nullptr;
+  }
+  std::string identity_json = GetString(env, args[1], &ok);
+  if (!ok) {
+    return nullptr;
+  }
+  std::string after_download = GetString(env, args[2], &ok);
+  if (!ok) {
+    return nullptr;
+  }
+  bool parsed = false;
+  flowjson::Value identity = flowjson::Parse(identity_json, &parsed);
+  if (!parsed || !identity.IsObject()) {
+    return nullptr;
+  }
+  return MakeUtf8String(env,
+                        flowjson::Stringify(updateflow::HandleCheckResponse(
+                            response_text, identity, false, after_download)));
+}
+
 napi_value Init(napi_env env, napi_value exports) {
   if (!ExportFunction(env, exports, "syncStateWithBinaryVersion", SyncStateWithBinaryVersion) ||
       !ExportFunction(env, exports, "runStateCore", RunStateCore) ||
@@ -1001,7 +1100,10 @@ napi_value Init(napi_env env, napi_value exports) {
       !ExportFunction(env, exports, "cleanupOldEntries", CleanupOldEntries) ||
       !ExportFunction(env, exports, "sha256Hex", Sha256Hex) ||
       !ExportFunction(env, exports, "crc32", Crc32) ||
-      !ExportFunction(env, exports, "getSupportedDiffVersion", GetSupportedDiffVersion)) {
+      !ExportFunction(env, exports, "getSupportedDiffVersion", GetSupportedDiffVersion) ||
+      !ExportFunction(env, exports, "buildCheckRequestBody", FlowBuildCheckRequestBody) ||
+      !ExportFunction(env, exports, "orderEndpointCandidates", FlowOrderEndpointCandidates) ||
+      !ExportFunction(env, exports, "handleCheckResponse", FlowHandleCheckResponse)) {
     return nullptr;
   }
   return exports;

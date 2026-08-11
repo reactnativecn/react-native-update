@@ -21,6 +21,8 @@ const updateResult: CheckResult = {
   name: '1.0.1',
   hash: 'next-hash',
   description: 'bugfix',
+  full: 'next.ppk',
+  paths: ['https://cdn.example.com'],
 };
 
 const createClient = (options: Record<string, any> = {}) => {
@@ -34,11 +36,14 @@ const createClient = (options: Record<string, any> = {}) => {
       autoMarkSuccess: false,
       ...options,
     },
+    getEffectivePackageVersion: () => options.overridePackageVersion || '1.0.0',
     assertDebug: () => true,
     checkUpdate: mock(
       async (): Promise<CheckResult | undefined> => ({ ...updateResult })
     ),
     notifyAfterCheckUpdate: mock(() => {}),
+    report: mock(() => {}),
+    reportInvalidUpdateOnce: mock(() => {}),
     markSuccess: mock(() => {}),
     switchVersion: mock(async () => {}),
     switchVersionLater: mock(async () => {}),
@@ -125,6 +130,73 @@ describe('UpdateProvider rendering', () => {
       await flush();
     });
     expect(client.switchVersion).toHaveBeenCalledWith('next-hash');
+  });
+
+  test('a hash-less update is reported but never shown as an actionable alert', async () => {
+    const client = createClient({ updateStrategy: 'alwaysAlert' });
+    client.checkUpdate.mockImplementation(async () => ({
+      update: true,
+      name: 'broken rollout entry',
+    }));
+
+    await renderProvider(client);
+
+    expect(client.reportInvalidUpdateOnce).toHaveBeenCalledWith('missingHash');
+    expect(client.downloadUpdate).not.toHaveBeenCalled();
+    expect(mockAlert).not.toHaveBeenCalled();
+  });
+
+  test('an expired app package without a bundle hash keeps its download action', async () => {
+    const client = createClient({ updateStrategy: 'alwaysAlert' });
+    client.checkUpdate.mockImplementation(async () => ({
+      expired: true,
+      update: true,
+      downloadUrl: 'https://cdn.example.com/app-release.apk',
+    }));
+
+    await renderProvider(client);
+
+    expect(client.reportInvalidUpdateOnce).not.toHaveBeenCalled();
+    expect(mockAlert).toHaveBeenCalledTimes(1);
+    const [, , buttons] = mockAlert.mock.calls[0] as any[];
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].text).toBe('alert_update_button');
+  });
+
+  test('an update without a downloadable artifact is never shown as actionable', async () => {
+    const client = createClient({ updateStrategy: 'alwaysAlert' });
+    client.checkUpdate.mockImplementation(async () => ({
+      update: true,
+      hash: 'broken-artifact-hash',
+      name: 'broken release',
+      paths: [],
+    }));
+
+    await renderProvider(client);
+
+    expect(client.reportInvalidUpdateOnce).toHaveBeenCalledWith(
+      'noArtifact',
+      'broken-artifact-hash'
+    );
+    expect(client.downloadUpdate).not.toHaveBeenCalled();
+    expect(mockAlert).not.toHaveBeenCalled();
+  });
+
+  test('a rolled-back update is never shown as actionable', async () => {
+    const client = createClient({ updateStrategy: 'alwaysAlert' });
+    client.checkUpdate.mockImplementation(async () => ({
+      update: true,
+      hash: 'rolled-back-hash',
+      full: 'rolled-back-hash.ppk',
+      paths: ['https://cdn.example.com'],
+    }));
+
+    await renderProvider(client);
+
+    expect(client.checkUpdate).toHaveBeenCalled();
+    expect(client.reportInvalidUpdateOnce).not.toHaveBeenCalled();
+    expect(client.downloadUpdate).not.toHaveBeenCalled();
+    expect(mockAlert).not.toHaveBeenCalled();
   });
 
   test('silentAndNow strategy downloads and switches without alerts', async () => {

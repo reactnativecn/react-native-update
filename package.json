@@ -14,6 +14,8 @@
     "submodule": "git submodule update --init --recursive",
     "test": "bun test src/__tests__",
     "test:patch-core": "./scripts/test-patch-core.sh",
+    "test:flow-core": "./scripts/test-update-flow-core.sh",
+    "generate:flow-vectors": "bun scripts/generate-flow-vectors.ts",
     "build:harmony-har": "node scripts/build-harmony-har.js",
     "build:harmony-e2e": "bash Example/e2etest/scripts/build-harmony-e2e.sh",
     "build:so": "bun submodule && bash scripts/build-android-so.sh",

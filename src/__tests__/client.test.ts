@@ -34,6 +34,9 @@ const setupClientMocks = ({
   supportedDiffVersion = 2,
   // 内嵌 bundle 的 sha256(core 层同步读预取值);'' 模拟未知
   getBundleHash = mock(() => ''),
+  // undefined 模拟旧原生(无该方法,feature-detect 静默跳过)
+  syncNativeConfig = undefined,
+  getNativeCheckCache = undefined,
 }: {
   isFirstTime?: boolean;
   markSuccess?: ReturnType<typeof mock>;
@@ -47,6 +50,8 @@ const setupClientMocks = ({
   resetToPackagedBundle?: ReturnType<typeof mock> | null;
   supportedDiffVersion?: number;
   getBundleHash?: ReturnType<typeof mock>;
+  syncNativeConfig?: ReturnType<typeof mock>;
+  getNativeCheckCache?: ReturnType<typeof mock>;
 } = {}) => {
   (globalThis as any).__DEV__ = false;
 
@@ -75,6 +80,8 @@ const setupClientMocks = ({
       downloadAndInstallApk: mock(() => Promise.resolve()),
       restartApp,
       resetToPackagedBundle,
+      ...(syncNativeConfig ? { syncNativeConfig } : {}),
+      ...(getNativeCheckCache ? { getNativeCheckCache } : {}),
     },
     buildTime: '2023-01-01',
     cInfo: {
@@ -836,6 +843,44 @@ describe('downloadUpdate fallback chain', () => {
     expect(downloadPatchFromPpk).toHaveBeenCalledTimes(1);
   });
 
+  test('reports a release response with no downloadable artifact', async () => {
+    const {
+      downloadPatchFromPpk,
+      downloadPatchFromPackage,
+      downloadFullUpdate,
+    } = setupDownloadMocks();
+    const logger = mock(() => {});
+    const { Pushy, sharedState } = await importFreshClient('dl-no-artifact');
+    sharedState.downloadedHash = undefined;
+    const client = new Pushy({
+      appKey: 'demo-app',
+      logger,
+      disableTelemetry: true,
+    });
+
+    expect(
+      await client.downloadUpdate({ ...updateInfo, paths: [] })
+    ).toBeUndefined();
+    expect(
+      await client.downloadUpdate({ ...updateInfo, paths: [] })
+    ).toBeUndefined();
+    await Promise.resolve();
+
+    expect(downloadPatchFromPpk).not.toHaveBeenCalled();
+    expect(downloadPatchFromPackage).not.toHaveBeenCalled();
+    expect(downloadFullUpdate).not.toHaveBeenCalled();
+    expect(logger).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'errorUpdate',
+        data: expect.objectContaining({
+          newVersion: 'new-hash',
+          message: 'update response contains no downloadable artifact',
+        }),
+      })
+    );
+    expect(logger).toHaveBeenCalledTimes(1);
+  });
+
   test('adds computed progress to download progress callbacks', async () => {
     let progressListener:
       | ((data: { hash: string; received: number; total: number }) => void)
@@ -1355,5 +1400,451 @@ describe('client singleton', () => {
     // After unmount the claim is released and a new provider may mount.
     release();
     expect(() => client.claimProviderMount()).not.toThrow();
+  });
+});
+
+describe('syncNativeConfig', () => {
+  test('persists the native check config on construction (silent strategy activates)', async () => {
+    const syncNativeConfig = mock(() => Promise.resolve());
+    setupClientMocks({ syncNativeConfig });
+    const { Pushy } = await importFreshClient('sync-config-1');
+    new Pushy({ appKey: 'demo-app', updateStrategy: 'silentAndLater' });
+
+    expect(syncNativeConfig).toHaveBeenCalled();
+    const config = JSON.parse(
+      (syncNativeConfig.mock.calls.at(-1) as unknown as string[])[0]
+    );
+    expect(config.appKey).toBe('demo-app');
+    expect(config.afterDownload).toBe('setNeedUpdate');
+    expect(config.endpoints.length).toBeGreaterThan(0);
+    expect(config.queryUrls.length).toBeGreaterThan(0);
+    expect(config.rnu).toBe('10.0.0');
+    expect(config.rn).toBe('0.73.0');
+    expect(config.packageVersion).toBe('1.0.0');
+  });
+
+  test('disabling automatic checks keeps activation with JS too', async () => {
+    // checkStrategy: null means "never check on your own". The native
+    // cold-start check still runs (that is what rescues a bricked device),
+    // but it must not hand the app a version switch it never asked for —
+    // only the server's explicit forceBoot may still activate.
+    const syncNativeConfig = mock(() => Promise.resolve());
+    setupClientMocks({ syncNativeConfig });
+    const { Pushy } = await importFreshClient('sync-config-no-autocheck');
+    new Pushy({
+      appKey: 'demo-app',
+      updateStrategy: 'silentAndNow',
+      checkStrategy: null,
+    });
+
+    const config = JSON.parse(
+      (syncNativeConfig.mock.calls.at(-1) as unknown as string[])[0]
+    );
+    expect(config.afterDownload).toBe('none');
+  });
+
+  test('silent strategy with automatic checks still activates', async () => {
+    const syncNativeConfig = mock(() => Promise.resolve());
+    setupClientMocks({ syncNativeConfig });
+    const { Pushy } = await importFreshClient('sync-config-autocheck');
+    new Pushy({
+      appKey: 'demo-app',
+      updateStrategy: 'silentAndNow',
+      checkStrategy: 'onAppStart',
+    });
+
+    const config = JSON.parse(
+      (syncNativeConfig.mock.calls.at(-1) as unknown as string[])[0]
+    );
+    expect(config.afterDownload).toBe('setNeedUpdate');
+  });
+
+  test('alert strategies keep activation with JS (afterDownload none)', async () => {
+    const syncNativeConfig = mock(() => Promise.resolve());
+    setupClientMocks({ syncNativeConfig });
+    const { Pushy } = await importFreshClient('sync-config-2');
+    new Pushy({ appKey: 'demo-app' });
+
+    const config = JSON.parse(
+      (syncNativeConfig.mock.calls.at(-1) as unknown as string[])[0]
+    );
+    expect(config.afterDownload).toBe('none');
+  });
+
+  test('setOptions re-syncs when the strategy changes', async () => {
+    const syncNativeConfig = mock(() => Promise.resolve());
+    setupClientMocks({ syncNativeConfig });
+    const { Pushy } = await importFreshClient('sync-config-3');
+    const client = new Pushy({ appKey: 'demo-app' });
+    client.setOptions({ updateStrategy: 'silentAndNow' });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const config = JSON.parse(
+      (syncNativeConfig.mock.calls.at(-1) as unknown as string[])[0]
+    );
+    expect(config.afterDownload).toBe('setNeedUpdate');
+  });
+
+  test('persists an explicit disabled state when the config becomes invalid', async () => {
+    const syncNativeConfig = mock(() => Promise.resolve());
+    setupClientMocks({ syncNativeConfig });
+    const { Pushy } = await importFreshClient('sync-config-disabled');
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    client.setOptions({ appKey: '' });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(syncNativeConfig).toHaveBeenCalledTimes(2);
+    expect(
+      JSON.parse((syncNativeConfig.mock.calls.at(-1) as unknown as string[])[0])
+    ).toEqual({ disabled: true });
+  });
+
+  test('persists and exposes the effective overridden package version', async () => {
+    const syncNativeConfig = mock(() => Promise.resolve());
+    setupClientMocks({ syncNativeConfig });
+    const { Pushy } = await importFreshClient('sync-config-package-override');
+    const client = new Pushy({
+      appKey: 'demo-app',
+      overridePackageVersion: '9.9.9',
+    });
+
+    const config = JSON.parse(
+      (syncNativeConfig.mock.calls.at(-1) as unknown as string[])[0]
+    );
+    expect(config.packageVersion).toBe('9.9.9');
+    expect(client.getEffectivePackageVersion()).toBe('9.9.9');
+  });
+
+  test('skips duplicate config writes after the same value succeeds', async () => {
+    const syncNativeConfig = mock(() => Promise.resolve());
+    setupClientMocks({ syncNativeConfig });
+    const { Pushy } = await importFreshClient('sync-config-dedupe');
+    const client = new Pushy({ appKey: 'demo-app' });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    client.setOptions({ appKey: 'demo-app' });
+
+    expect(syncNativeConfig).toHaveBeenCalledTimes(1);
+  });
+
+  test('serializes config writes and preserves the newest pending value', async () => {
+    const resolvers: Array<() => void> = [];
+    const syncNativeConfig = mock(
+      () =>
+        new Promise<void>((resolve) => {
+          resolvers.push(resolve);
+        })
+    );
+    setupClientMocks({ syncNativeConfig });
+    const { Pushy } = await importFreshClient('sync-config-serialized');
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    client.setOptions({ updateStrategy: 'silentAndNow' });
+    expect(syncNativeConfig).toHaveBeenCalledTimes(1);
+    resolvers[0]();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(syncNativeConfig).toHaveBeenCalledTimes(2);
+    const config = JSON.parse(
+      (syncNativeConfig.mock.calls.at(-1) as unknown as string[])[0]
+    );
+    expect(config.afterDownload).toBe('setNeedUpdate');
+    resolvers[1]();
+  });
+
+  test('persists a revert to the last synced value while a newer write is in flight', async () => {
+    const resolvers: Array<() => void> = [];
+    const syncNativeConfig = mock(
+      () =>
+        new Promise<void>((resolve) => {
+          resolvers.push(resolve);
+        })
+    );
+    setupClientMocks({ syncNativeConfig });
+    const { Pushy } = await importFreshClient('sync-config-revert-race');
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    // Finish the initial alert-strategy value (A).
+    resolvers[0]();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Start B, then revert to A before B finishes. A must remain pending even
+    // though it still equals the last completed value at this instant.
+    client.setOptions({ updateStrategy: 'silentAndNow' });
+    client.setOptions({ updateStrategy: 'alwaysAlert' });
+    expect(syncNativeConfig).toHaveBeenCalledTimes(2);
+
+    resolvers[1]();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(syncNativeConfig).toHaveBeenCalledTimes(3);
+    const reverted = JSON.parse(
+      (syncNativeConfig.mock.calls.at(-1) as unknown as string[])[0]
+    );
+    expect(reverted.afterDownload).toBe('none');
+    resolvers[2]();
+  });
+
+  test('retries a config write that failed', async () => {
+    let calls = 0;
+    const syncNativeConfig = mock(() => {
+      calls++;
+      return calls === 1
+        ? Promise.reject(new Error('write failed'))
+        : Promise.resolve();
+    });
+    setupClientMocks({ syncNativeConfig });
+    const { Pushy } = await importFreshClient('sync-config-retry');
+    const client = new Pushy({ appKey: 'demo-app' });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    client.setOptions({ appKey: 'demo-app' });
+
+    expect(syncNativeConfig).toHaveBeenCalledTimes(2);
+  });
+
+  test('an older native module without the method is skipped silently', async () => {
+    setupClientMocks();
+    const { Pushy } = await importFreshClient('sync-config-4');
+    // Must not throw even though PushyModule lacks syncNativeConfig.
+    new Pushy({ appKey: 'demo-app' });
+  });
+});
+
+describe('native check cache reuse', () => {
+  const expectedRequestBody = JSON.stringify({
+    packageVersion: '1.0.0',
+    hash: 'hash',
+    buildTime: '2023-01-01',
+    cInfo: {
+      rnu: '10.0.0',
+      rn: '0.73.0',
+      os: 'ios',
+      uuid: 'uuid',
+    },
+    diffV: 2,
+  });
+
+  test('a fresh cached response is reused without a network check', async () => {
+    const cachedResult = { upToDate: true };
+    let configJson = '';
+    const syncNativeConfig = mock((value: string) => {
+      configJson = value;
+      return Promise.resolve();
+    });
+    const getNativeCheckCache = mock(() =>
+      Promise.resolve(
+        JSON.stringify({
+          ts: Math.floor(Date.now() / 1000) - 30,
+          body: JSON.stringify(cachedResult),
+          request: expectedRequestBody,
+          config: configJson,
+        })
+      )
+    );
+    setupClientMocks({ getNativeCheckCache, syncNativeConfig });
+    // setup.ts's default fetch throws, so any network attempt would surface
+    // as a failed check (undefined) instead of the cached result.
+    const { Pushy } = await importFreshClient('native-cache-fresh');
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    expect(await client.checkUpdate()).toEqual(cachedResult);
+    expect(getNativeCheckCache).toHaveBeenCalled();
+  });
+
+  test('a stale cached response falls through to the network', async () => {
+    let configJson = '';
+    const syncNativeConfig = mock((value: string) => {
+      configJson = value;
+      return Promise.resolve();
+    });
+    const getNativeCheckCache = mock(() =>
+      Promise.resolve(
+        JSON.stringify({
+          ts: Math.floor(Date.now() / 1000) - 600,
+          body: JSON.stringify({ upToDate: true }),
+          request: expectedRequestBody,
+          config: configJson,
+        })
+      )
+    );
+    setupClientMocks({ getNativeCheckCache, syncNativeConfig });
+    const networkResult = { update: true, hash: 'net-hash' };
+    (globalThis as any).fetch = mock(async () =>
+      createJsonResponse(networkResult)
+    );
+    const { Pushy } = await importFreshClient('native-cache-stale');
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    expect(await client.checkUpdate()).toEqual(networkResult);
+  });
+
+  test('an unreadable cache never breaks the check', async () => {
+    const getNativeCheckCache = mock(() => Promise.resolve('not json'));
+    const syncNativeConfig = mock(() => Promise.resolve());
+    setupClientMocks({ getNativeCheckCache, syncNativeConfig });
+    const networkResult = { upToDate: true };
+    (globalThis as any).fetch = mock(async () =>
+      createJsonResponse(networkResult)
+    );
+    const { Pushy } = await importFreshClient('native-cache-bad');
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    expect(await client.checkUpdate()).toEqual(networkResult);
+  });
+
+  test('a cache for a different request body is never reused', async () => {
+    let configJson = '';
+    const syncNativeConfig = mock((value: string) => {
+      configJson = value;
+      return Promise.resolve();
+    });
+    const getNativeCheckCache = mock(() =>
+      Promise.resolve(
+        JSON.stringify({
+          ts: Math.floor(Date.now() / 1000) - 10,
+          body: JSON.stringify({ hash: 'wrong-hash', update: true }),
+          request: expectedRequestBody,
+          config: configJson,
+        })
+      )
+    );
+    setupClientMocks({ getNativeCheckCache, syncNativeConfig });
+    const networkResult = { update: true, hash: 'requested-hash' };
+    (globalThis as any).fetch = mock(async () =>
+      createJsonResponse(networkResult)
+    );
+    const { Pushy } = await importFreshClient('native-cache-request-key');
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    expect(await client.checkUpdate({ toHash: 'requested-hash' })).toEqual(
+      networkResult
+    );
+  });
+
+  test('request key order does not prevent reuse of the same request', async () => {
+    const cachedResult = { upToDate: true };
+    let configJson = '';
+    const syncNativeConfig = mock((value: string) => {
+      configJson = value;
+      return Promise.resolve();
+    });
+    const getNativeCheckCache = mock(() =>
+      Promise.resolve(
+        JSON.stringify({
+          ts: Math.floor(Date.now() / 1000) - 10,
+          body: JSON.stringify(cachedResult),
+          request: JSON.stringify({
+            diffV: 2,
+            cInfo: {
+              uuid: 'uuid',
+              os: 'ios',
+              rn: '0.73.0',
+              rnu: '10.0.0',
+            },
+            buildTime: '2023-01-01',
+            hash: 'hash',
+            packageVersion: '1.0.0',
+          }),
+          config: configJson,
+        })
+      )
+    );
+    setupClientMocks({ getNativeCheckCache, syncNativeConfig });
+    const { Pushy } = await importFreshClient('native-cache-key-order');
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    expect(await client.checkUpdate()).toEqual(cachedResult);
+  });
+
+  test('undefined request extras omitted by JSON do not prevent cache reuse', async () => {
+    const cachedResult = { upToDate: true };
+    let configJson = '';
+    const syncNativeConfig = mock((value: string) => {
+      configJson = value;
+      return Promise.resolve();
+    });
+    const getNativeCheckCache = mock(() =>
+      Promise.resolve(
+        JSON.stringify({
+          ts: Math.floor(Date.now() / 1000) - 10,
+          body: JSON.stringify(cachedResult),
+          request: expectedRequestBody,
+          config: configJson,
+        })
+      )
+    );
+    setupClientMocks({ getNativeCheckCache, syncNativeConfig });
+    const { Pushy } = await importFreshClient('native-cache-undefined-extra');
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    expect(await client.checkUpdate({ omitted: undefined })).toEqual(
+      cachedResult
+    );
+  });
+
+  test('a cache for a different native config is never reused', async () => {
+    const getNativeCheckCache = mock(() =>
+      Promise.resolve(
+        JSON.stringify({
+          ts: Math.floor(Date.now() / 1000) - 10,
+          body: JSON.stringify({ upToDate: true }),
+          request: expectedRequestBody,
+          config: JSON.stringify({ appKey: 'another-app' }),
+        })
+      )
+    );
+    const syncNativeConfig = mock(() => Promise.resolve());
+    setupClientMocks({ getNativeCheckCache, syncNativeConfig });
+    const networkResult = { update: true, hash: 'net-hash' };
+    (globalThis as any).fetch = mock(async () =>
+      createJsonResponse(networkResult)
+    );
+    const { Pushy } = await importFreshClient('native-cache-config-key');
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    expect(await client.checkUpdate()).toEqual(networkResult);
+  });
+
+  test('a cache timestamp from the future is never reused', async () => {
+    let configJson = '';
+    const syncNativeConfig = mock((value: string) => {
+      configJson = value;
+      return Promise.resolve();
+    });
+    const getNativeCheckCache = mock(() =>
+      Promise.resolve(
+        JSON.stringify({
+          ts: Math.floor(Date.now() / 1000) + 600,
+          body: JSON.stringify({ upToDate: true }),
+          request: expectedRequestBody,
+          config: configJson,
+        })
+      )
+    );
+    setupClientMocks({ getNativeCheckCache, syncNativeConfig });
+    const networkResult = { update: true, hash: 'net-hash' };
+    (globalThis as any).fetch = mock(async () =>
+      createJsonResponse(networkResult)
+    );
+    const { Pushy } = await importFreshClient('native-cache-future');
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    expect(await client.checkUpdate()).toEqual(networkResult);
   });
 });

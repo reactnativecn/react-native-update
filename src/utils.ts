@@ -76,18 +76,7 @@ const ping = isWeb
       }
     };
 
-export function joinUrls(paths: string[], fileName?: string) {
-  if (fileName) {
-    return paths.map((path) => {
-      const normalizedPath = path.replace(/\/+$/, '');
-      // Keep explicit http(s) URLs for local/self-hosted update sources.
-      const baseUrl = /^[a-z][a-z0-9+.-]*:\/\//i.test(normalizedPath)
-        ? normalizedPath
-        : `https://${normalizedPath}`;
-      return `${baseUrl}/${fileName}`;
-    });
-  }
-}
+export { joinUrls } from './updateFlowCore';
 
 export const testUrls = async (urls?: string[]): Promise<string | null> => {
   if (!urls?.length) {

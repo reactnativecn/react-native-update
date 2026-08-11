@@ -86,6 +86,20 @@ interface NativePatchCoreBindings {
   crc32(data: Uint8Array | ArrayBuffer): number;
   /** 原生 patch 内核可消费的 diff 轨道版本(2 = hdiffv2 轨道) */
   getSupportedDiffVersion(): number;
+
+  // 更新流程决策层(cpp/update_flow_core,NATIVE_CHECKUPDATE_DESIGN §10):
+  // JSON 字符串进出,与决策层自身的边界一致。返回 undefined = 输入未通过
+  // 解析,编排器跳过本轮检测。
+  buildCheckRequestBody(inputJson: string): string | undefined;
+  orderEndpointCandidates(
+    endpointsJson: string,
+    randomSample: number,
+  ): string | undefined;
+  handleCheckResponse(
+    responseText: string,
+    identityJson: string,
+    afterDownload: string,
+  ): string | undefined;
 }
 
 export default NativeUpdateCore as unknown as NativePatchCoreBindings;

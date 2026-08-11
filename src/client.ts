@@ -42,12 +42,17 @@ import type {
   UpdateServerConfig,
 } from './type';
 import {
+  buildCheckRequestBody,
+  type DownloadPlan,
+  type DownloadStrategyType,
+  decideDownload,
+} from './updateFlowCore';
+import {
   assertWeb,
   computeProgress,
   DEFAULT_FETCH_TIMEOUT_MS,
   fetchWithTimeout,
   info,
-  joinUrls,
   log,
   noop,
   promiseAny,
@@ -90,6 +95,11 @@ const cloneServerConfig = (server: UpdateServerConfig): UpdateServerConfig => ({
   main: dedupeEndpoints([...(server.main || [])]),
   queryUrls: server.queryUrls ? [...server.queryUrls] : undefined,
 });
+
+// Persist an object (rather than an empty string) so every native bridge keeps
+// accepting the payload while the orchestrators treat the missing appKey and
+// endpoints as an explicit disabled state.
+const NATIVE_CONFIG_DISABLED_JSON = '{"disabled":true}';
 
 const excludeConfiguredEndpoints = (
   endpoints: string[],
@@ -161,6 +171,10 @@ export class Pushy {
   // Endpoint that most recently served a successful checkUpdate; telemetry
   // reuses it instead of re-running the fallback race.
   private lastWorkingEndpoint?: string;
+  private syncedNativeConfigJson?: string;
+  private pendingNativeConfigJson?: string;
+  private nativeConfigSyncInFlight = false;
+  private reportedInvalidUpdates = new Set<string>();
 
   version = cInfo.rnu;
   loggerPromise = (() => {
@@ -259,6 +273,149 @@ export class Pushy {
         log('onOptionsChange listener error:', e?.message || e);
       }
     }
+    this.syncNativeConfig();
+  };
+
+  /** Build the subset of options used by the native cold-start check. */
+  private getNativeConfig = (): Record<string, unknown> | undefined => {
+    if (
+      Platform.OS === 'web' ||
+      typeof PushyModule.syncNativeConfig !== 'function'
+    ) {
+      // Older natives lack the method; on web PushyModule is a noop Proxy
+      // and the feature-detect would false-positive.
+      return undefined;
+    }
+    const { appKey, server, updateStrategy, checkStrategy } = this.options;
+    if (!appKey || !server?.main?.length) {
+      return undefined;
+    }
+    // An app that turned automatic checks off (checkStrategy: null) must not
+    // be handed a version switch it never asked for. The cold-start check
+    // still runs and still downloads — that is what keeps a bricked device
+    // rescuable — but activation waits for the JS side, or for the server's
+    // explicit per-version forceBoot directive (shouldActivateAfterDownload).
+    const autoCheckEnabled = checkStrategy != null;
+    return {
+      appKey,
+      packageVersion: this.getEffectivePackageVersion(),
+      endpoints: server.main,
+      queryUrls: server.queryUrls ?? [],
+      // The native check may activate a downloaded version (next launch)
+      // only under the silent strategies; alert-style strategies keep
+      // activation with the JS side (§6/§10.1).
+      afterDownload:
+        autoCheckEnabled &&
+        (updateStrategy === 'silentAndNow' ||
+          updateStrategy === 'silentAndLater')
+          ? 'setNeedUpdate'
+          : 'none',
+      rnu: cInfo.rnu,
+      rn: cInfo.rn,
+    };
+  };
+
+  private getNativeConfigJson = (): string | undefined => {
+    const config = this.getNativeConfig();
+    return config ? JSON.stringify(config) : undefined;
+  };
+
+  private flushNativeConfig = () => {
+    if (this.nativeConfigSyncInFlight) {
+      return;
+    }
+    const configJson = this.pendingNativeConfigJson;
+    this.pendingNativeConfigJson = undefined;
+    if (!configJson || configJson === this.syncedNativeConfigJson) {
+      return;
+    }
+    this.nativeConfigSyncInFlight = true;
+    let syncResult: Promise<void>;
+    try {
+      syncResult = Promise.resolve(PushyModule.syncNativeConfig(configJson));
+    } catch (e: any) {
+      this.nativeConfigSyncInFlight = false;
+      log('syncNativeConfig failed:', e?.message || e);
+      return;
+    }
+    syncResult
+      .then(() => {
+        this.syncedNativeConfigJson = configJson;
+      })
+      .catch((e: any) => {
+        log('syncNativeConfig failed:', e?.message || e);
+      })
+      .finally(() => {
+        this.nativeConfigSyncInFlight = false;
+        this.flushNativeConfig();
+      });
+  };
+
+  private syncNativeConfig = () => {
+    if (
+      Platform.OS === 'web' ||
+      typeof PushyModule.syncNativeConfig !== 'function'
+    ) {
+      return;
+    }
+    const configJson =
+      this.getNativeConfigJson() ?? NATIVE_CONFIG_DISABLED_JSON;
+    // Always record the latest desired value, even when it matches the last
+    // completed write. Example: A synced -> B in flight -> options revert to
+    // A. Comparing only with synced(A) would drop the revert and leave native
+    // storage at B after that in-flight write completes.
+    // Coalesce rapid setOptions calls, but serialize bridge writes so an older
+    // completion can never overwrite the newest desired configuration.
+    this.pendingNativeConfigJson = configJson;
+    this.flushNativeConfig();
+  };
+
+  /** Package version used by every server-side update decision. */
+  getEffectivePackageVersion = () =>
+    this.options.overridePackageVersion || packageVersion;
+
+  private jsonValuesEqual = (left: unknown, right: unknown): boolean => {
+    const compare = (a: unknown, b: unknown): boolean => {
+      if (a === b) {
+        return true;
+      }
+      if (Array.isArray(a) || Array.isArray(b)) {
+        return (
+          Array.isArray(a) &&
+          Array.isArray(b) &&
+          a.length === b.length &&
+          a.every((value, index) => compare(value, b[index]))
+        );
+      }
+      if (
+        a === null ||
+        b === null ||
+        typeof a !== 'object' ||
+        typeof b !== 'object'
+      ) {
+        return false;
+      }
+      const leftObject = a as Record<string, unknown>;
+      const rightObject = b as Record<string, unknown>;
+      // Match JSON.stringify semantics for request extras: object properties
+      // whose value is undefined are omitted from the wire fingerprint.
+      const leftKeys = Object.keys(leftObject)
+        .filter((key) => leftObject[key] !== undefined)
+        .sort();
+      const rightKeys = Object.keys(rightObject)
+        .filter((key) => rightObject[key] !== undefined)
+        .sort();
+      return (
+        leftKeys.length === rightKeys.length &&
+        leftKeys.every(
+          (key, index) =>
+            key === rightKeys[index] &&
+            compare(leftObject[key], rightObject[key])
+        )
+      );
+    };
+
+    return compare(left, right);
   };
 
   private providerMounted = false;
@@ -289,6 +446,25 @@ export class Pushy {
    */
   t = (key: string, values?: Record<string, string | number>) => {
     return i18n.t(key as any, values);
+  };
+
+  reportInvalidUpdateOnce = (
+    reason: 'missingHash' | 'noArtifact',
+    hash = ''
+  ) => {
+    const key = `${this.options.appKey}:${reason}:${hash}`;
+    if (this.reportedInvalidUpdates.has(key)) {
+      return;
+    }
+    this.reportedInvalidUpdates.add(key);
+    this.report({
+      type: 'errorUpdate',
+      message:
+        reason === 'missingHash'
+          ? 'update response is missing a version hash'
+          : 'update response contains no downloadable artifact',
+      ...(hash ? { data: { newVersion: hash } } : {}),
+    });
   };
 
   report = async ({
@@ -385,8 +561,7 @@ export class Pushy {
             body: JSON.stringify({
               type: payloadType,
               hash,
-              packageVersion:
-                this.options.overridePackageVersion || packageVersion,
+              packageVersion: this.getEffectivePackageVersion(),
               cInfo,
               detail: truncateDetail(detail),
             }),
@@ -577,6 +752,57 @@ export class Pushy {
     this.lastWorkingEndpoint = endpoint;
     return value;
   };
+  /**
+   * Reuse the native cold-start check's cached response when fresh
+   * (NATIVE_CHECKUPDATE_DESIGN §10.3) instead of re-checking. Returns
+   * undefined whenever the cache is absent, stale, or unreadable — any
+   * failure falls through to a normal network check.
+   */
+  private readNativeCheckCache = async (
+    requestBody: Record<string, any>
+  ): Promise<CheckResult | undefined> => {
+    try {
+      if (__DEV__ || typeof PushyModule.getNativeCheckCache !== 'function') {
+        return undefined;
+      }
+      const raw = await Promise.resolve(PushyModule.getNativeCheckCache());
+      if (!raw || typeof raw !== 'string') {
+        return undefined;
+      }
+      const entry = JSON.parse(raw);
+      const config = this.getNativeConfig();
+      const cachedRequest =
+        typeof entry?.request === 'string'
+          ? JSON.parse(entry.request)
+          : undefined;
+      const cachedConfig =
+        typeof entry?.config === 'string'
+          ? JSON.parse(entry.config)
+          : undefined;
+      if (
+        typeof entry?.ts !== 'number' ||
+        typeof entry?.body !== 'string' ||
+        !this.jsonValuesEqual(cachedRequest, requestBody) ||
+        !config ||
+        !this.jsonValuesEqual(cachedConfig, config)
+      ) {
+        return undefined;
+      }
+      const ageSeconds = Date.now() / 1000 - entry.ts;
+      if (ageSeconds < 0 || ageSeconds > 120) {
+        return undefined;
+      }
+      const result = JSON.parse(entry.body);
+      if (!result || typeof result !== 'object') {
+        return undefined;
+      }
+      log('reusing native check response cache');
+      return result as CheckResult;
+    } catch {
+      return undefined;
+    }
+  };
+
   assertDebug = (matter: string) => {
     if (__DEV__ && !this.options.debug) {
       info(this.t('dev_debug_disabled', { matter }));
@@ -697,19 +923,16 @@ export class Pushy {
       }
     }
     this.lastChecking = now;
-    const fetchBody: Record<string, any> = {
-      packageVersion: this.options.overridePackageVersion || packageVersion,
-      hash: currentVersion,
+    const fetchBody = buildCheckRequestBody({
+      packageVersion: this.getEffectivePackageVersion(),
+      currentVersion,
       buildTime,
       cInfo,
-      // 可消费的 diff 轨道版本(2 = hdiffv2 轨道),服务端据此门控下发
-      ...(supportedDiffVersion ? { diffV: supportedDiffVersion } : {}),
-      ...(bundleHash ? { bundleHash } : {}),
-      ...extra,
-    };
-    if (__DEV__) {
-      delete fetchBody.buildTime;
-    }
+      supportedDiffVersion,
+      bundleHash,
+      isDev: __DEV__,
+      extra,
+    });
     const stringifyBody = JSON.stringify(fetchBody);
     // harmony fetch body is not string
     let body: any = fetchBody;
@@ -730,7 +953,18 @@ export class Pushy {
         type: 'checking',
         message: `${this.options.appKey}: ${stringifyBody}`,
       });
-      const respJsonPromise = this.fetchCheckResult(fetchPayload);
+      // The native cold-start check may have a fresh response on disk
+      // (§10.3); reuse it instead of re-checking. The read happens INSIDE
+      // the promise so no await lands between the dedup window above and the
+      // lastRespJson assignment below (the JS2-1 double-send lesson).
+      const respJsonPromise = (async (): Promise<CheckResult> => {
+        // While bundleHash prefetch is still pending, the JS request omits
+        // that key whereas the native request always includes its synchronously
+        // computed value. That narrow first-launch window intentionally misses
+        // the cache rather than delaying checkUpdate for hashing.
+        const cached = await this.readNativeCheckCache(fetchBody);
+        return cached ?? (await this.fetchCheckResult(fetchPayload));
+      })();
       this.lastRespJson = respJsonPromise;
       const result: CheckResult = await respJsonPromise;
 
@@ -766,7 +1000,6 @@ export class Pushy {
     updateInfo: CheckResult,
     onDownloadProgress?: (data: ProgressData) => void
   ) => {
-    const { hash } = updateInfo;
     if (
       this.options.beforeDownloadUpdate &&
       (await this.options.beforeDownloadUpdate(updateInfo)) === false
@@ -774,17 +1007,26 @@ export class Pushy {
       log('beforeDownloadUpdate returned false, skipping download');
       return;
     }
-    if (!updateInfo.update || !hash) {
+    const decision = decideDownload(
+      updateInfo,
+      { currentVersion, rolledBackVersion },
+      __DEV__
+    );
+    if (decision.action === 'none') {
+      if (decision.reason === 'alreadyCurrent') {
+        log(`current hash ${currentVersion}, ignored`);
+      } else if (decision.reason === 'rolledBack') {
+        log(`rolledback hash ${rolledBackVersion}, ignored`);
+      } else if (decision.reason === 'noArtifact') {
+        // A server response that advertises an update but provides no usable
+        // artifact is a bad release signal, not an ordinary no-update result.
+        // Keep the user flow silent and report at most once per bad release in
+        // this process: repeated checks must not inflate download_fail health.
+        this.reportInvalidUpdateOnce('noArtifact', updateInfo.hash || '');
+      }
       return;
     }
-    if (hash === currentVersion) {
-      log(`current hash ${currentVersion}, ignored`);
-      return;
-    }
-    if (rolledBackVersion === hash) {
-      log(`rolledback hash ${rolledBackVersion}, ignored`);
-      return;
-    }
+    const { hash } = decision;
     if (sharedState.downloadedHash === hash) {
       log(`duplicated downloaded hash ${sharedState.downloadedHash}, ignored`);
       return sharedState.downloadedHash;
@@ -801,7 +1043,7 @@ export class Pushy {
       }
       return existingTask;
     }
-    const task = this.performDownload(updateInfo, onDownloadProgress);
+    const task = this.performDownload(updateInfo, decision, onDownloadProgress);
     sharedState.downloadingTasks[hash] = task;
     try {
       return await task;
@@ -811,21 +1053,11 @@ export class Pushy {
   };
   private performDownload = async (
     updateInfo: CheckResult,
+    plan: DownloadPlan,
     onDownloadProgress?: (data: ProgressData) => void
   ) => {
-    const {
-      hash,
-      diff,
-      pdiff,
-      full,
-      paths = [],
-      name,
-      description = '',
-      metaInfo,
-    } = updateInfo;
-    if (!hash) {
-      return;
-    }
+    const { name, description = '', metaInfo } = updateInfo;
+    const { hash, attempts, devNoop } = plan;
     const patchStartTime = Date.now();
     // One native listener per hash dispatching to a callback set, so
     // concurrent callers deduped onto this task can each observe progress
@@ -870,61 +1102,35 @@ export class Pushy {
     let lastError: any;
     const errorMessages: string[] = [];
 
-    // Ordered download strategies, tried in sequence until one succeeds. Each
-    // resolves its candidate URL lazily (testUrls) and runs the matching native
-    // download. diff/pdiff are incremental and skipped entirely in dev; full is
-    // attempted whenever a URL exists, and in dev with no URL it is treated as a
-    // no-op success so the flow can proceed.
-    type DownloadStrategy = {
-      name: string;
-      candidate: string | undefined;
-      errorKey:
-        | 'error_diff_failed'
-        | 'error_pdiff_failed'
-        | 'error_full_patch_failed';
-      skipInDev: boolean;
-      devNoopWhenNoUrl: boolean;
-      run: (url: string) => Promise<void>;
+    // The ordered attempts come from decideDownload (the pure decision layer);
+    // this side only executes them: probe candidate URLs, run the matching
+    // native download, fall through to the next attempt on failure.
+    const runners: Record<
+      DownloadStrategyType,
+      (url: string) => Promise<void>
+    > = {
+      diff: (url) =>
+        PushyModule.downloadPatchFromPpk({
+          updateUrl: url,
+          hash,
+          originHash: currentVersion,
+        }),
+      pdiff: (url) =>
+        PushyModule.downloadPatchFromPackage({
+          updateUrl: url,
+          hash,
+        }),
+      full: (url) =>
+        PushyModule.downloadFullUpdate({
+          updateUrl: url,
+          hash,
+        }),
     };
-    const strategies: DownloadStrategy[] = [
-      {
-        name: 'diff',
-        candidate: diff,
-        errorKey: 'error_diff_failed',
-        skipInDev: true,
-        devNoopWhenNoUrl: false,
-        run: (url) =>
-          PushyModule.downloadPatchFromPpk({
-            updateUrl: url,
-            hash,
-            originHash: currentVersion,
-          }),
-      },
-      {
-        name: 'pdiff',
-        candidate: pdiff,
-        errorKey: 'error_pdiff_failed',
-        skipInDev: true,
-        devNoopWhenNoUrl: false,
-        run: (url) =>
-          PushyModule.downloadPatchFromPackage({
-            updateUrl: url,
-            hash,
-          }),
-      },
-      {
-        name: 'full',
-        candidate: full,
-        errorKey: 'error_full_patch_failed',
-        skipInDev: false,
-        devNoopWhenNoUrl: true,
-        run: (url) =>
-          PushyModule.downloadFullUpdate({
-            updateUrl: url,
-            hash,
-          }),
-      },
-    ];
+    const errorKeys = {
+      diff: 'error_diff_failed',
+      pdiff: 'error_pdiff_failed',
+      full: 'error_full_patch_failed',
+    } as const;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       if (attempt > 0) {
@@ -942,34 +1148,36 @@ export class Pushy {
           attempt,
         },
       });
-      for (const strategy of strategies) {
+      if (devNoop) {
+        log(this.t('dev_incremental_update_disabled'));
+        succeeded = 'full';
+      }
+      for (const { type, urls } of attempts) {
         if (succeeded) {
           break;
         }
-        const url = await testUrls(joinUrls(paths, strategy.candidate));
-        if (url && !(strategy.skipInDev && __DEV__)) {
-          log(`downloading ${strategy.name}`);
-          try {
-            await strategy.run(url);
-            succeeded = strategy.name;
-          } catch (e: any) {
-            const errorMessage = this.t(strategy.errorKey, {
-              message: e.message,
-            });
-            errorMessages.push(errorMessage);
-            // Keep the i18n message for display, but preserve the native
-            // rejection's stable code (e.g. PATCH_FAILED vs DOWNLOAD_FAILED —
-            // telemetry classifies on it) and the original error as cause.
-            lastError = new UpdateError(
-              errorMessage,
-              asUpdateErrorCode(e?.code) ?? 'DOWNLOAD_FAILED',
-              { cause: e }
-            );
-            log(errorMessage);
-          }
-        } else if (!url && strategy.devNoopWhenNoUrl && __DEV__) {
-          log(this.t('dev_incremental_update_disabled'));
-          succeeded = strategy.name;
+        const url = await testUrls(urls);
+        if (!url) {
+          continue;
+        }
+        log(`downloading ${type}`);
+        try {
+          await runners[type](url);
+          succeeded = type;
+        } catch (e: any) {
+          const errorMessage = this.t(errorKeys[type], {
+            message: e.message,
+          });
+          errorMessages.push(errorMessage);
+          // Keep the i18n message for display, but preserve the native
+          // rejection's stable code (e.g. PATCH_FAILED vs DOWNLOAD_FAILED —
+          // telemetry classifies on it) and the original error as cause.
+          lastError = new UpdateError(
+            errorMessage,
+            asUpdateErrorCode(e?.code) ?? 'DOWNLOAD_FAILED',
+            { cause: e }
+          );
+          log(errorMessage);
         }
       }
       if (succeeded) {

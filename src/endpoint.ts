@@ -1,4 +1,7 @@
 import { UpdateError } from './error';
+import { dedupeEndpoints, orderEndpointCandidates } from './updateFlowCore';
+
+export { dedupeEndpoints };
 
 export interface EndpointAttemptSuccess<T> {
   endpoint: string;
@@ -26,33 +29,6 @@ const normalizeError = (error: unknown) => {
     return error;
   }
   return new Error(String(error));
-};
-
-export const dedupeEndpoints = (
-  endpoints: Array<string | null | undefined>
-): string[] => {
-  const result: string[] = [];
-  const visited = new Set<string>();
-
-  for (const endpoint of endpoints) {
-    if (!endpoint || visited.has(endpoint)) {
-      continue;
-    }
-    visited.add(endpoint);
-    result.push(endpoint);
-  }
-
-  return result;
-};
-
-export const pickRandomEndpoint = (
-  endpoints: string[],
-  random: () => number = Math.random
-) => {
-  if (!endpoints.length) {
-    throw new UpdateError('No endpoints configured', 'NO_ENDPOINTS');
-  }
-  return endpoints[Math.floor(random() * endpoints.length)];
 };
 
 export const DEFAULT_HEDGE_DELAY_MS = 250;
@@ -165,13 +141,15 @@ export async function executeEndpointFallback<T>({
   onFirstFailure,
 }: ExecuteEndpointFallbackOptions<T>): Promise<EndpointAttemptSuccess<T>> {
   const excludedEndpoints = new Set<string>();
-  let candidates = dedupeEndpoints(configuredEndpoints);
+  // The candidate ordering (random first pick, configured order as fallback)
+  // is pure policy; this side only executes it.
+  let candidates = orderEndpointCandidates(configuredEndpoints, random());
 
   if (!candidates.length) {
     throw new UpdateError('No endpoints configured', 'NO_ENDPOINTS');
   }
 
-  const firstEndpoint = pickRandomEndpoint(candidates, random);
+  const firstEndpoint = candidates[0];
 
   try {
     return {

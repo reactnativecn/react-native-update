@@ -57,3 +57,9 @@ jobs:
             -lpthread \
             -o unit_test
           ./unit_test
+
+      # Golden-vector parity between src/updateFlowCore.ts (reference) and
+      # the cpp/update_flow_core port. The vectors themselves are kept in
+      # sync with the TS side by src/__tests__/flowVectors.test.ts (js-test).
+      - name: Replay flow golden vectors against the C++ port
+        run: SANITIZE=1 ./scripts/test-update-flow-core.sh

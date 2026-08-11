@@ -37,6 +37,9 @@ const REQUIRED_SYMBOLS = [
   'Java_cn_reactnative_modules_update_UpdateContext_syncStateWithBinaryVersion',
   'Java_cn_reactnative_modules_update_UpdateContext_runStateCore',
   'Java_cn_reactnative_modules_update_NativeUpdateCore_getSupportedDiffVersion',
+  'Java_cn_reactnative_modules_update_NativeUpdateFlow_buildCheckRequestBody',
+  'Java_cn_reactnative_modules_update_NativeUpdateFlow_orderEndpointCandidates',
+  'Java_cn_reactnative_modules_update_NativeUpdateFlow_handleCheckResponse',
 ];
 
 const SHT_DYNSYM = 11;

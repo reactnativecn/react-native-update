@@ -47,6 +47,17 @@ public class UpdateContext {
     private static final int STATE_OP_CLEAR_ROLLBACK_MARK = 5;
     private static final int STATE_OP_RESOLVE_LAUNCH = 6;
     private static final String KEY_FIRST_LOAD_MARKED = "firstLoadMarked";
+    static final String VERSION_COMPLETE_FILE = ".pushy-complete";
+    // Bumped by resetToPackagedBundle. The cold-start check runs for minutes
+    // and may already hold a decision when the app resets to the packaged
+    // bundle; the orchestrator samples this counter and abandons activation
+    // (and its response cache) when the value moved, so an in-flight rescue
+    // can never resurrect the version the app just reset away from.
+    private static final java.util.concurrent.atomic.AtomicLong resetGeneration =
+        new java.util.concurrent.atomic.AtomicLong(0);
+    // Held by resetToPackagedBundle and by the cold-start check's commit, so
+    // the generation check and the writes it guards are one atomic step.
+    private static final Object commitLock = new Object();
     
     // Singleton instance
     private static volatile UpdateContext sInstance;
@@ -159,7 +170,9 @@ public class UpdateContext {
         });
     }
 
-    private String computeBundleHash() {
+    // Package-private: also the native cold-start check's request input
+    // (NativeCheckOrchestrator). Blocking — call off the main thread.
+    String computeBundleHash() {
         String cachePrefix = getPackageVersion() + "|" + getPackageLastUpdateTime() + "|";
         String cached = sp.getString(KEY_BUNDLE_HASH_CACHE, null);
         if (cached != null && cached.startsWith(cachePrefix)) {
@@ -238,6 +251,12 @@ public class UpdateContext {
     }
 
     public void downloadFullUpdate(String url, String hash, DownloadFileListener listener) {
+        downloadFullUpdate(url, hash, listener, 0);
+    }
+
+    void downloadFullUpdate(
+        String url, String hash, DownloadFileListener listener, long deadlineNanos
+    ) {
         if (rejectUnsafeComponent(hash, listener)) {
             return;
         }
@@ -246,6 +265,7 @@ public class UpdateContext {
         params.url = url;
         params.hash = hash;
         params.listener = listener;
+        params.deadlineNanos = deadlineNanos;
         params.targetFile = new File(rootDir, hash + ".ppk");
         params.unzipDirectory = new File(rootDir, hash);
         enqueue(params);
@@ -273,6 +293,12 @@ public class UpdateContext {
     }
 
     public void downloadPatchFromApk(String url, String hash, DownloadFileListener listener) {
+        downloadPatchFromApk(url, hash, listener, 0);
+    }
+
+    void downloadPatchFromApk(
+        String url, String hash, DownloadFileListener listener, long deadlineNanos
+    ) {
         if (rejectUnsafeComponent(hash, listener)) {
             return;
         }
@@ -281,12 +307,23 @@ public class UpdateContext {
         params.url = url;
         params.hash = hash;
         params.listener = listener;
+        params.deadlineNanos = deadlineNanos;
         params.targetFile = new File(rootDir, hash + ".apk.patch");
         params.unzipDirectory = new File(rootDir, hash);
         enqueue(params);
     }
 
     public void downloadPatchFromPpk(String url, String hash, String originHash, DownloadFileListener listener) {
+        downloadPatchFromPpk(url, hash, originHash, listener, 0);
+    }
+
+    void downloadPatchFromPpk(
+        String url,
+        String hash,
+        String originHash,
+        DownloadFileListener listener,
+        long deadlineNanos
+    ) {
         if (rejectUnsafeComponent(hash, listener) || rejectUnsafeComponent(originHash, listener)) {
             return;
         }
@@ -296,6 +333,7 @@ public class UpdateContext {
         params.hash = hash;
         params.originHash = originHash;
         params.listener = listener;
+        params.deadlineNanos = deadlineNanos;
         params.targetFile = new File(rootDir, originHash + "-" + hash + ".ppk.patch");
         params.unzipDirectory = new File(rootDir, hash);
         params.originDirectory = new File(rootDir, originHash);
@@ -348,10 +386,21 @@ public class UpdateContext {
         if (!isSafePathComponent(hash)) {
             throw new IllegalArgumentException("Invalid hash: " + hash);
         }
-        if (!new File(rootDir, hash+"/index.bundlejs").exists()) {
+        File versionDir = new File(rootDir, hash);
+        File bundleFile = new File(versionDir, "index.bundlejs");
+        if (!bundleFile.isFile()) {
             throw new IllegalStateException("Bundle version " + hash + " not found.");
         }
         StateCoreResult currentState = getStateSnapshot();
+        boolean isLegacyActivatedVersion = hash.equals(currentState.currentVersion)
+            || hash.equals(currentState.lastVersion);
+        if (!new File(versionDir, VERSION_COMPLETE_FILE).isFile()
+            && !isLegacyActivatedVersion) {
+            // Versions activated before completion markers were introduced are
+            // explicitly grandfathered through current/last state. An arbitrary
+            // markerless directory may be a crash-left partial install.
+            throw new IllegalStateException("Bundle version " + hash + " is incomplete.");
+        }
         StateCoreResult nextState = runStateCore(
             STATE_OP_SWITCH_VERSION,
             currentState,
@@ -445,6 +494,16 @@ public class UpdateContext {
      * for gray release bucketing and must not change on reset.
      */
     public void resetToPackagedBundle() {
+        synchronized (commitLock) {
+            resetToPackagedBundleLocked();
+        }
+    }
+
+    private void resetToPackagedBundleLocked() {
+        // Invalidate any in-flight cold-start round before clearing state: a
+        // round committing under the same lock afterwards sees the new
+        // generation and drops its result.
+        resetGeneration.incrementAndGet();
         StateCoreResult resetState = new StateCoreResult();
         resetState.packageVersion = getPackageVersion();
         resetState.buildTime = getBuildTime();
@@ -459,6 +518,8 @@ public class UpdateContext {
         }
         persistEditor(editor, "reset to packaged bundle");
         ignoreRollback = false;
+        // editor.clear() above already dropped the cached check response; it
+        // still advertised the version this reset removed.
         Log.i(TAG, "Reset to packaged bundle");
 
         DownloadTaskParams params = new DownloadTaskParams();
@@ -530,55 +591,112 @@ public class UpdateContext {
 
     public String getBundleUrl(String defaultAssetsUrl) {
         isUsingBundleUrl = true;
-        StateCoreResult currentState = getStateSnapshot();
-        StateCoreResult launchState = runStateCore(
-            STATE_OP_RESOLVE_LAUNCH,
-            currentState,
-            null,
-            ignoreRollback,
-            true
-        );
-        if (launchState.didRollback) {
-            // The crash-protection rollback: the new version never called
-            // markSuccess. Keep this visible in release logs.
-            Log.e(TAG, "Version " + currentState.currentVersion
-                + " was not marked as successful, rolling back to "
-                + launchState.currentVersion);
-        }
-        if (launchState.didRollback || launchState.consumedFirstTime) {
-            SharedPreferences.Editor editor = sp.edit();
-            applyState(editor, launchState);
+        String nativeCheckRolledBackVersion = null;
+        try {
+            StateCoreResult currentState = getStateSnapshot();
+            StateCoreResult launchState = runStateCore(
+                STATE_OP_RESOLVE_LAUNCH,
+                currentState,
+                null,
+                ignoreRollback,
+                true
+            );
+            nativeCheckRolledBackVersion = launchState.rolledBackVersion;
+            if (launchState.didRollback) {
+                // The crash-protection rollback: the new version never called
+                // markSuccess. Keep this visible in release logs.
+                Log.e(TAG, "Version " + currentState.currentVersion
+                    + " was not marked as successful, rolling back to "
+                    + launchState.currentVersion);
+            }
+            if (launchState.didRollback || launchState.consumedFirstTime) {
+                SharedPreferences.Editor editor = sp.edit();
+                applyState(editor, launchState);
+                if (launchState.consumedFirstTime) {
+                    editor.putBoolean(KEY_FIRST_LOAD_MARKED, true);
+                }
+                persistEditor(editor, "resolve launch");
+            }
             if (launchState.consumedFirstTime) {
-                editor.putBoolean(KEY_FIRST_LOAD_MARKED, true);
+                // bundleURL may be resolved multiple times in one process.
+                ignoreRollback = true;
             }
-            persistEditor(editor, "resolve launch");
-        }
-        if (launchState.consumedFirstTime) {
-            // bundleURL may be resolved multiple times in one process.
-            ignoreRollback = true;
-        }
 
-        String currentVersion = launchState.loadVersion;
-        if (currentVersion == null) {
+            String currentVersion = launchState.loadVersion;
+            if (currentVersion == null) {
+                return defaultAssetsUrl;
+            }
+
+            // Guard the rollback chain against cycles: a corrupted state returning
+            // an already-visited version would otherwise spin this loop forever on
+            // the main thread.
+            java.util.HashSet<String> visitedVersions = new java.util.HashSet<>();
+            while (currentVersion != null && visitedVersions.add(currentVersion)) {
+                File bundleFile = new File(rootDir, currentVersion+"/index.bundlejs");
+                if (!bundleFile.exists()) {
+                    Log.e(TAG, "Bundle version " + currentVersion + " not found.");
+                    currentVersion = this.rollBack();
+                    nativeCheckRolledBackVersion = rolledBackVersion();
+                    continue;
+                }
+                launchVersion = currentVersion;
+                nativeCheckRolledBackVersion = rolledBackVersion();
+                return bundleFile.toString();
+            }
+
+            nativeCheckRolledBackVersion = rolledBackVersion();
             return defaultAssetsUrl;
+        } finally {
+            // Even corrupted state or a state-core exception must not disable
+            // the next-launch rescue check. A null snapshot simply omits the
+            // rollback guard for this exceptional launch.
+            NativeCheckOrchestrator.schedule(this, nativeCheckRolledBackVersion);
         }
+    }
 
-        // Guard the rollback chain against cycles: a corrupted state returning
-        // an already-visited version would otherwise spin this loop forever on
-        // the main thread.
-        java.util.HashSet<String> visitedVersions = new java.util.HashSet<>();
-        while (currentVersion != null && visitedVersions.add(currentVersion)) {
-            File bundleFile = new File(rootDir, currentVersion+"/index.bundlejs");
-            if (!bundleFile.exists()) {
-                Log.e(TAG, "Bundle version " + currentVersion + " not found.");
-                currentVersion = this.rollBack();
-                continue;
+    /** Sampled/compared by the native check orchestrator; see resetGeneration. */
+    static long getResetGeneration() {
+        return resetGeneration.get();
+    }
+
+    /**
+     * Commit everything a cold-start round persists — version info, the
+     * activation, the response cache — under one lock that first re-checks the
+     * reset generation. resetToPackagedBundle takes the same lock, so there is
+     * no compare-and-act window: either the whole round lands, or the reset
+     * wins and none of it does. Returns whether the round was committed.
+     */
+    boolean commitNativeCheckResult(
+        long expectedGeneration,
+        String hash,
+        String hashInfoJson,
+        boolean activate,
+        String responseCacheJson
+    ) {
+        synchronized (commitLock) {
+            if (resetGeneration.get() != expectedGeneration) {
+                return false;
             }
-            launchVersion = currentVersion;
-            return bundleFile.toString();
+            if (hash != null && hashInfoJson != null) {
+                setKv("hash_" + hash, hashInfoJson);
+            }
+            if (activate && hash != null) {
+                switchVersion(hash);
+            }
+            if (responseCacheJson != null) {
+                setKv(NativeCheckOrchestrator.KEY_RESP_CACHE, responseCacheJson);
+            }
+            return true;
         }
+    }
 
-        return defaultAssetsUrl;
+    boolean hasCompletedVersion(String hash) {
+        if (!isSafePathComponent(hash)) {
+            return false;
+        }
+        File versionDir = new File(rootDir, hash);
+        return new File(versionDir, "index.bundlejs").isFile()
+            && new File(versionDir, VERSION_COMPLETE_FILE).isFile();
     }
 
     private String rollBack() {

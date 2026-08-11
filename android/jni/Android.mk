@@ -10,7 +10,8 @@ LOCAL_C_INCLUDES := \
 	$(LOCAL_PATH)/HDiffPatch \
 	$(LOCAL_PATH)/HDiffPatch/libHDiffPatch/HPatch \
 	$(LOCAL_PATH)/lzma/C \
-	$(LOCAL_PATH)/../../cpp/patch_core
+	$(LOCAL_PATH)/../../cpp/patch_core \
+	$(LOCAL_PATH)/../../cpp/update_flow_core
 
 Hdp_Files := \
 	hpatch.c \
@@ -28,6 +29,9 @@ LOCAL_SRC_FILES := \
 	../../cpp/patch_core/patch_core_android.cpp \
 	../../cpp/patch_core/state_core.cpp \
 	../../cpp/patch_core/update_core_android.cpp \
+	../../cpp/update_flow_core/flow_json.cpp \
+	../../cpp/update_flow_core/update_flow_core.cpp \
+	../../cpp/update_flow_core/update_flow_jni.cpp \
 	$(Hdp_Files)
 
 include $(BUILD_SHARED_LIBRARY)

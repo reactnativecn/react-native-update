@@ -1,11 +1,18 @@
 import preferences from '@ohos.data.preferences';
 import fileIo from '@ohos.file.fs';
-import { DownloadTask } from './DownloadTask';
+import {
+  DownloadTask,
+  VERSION_COMPLETE_FILE_NAME,
+} from './DownloadTask';
 import common from '@ohos.app.ability.common';
 import { DownloadTaskParams } from './DownloadTaskParams';
 import { bundleManager } from '@kit.AbilityKit';
 import { util } from '@kit.ArkTS';
 import logger from './Logger';
+import {
+  KEY_RESP_CACHE,
+  scheduleNativeCheck,
+} from './NativeCheckOrchestrator';
 import NativePatchCore, {
   STATE_OP_CLEAR_FIRST_TIME,
   STATE_OP_CLEAR_ROLLBACK_MARK,
@@ -15,31 +22,13 @@ import NativePatchCore, {
   STATE_OP_SWITCH_VERSION,
   StateCoreResult,
 } from './NativePatchCore';
+import { assertSafePathComponent } from './PathUtils';
+
+export { isSafePathComponent } from './PathUtils';
 
 type FlushablePreferences = preferences.Preferences & {
   flushSync?: () => void;
 };
-
-// 服务端下发的 hash/originHash/fileName 会拼进 rootDir 作为子路径；凡是可能
-// 逃出 rootDir 的值（路径分隔符、".."、"."）必须在触碰文件系统前拒绝。
-export function isSafePathComponent(name: string): boolean {
-  return (
-    typeof name === 'string' &&
-    name.length > 0 &&
-    name !== '.' &&
-    name !== '..' &&
-    !name.includes('/') &&
-    !name.includes('\\') &&
-    !name.includes('\0')
-  );
-}
-
-function assertSafePathComponent(name: string): string {
-  if (!isSafePathComponent(name)) {
-    throw Error(`Invalid path component: ${name}`);
-  }
-  return name;
-}
 
 export class UpdateContext {
   private context: common.UIAbilityContext;
@@ -52,6 +41,10 @@ export class UpdateContext {
   // resetToPackagedBundle 不能删它的目录：热更包内的图片等资源是运行时按需
   // 读盘的，静默（不重启）reset 若删掉会导致后续所有未加载过的资源失败。
   private static launchVersion: string = '';
+  // 由 resetToPackagedBundle 递增。原生冷启动检测可能跑数分钟并已握有决策,
+  // 期间发生的 reset 必须赢:编排器采样该值,发现变化即放弃激活与响应缓存,
+  // 在飞的救援不会把刚被重置掉的版本装回去。
+  private static resetGeneration: number = 0;
   private static cachedPackageVersion: string = '';
   private static cachedBuildTime: string = '';
   // 单例：确保 bundle provider 与 TurboModule 共用同一份 preferences 内存状态，
@@ -338,6 +331,15 @@ export class UpdateContext {
 
   private async executeTask(params: DownloadTaskParams): Promise<void> {
     await this.enqueueSerialTask(() => {
+      const isPatchTask =
+        params.type === DownloadTaskParams.TASK_TYPE_PATCH_FULL ||
+        params.type === DownloadTaskParams.TASK_TYPE_PATCH_FROM_APP ||
+        params.type === DownloadTaskParams.TASK_TYPE_PATCH_FROM_PPK;
+      // Re-check only when this queued job actually starts. A JS download may
+      // have completed while the cold-start duplicate waited behind it.
+      if (isPatchTask && this.hasDownloadedVersion(params.hash)) {
+        return Promise.resolve();
+      }
       const downloadTask = new DownloadTask(this.context);
       return downloadTask.execute(params);
     });
@@ -451,7 +453,16 @@ export class UpdateContext {
         console.error('Failed to clear hash info on reset:', e);
       }
     }
+    // 先让在飞的原生检测轮次失效,再清理状态:随后在同一(单线程)执行序里
+    // 提交的轮次会看到新代数并整轮丢弃。
+    UpdateContext.resetGeneration += 1;
     this.persistState(resetState, { clearFirstLoadMarker: true });
+    // 缓存里的响应仍在宣告本次 reset 刚删掉的版本,一并丢弃,避免 JS 侧复用。
+    try {
+      this.preferences.deleteSync(KEY_RESP_CACHE);
+    } catch (e: any) {
+      console.error('Failed to clear native check cache on reset:', e);
+    }
     UpdateContext.ignoreRollback = false;
 
     // maxAgeDays=0：删除下载目录内容，仅保留当前运行版本的目录（残留目录由
@@ -469,7 +480,44 @@ export class UpdateContext {
     this.trace('resetToPackagedBundle:after');
   }
 
-  public async downloadFullUpdate(url: string, hash: string): Promise<void> {
+  /** 供原生检测编排器采样/比对的 reset 代数(见 resetGeneration 注释)。 */
+  public getResetGeneration(): number {
+    return UpdateContext.resetGeneration;
+  }
+
+  /**
+   * 一次性提交原生检测轮次的全部持久化结果(版本元信息、激活、响应缓存):
+   * 先复核 reset 代数,再落所有写入。ArkTS 单线程 + 本方法内无 await,因此
+   * 校验与写入之间不存在可插入 reset 的窗口(iOS/Android 用锁达到同一效果)。
+   * 返回是否提交成功。
+   */
+  public commitNativeCheckResult(
+    expectedGeneration: number,
+    hash: string,
+    hashInfoJson: string,
+    activate: boolean,
+    responseCacheJson: string,
+  ): boolean {
+    if (UpdateContext.resetGeneration !== expectedGeneration) {
+      return false;
+    }
+    if (hash && hashInfoJson) {
+      this.setKv(`hash_${hash}`, hashInfoJson);
+    }
+    if (activate && hash) {
+      this.switchVersion(hash);
+    }
+    if (responseCacheJson) {
+      this.setKv(KEY_RESP_CACHE, responseCacheJson);
+    }
+    return true;
+  }
+
+  public async downloadFullUpdate(
+    url: string,
+    hash: string,
+    deadlineUptimeMs: number = 0,
+  ): Promise<void> {
     try {
       const params = this.createTaskParams(
         DownloadTaskParams.TASK_TYPE_PATCH_FULL,
@@ -478,6 +526,7 @@ export class UpdateContext {
       );
       params.targetFile = `${this.rootDir}/${hash}.ppk`;
       params.unzipDirectory = `${this.rootDir}/${hash}`;
+      params.deadlineUptimeMs = deadlineUptimeMs;
       await this.executeTask(params);
     } catch (e) {
       console.error('Failed to download full update:', e);
@@ -503,6 +552,7 @@ export class UpdateContext {
     url: string,
     hash: string,
     originHash: string,
+    deadlineUptimeMs: number = 0,
   ): Promise<void> {
     const params = this.createTaskParams(
       DownloadTaskParams.TASK_TYPE_PATCH_FROM_PPK,
@@ -513,12 +563,14 @@ export class UpdateContext {
     params.targetFile = `${this.rootDir}/${originHash}_${hash}.ppk.patch`;
     params.unzipDirectory = `${this.rootDir}/${hash}`;
     params.originDirectory = `${this.rootDir}/${params.originHash}`;
+    params.deadlineUptimeMs = deadlineUptimeMs;
     await this.executeTask(params);
   }
 
   public async downloadPatchFromPackage(
     url: string,
     hash: string,
+    deadlineUptimeMs: number = 0,
   ): Promise<void> {
     try {
       const params = this.createTaskParams(
@@ -528,10 +580,25 @@ export class UpdateContext {
       );
       params.targetFile = `${this.rootDir}/${hash}.app.patch`;
       params.unzipDirectory = `${this.rootDir}/${hash}`;
+      params.deadlineUptimeMs = deadlineUptimeMs;
       return await this.executeTask(params);
     } catch (e) {
       console.error('Failed to download package patch:', e);
       throw e;
+    }
+  }
+
+  // 原生冷启动检测(NativeCheckOrchestrator)用来跳过已就绪版本的重复下载
+  // ——alert 类策略下版本已下载但未激活,若不判在这里会每次冷启动重下一遍。
+  public hasDownloadedVersion(hash: string): boolean {
+    try {
+      const safeHash = assertSafePathComponent(hash);
+      return fileIo.accessSync(this.getBundlePath(safeHash))
+        && fileIo.accessSync(
+          `${this.rootDir}/${safeHash}/${VERSION_COMPLETE_FILE_NAME}`,
+        );
+    } catch (e) {
+      return false;
     }
   }
 
@@ -565,58 +632,70 @@ export class UpdateContext {
   public getBundleUrl() {
     UpdateContext.isUsingBundleUrl = true;
     this.trace('getBundleUrl:enter');
-    const stateBeforeLaunch = this.getStateSnapshot();
-    const launchState = NativePatchCore.runStateCore(
-      STATE_OP_RESOLVE_LAUNCH,
-      stateBeforeLaunch,
-      '',
-      UpdateContext.ignoreRollback,
-      true,
-    );
-    if (launchState.didRollback) {
-      // The crash-protection rollback: the new version never called
-      // markSuccess. Keep this visible in release logs.
-      console.error(
-        `Version ${stateBeforeLaunch.currentVersion} was not marked as successful,` +
-          ` rolled back to ${launchState.currentVersion}`,
+    let nativeCheckRolledBackVersion = '';
+    try {
+      const stateBeforeLaunch = this.getStateSnapshot();
+      const launchState = NativePatchCore.runStateCore(
+        STATE_OP_RESOLVE_LAUNCH,
+        stateBeforeLaunch,
+        '',
+        UpdateContext.ignoreRollback,
+        true,
       );
-    }
-    if (launchState.didRollback || launchState.consumedFirstTime) {
-      this.persistState(launchState, {
-        markFirstLoadMarker: launchState.consumedFirstTime,
-      });
-    }
-    if (launchState.consumedFirstTime) {
-      UpdateContext.ignoreRollback = true;
-    }
-    this.trace(
-      `getBundleUrl:load=${launchState.loadVersion}` +
-        ` consumed=${launchState.consumedFirstTime}` +
-        ` rollback=${launchState.didRollback}`,
-    );
-
-    let version = launchState.loadVersion || '';
-    // Guard the rollback chain against cycles: a corrupted state returning an
-    // already-visited version would otherwise spin this loop forever during
-    // startup (Android has the same guard).
-    const visitedVersions = new Set<string>();
-    while (version && !visitedVersions.has(version)) {
-      visitedVersions.add(version);
-      const bundleFile = this.getBundlePath(version);
-      try {
-        if (!fileIo.accessSync(bundleFile)) {
-          console.error(`Bundle version ${version} not found.`);
-          version = this.rollBack();
-          continue;
-        }
-        UpdateContext.launchVersion = version;
-        return bundleFile;
-      } catch (e) {
-        console.error('Failed to access bundle file:', e);
-        version = this.rollBack();
+      nativeCheckRolledBackVersion = launchState.rolledBackVersion || '';
+      if (launchState.didRollback) {
+        // The crash-protection rollback: the new version never called
+        // markSuccess. Keep this visible in release logs.
+        console.error(
+          `Version ${stateBeforeLaunch.currentVersion} was not marked as successful,` +
+            ` rolled back to ${launchState.currentVersion}`,
+        );
       }
+      if (launchState.didRollback || launchState.consumedFirstTime) {
+        this.persistState(launchState, {
+          markFirstLoadMarker: launchState.consumedFirstTime,
+        });
+      }
+      if (launchState.consumedFirstTime) {
+        UpdateContext.ignoreRollback = true;
+      }
+      this.trace(
+        `getBundleUrl:load=${launchState.loadVersion}` +
+          ` consumed=${launchState.consumedFirstTime}` +
+          ` rollback=${launchState.didRollback}`,
+      );
+
+      let version = launchState.loadVersion || '';
+      // Guard the rollback chain against cycles: a corrupted state returning an
+      // already-visited version would otherwise spin this loop forever during
+      // startup (Android has the same guard).
+      const visitedVersions = new Set<string>();
+      while (version && !visitedVersions.has(version)) {
+        visitedVersions.add(version);
+        const bundleFile = this.getBundlePath(version);
+        try {
+          if (!fileIo.accessSync(bundleFile)) {
+            console.error(`Bundle version ${version} not found.`);
+            version = this.rollBack();
+            nativeCheckRolledBackVersion = this.rolledBackVersion();
+            continue;
+          }
+          UpdateContext.launchVersion = version;
+          nativeCheckRolledBackVersion = this.rolledBackVersion();
+          return bundleFile;
+        } catch (e) {
+          console.error('Failed to access bundle file:', e);
+          version = this.rollBack();
+          nativeCheckRolledBackVersion = this.rolledBackVersion();
+        }
+      }
+      nativeCheckRolledBackVersion = this.rolledBackVersion();
+      return '';
+    } finally {
+      // State corruption is exactly when the native rescue check is needed;
+      // schedule even if state parsing/rollback throws before a normal exit.
+      scheduleNativeCheck(this, nativeCheckRolledBackVersion);
     }
-    return '';
   }
 
   public getCurrentVersion(): string {

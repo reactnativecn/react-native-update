@@ -18,13 +18,15 @@ import { URL } from 'react-native-url-polyfill';
 import { type Cresc, type Pushy, sharedState } from './client';
 import { ProgressContext, UpdateContext } from './context';
 import {
+  cInfo,
   currentVersion,
   currentVersionInfo,
   getCurrentVersionInfo,
   packageVersion,
+  rolledBackVersion,
 } from './core';
-import { resolveCheckResult } from './resolveCheckResult';
 import type { CheckResult, ProgressData, UpdateTestPayload } from './type';
+import { decideDownload, resolveCheckResult } from './updateFlowCore';
 import { assertWeb, log, noop } from './utils';
 
 export const UpdateProvider = ({
@@ -222,7 +224,41 @@ export const UpdateProvider = ({
         // known updateInfo instead of overwriting it with an empty object.
         return;
       }
-      const info = resolveCheckResult(rootInfo);
+      let info = resolveCheckResult(
+        rootInfo,
+        {
+          packageVersion: client.getEffectivePackageVersion(),
+          currentVersion,
+          uuid: cInfo.uuid,
+        },
+        log
+      );
+      if (
+        !info.expired &&
+        info.update &&
+        (typeof info.hash !== 'string' || info.hash.length === 0)
+      ) {
+        // A malformed rollout/root entry must not produce an alert whose
+        // confirm button can never download anything. Surface it to the
+        // developer telemetry/logger and present it to the app as no update.
+        client.reportInvalidUpdateOnce('missingHash');
+        info = { upToDate: true };
+      }
+      if (info.update && !info.expired) {
+        const decision = decideDownload(
+          info,
+          { currentVersion, rolledBackVersion },
+          __DEV__
+        );
+        if (decision.action === 'none') {
+          if (decision.reason === 'noArtifact') {
+            // Invalid server data is worth reporting; local rollout guards are
+            // expected no-ops and stay silent.
+            client.reportInvalidUpdateOnce('noArtifact', info.hash || '');
+          }
+          info = { upToDate: true };
+        }
+      }
       if (info.update) {
         info.description = info.description ?? '';
       }

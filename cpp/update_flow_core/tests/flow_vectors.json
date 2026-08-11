@@ -1,0 +1,1401 @@
+{
+  "generated_by": "scripts/generate-flow-vectors.ts — do not edit by hand",
+  "cases": [
+    {
+      "fn": "murmurhash3_32_gc",
+      "args": [
+        ""
+      ],
+      "expected": 0
+    },
+    {
+      "fn": "murmurhash3_32_gc",
+      "args": [
+        "hello"
+      ],
+      "expected": 613153351
+    },
+    {
+      "fn": "murmurhash3_32_gc",
+      "args": [
+        "test"
+      ],
+      "expected": 3127628307
+    },
+    {
+      "fn": "murmurhash3_32_gc",
+      "args": [
+        "Hello, world!"
+      ],
+      "expected": 3224780355
+    },
+    {
+      "fn": "murmurhash3_32_gc",
+      "args": [
+        "The quick brown fox jumps over the lazy dog"
+      ],
+      "expected": 776992547
+    },
+    {
+      "fn": "murmurhash3_32_gc",
+      "args": [
+        "test1"
+      ],
+      "expected": 374203662
+    },
+    {
+      "fn": "murmurhash3_32_gc",
+      "args": [
+        "test2"
+      ],
+      "expected": 3155333867
+    },
+    {
+      "fn": "murmurhash3_32_gc",
+      "args": [
+        "test3"
+      ],
+      "expected": 4144626353
+    },
+    {
+      "fn": "murmurhash3_32_gc",
+      "args": [
+        "123e4567-e89b-12d3-a456-426614174000"
+      ],
+      "expected": 439536286
+    },
+    {
+      "fn": "murmurhash3_32_gc",
+      "args": [
+        "123e4567-e89b-12d3-a456-426614174001"
+      ],
+      "expected": 3316680088
+    },
+    {
+      "fn": "murmurhash3_32_gc",
+      "args": [
+        "a"
+      ],
+      "expected": 1009084850
+    },
+    {
+      "fn": "murmurhash3_32_gc",
+      "args": [
+        "ab"
+      ],
+      "expected": 2613040991
+    },
+    {
+      "fn": "murmurhash3_32_gc",
+      "args": [
+        "abc"
+      ],
+      "expected": 3017643002
+    },
+    {
+      "fn": "murmurhash3_32_gc",
+      "args": [
+        "abcd"
+      ],
+      "expected": 1139631978
+    },
+    {
+      "fn": "isInRollout",
+      "args": [
+        63,
+        "test1"
+      ],
+      "expected": true
+    },
+    {
+      "fn": "isInRollout",
+      "args": [
+        62,
+        "test1"
+      ],
+      "expected": false
+    },
+    {
+      "fn": "isInRollout",
+      "args": [
+        61,
+        "test1"
+      ],
+      "expected": false
+    },
+    {
+      "fn": "isInRollout",
+      "args": [
+        0,
+        "test1"
+      ],
+      "expected": false
+    },
+    {
+      "fn": "isInRollout",
+      "args": [
+        100,
+        "test1"
+      ],
+      "expected": true
+    },
+    {
+      "fn": "isInRollout",
+      "args": [
+        -1,
+        "test3"
+      ],
+      "expected": false
+    },
+    {
+      "fn": "isInRollout",
+      "args": [
+        54,
+        "test3"
+      ],
+      "expected": true
+    },
+    {
+      "fn": "isInRollout",
+      "args": [
+        53,
+        "test3"
+      ],
+      "expected": false
+    },
+    {
+      "fn": "joinUrls",
+      "args": [
+        [
+          "example.com"
+        ]
+      ]
+    },
+    {
+      "fn": "joinUrls",
+      "args": [
+        [
+          "example.com"
+        ],
+        ""
+      ]
+    },
+    {
+      "fn": "joinUrls",
+      "args": [
+        [],
+        "file.txt"
+      ],
+      "expected": []
+    },
+    {
+      "fn": "joinUrls",
+      "args": [
+        [
+          "example.com",
+          "test.org"
+        ],
+        "file.txt"
+      ],
+      "expected": [
+        "https://example.com/file.txt",
+        "https://test.org/file.txt"
+      ]
+    },
+    {
+      "fn": "joinUrls",
+      "args": [
+        [
+          "example.com///",
+          "http://example.com///"
+        ],
+        "file.txt"
+      ],
+      "expected": [
+        "https://example.com/file.txt",
+        "http://example.com/file.txt"
+      ]
+    },
+    {
+      "fn": "joinUrls",
+      "args": [
+        [
+          "ftp://example.com",
+          "myapp://some/path"
+        ],
+        "file.txt"
+      ],
+      "expected": [
+        "ftp://example.com/file.txt",
+        "myapp://some/path/file.txt"
+      ]
+    },
+    {
+      "fn": "joinUrls",
+      "args": [
+        [
+          "192.168.1.1:8080",
+          "10.0.0.1:3000/api"
+        ],
+        "file.txt"
+      ],
+      "expected": [
+        "https://192.168.1.1:8080/file.txt",
+        "https://10.0.0.1:3000/api/file.txt"
+      ]
+    },
+    {
+      "fn": "joinUrls",
+      "args": [
+        [
+          ""
+        ],
+        "file.txt"
+      ],
+      "expected": [
+        "https:///file.txt"
+      ]
+    },
+    {
+      "fn": "joinUrls",
+      "args": [
+        [
+          "HTTPS://Upper.example.com"
+        ],
+        "file.txt"
+      ],
+      "expected": [
+        "HTTPS://Upper.example.com/file.txt"
+      ]
+    },
+    {
+      "fn": "joinUrls",
+      "args": [
+        [
+          "a:b://weird"
+        ],
+        "file.txt"
+      ],
+      "expected": [
+        "https://a:b://weird/file.txt"
+      ]
+    },
+    {
+      "fn": "orderEndpointCandidates",
+      "args": [
+        [
+          "a",
+          "b",
+          "c"
+        ],
+        0
+      ],
+      "expected": [
+        "a",
+        "b",
+        "c"
+      ]
+    },
+    {
+      "fn": "orderEndpointCandidates",
+      "args": [
+        [
+          "a",
+          "b",
+          "c"
+        ],
+        0.34
+      ],
+      "expected": [
+        "b",
+        "a",
+        "c"
+      ]
+    },
+    {
+      "fn": "orderEndpointCandidates",
+      "args": [
+        [
+          "a",
+          "b",
+          "c"
+        ],
+        0.5
+      ],
+      "expected": [
+        "b",
+        "a",
+        "c"
+      ]
+    },
+    {
+      "fn": "orderEndpointCandidates",
+      "args": [
+        [
+          "a",
+          "b",
+          "c"
+        ],
+        0.99
+      ],
+      "expected": [
+        "c",
+        "a",
+        "b"
+      ]
+    },
+    {
+      "fn": "orderEndpointCandidates",
+      "args": [
+        [
+          "a",
+          "b",
+          "c"
+        ],
+        1
+      ],
+      "expected": [
+        "c",
+        "a",
+        "b"
+      ]
+    },
+    {
+      "fn": "orderEndpointCandidates",
+      "args": [
+        [
+          "a",
+          null,
+          "a",
+          "",
+          "b"
+        ],
+        0.6
+      ],
+      "expected": [
+        "b",
+        "a"
+      ]
+    },
+    {
+      "fn": "orderEndpointCandidates",
+      "args": [
+        [],
+        0.5
+      ],
+      "expected": []
+    },
+    {
+      "fn": "orderEndpointCandidates",
+      "args": [
+        [
+          "a"
+        ],
+        0.5
+      ],
+      "expected": [
+        "a"
+      ]
+    },
+    {
+      "fn": "buildCheckRequestBody",
+      "args": [
+        {
+          "packageVersion": "2.3.4",
+          "currentVersion": "abcdef1234",
+          "buildTime": "1719999999",
+          "cInfo": {
+            "rnu": "10.50.0",
+            "rn": "0.85.2",
+            "os": "ios 17.5",
+            "uuid": "u-1"
+          }
+        }
+      ],
+      "expected": {
+        "packageVersion": "2.3.4",
+        "hash": "abcdef1234",
+        "buildTime": "1719999999",
+        "cInfo": {
+          "rnu": "10.50.0",
+          "rn": "0.85.2",
+          "os": "ios 17.5",
+          "uuid": "u-1"
+        }
+      }
+    },
+    {
+      "fn": "buildCheckRequestBody",
+      "args": [
+        {
+          "packageVersion": "2.3.4",
+          "currentVersion": "abcdef1234",
+          "buildTime": "1719999999",
+          "cInfo": {
+            "rnu": "10.50.0",
+            "rn": "0.85.2",
+            "os": "ios 17.5",
+            "uuid": "u-1"
+          },
+          "supportedDiffVersion": 2,
+          "bundleHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "expected": {
+        "packageVersion": "2.3.4",
+        "hash": "abcdef1234",
+        "buildTime": "1719999999",
+        "cInfo": {
+          "rnu": "10.50.0",
+          "rn": "0.85.2",
+          "os": "ios 17.5",
+          "uuid": "u-1"
+        },
+        "diffV": 2,
+        "bundleHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "fn": "buildCheckRequestBody",
+      "args": [
+        {
+          "packageVersion": "2.3.4",
+          "currentVersion": "",
+          "buildTime": "1719999999",
+          "cInfo": {
+            "rnu": "10.50.0",
+            "rn": "0.85.2",
+            "os": "ios 17.5",
+            "uuid": "u-1"
+          },
+          "supportedDiffVersion": 0,
+          "bundleHash": ""
+        }
+      ],
+      "expected": {
+        "packageVersion": "2.3.4",
+        "hash": "",
+        "buildTime": "1719999999",
+        "cInfo": {
+          "rnu": "10.50.0",
+          "rn": "0.85.2",
+          "os": "ios 17.5",
+          "uuid": "u-1"
+        }
+      }
+    },
+    {
+      "fn": "buildCheckRequestBody",
+      "args": [
+        {
+          "packageVersion": "2.3.4",
+          "currentVersion": "abcdef1234",
+          "buildTime": "1719999999",
+          "cInfo": {
+            "rnu": "10.50.0",
+            "rn": "0.85.2",
+            "os": "ios 17.5",
+            "uuid": "u-1"
+          },
+          "extra": {
+            "toHash": "debug-hash",
+            "hash": "override-hash"
+          }
+        }
+      ],
+      "expected": {
+        "packageVersion": "2.3.4",
+        "hash": "override-hash",
+        "buildTime": "1719999999",
+        "cInfo": {
+          "rnu": "10.50.0",
+          "rn": "0.85.2",
+          "os": "ios 17.5",
+          "uuid": "u-1"
+        },
+        "toHash": "debug-hash"
+      }
+    },
+    {
+      "fn": "buildCheckRequestBody",
+      "args": [
+        {
+          "packageVersion": "2.3.4",
+          "currentVersion": "abcdef1234",
+          "buildTime": "1719999999",
+          "cInfo": {
+            "rnu": "10.50.0",
+            "rn": "0.85.2",
+            "os": "ios 17.5",
+            "uuid": "u-1"
+          },
+          "isDev": true,
+          "extra": {
+            "buildTime": "injected"
+          }
+        }
+      ],
+      "expected": {
+        "packageVersion": "2.3.4",
+        "hash": "abcdef1234",
+        "cInfo": {
+          "rnu": "10.50.0",
+          "rn": "0.85.2",
+          "os": "ios 17.5",
+          "uuid": "u-1"
+        }
+      }
+    },
+    {
+      "fn": "buildCheckRequestBody",
+      "args": [
+        {
+          "packageVersion": "2.3.4",
+          "buildTime": "1719999999",
+          "cInfo": {
+            "rnu": "10.50.0",
+            "rn": "0.85.2",
+            "os": "ios 17.5",
+            "uuid": "u-1"
+          }
+        }
+      ],
+      "expected": {
+        "packageVersion": "2.3.4",
+        "buildTime": "1719999999",
+        "cInfo": {
+          "rnu": "10.50.0",
+          "rn": "0.85.2",
+          "os": "ios 17.5",
+          "uuid": "u-1"
+        }
+      }
+    },
+    {
+      "fn": "resolveCheckResult",
+      "args": [
+        {
+          "update": true,
+          "hash": "root-hash",
+          "name": "root",
+          "description": "rd",
+          "metaInfo": "rm",
+          "diff": "a.hdiff",
+          "pdiff": "b.phdiff",
+          "full": "c.ppk",
+          "paths": [
+            "cdn.example.com"
+          ],
+          "expVersion": {
+            "name": "gray",
+            "hash": "gray-hash",
+            "description": "d",
+            "metaInfo": "m",
+            "config": {
+              "rollout": {
+                "2.3.4": 63
+              }
+            }
+          }
+        },
+        {
+          "packageVersion": "2.3.4",
+          "currentVersion": "current-hash",
+          "uuid": "test1"
+        }
+      ],
+      "expected": {
+        "update": true,
+        "name": "gray",
+        "hash": "gray-hash",
+        "description": "d",
+        "metaInfo": "m",
+        "config": {
+          "rollout": {
+            "2.3.4": 63
+          }
+        },
+        "paths": [
+          "cdn.example.com"
+        ]
+      }
+    },
+    {
+      "fn": "resolveCheckResult",
+      "args": [
+        {
+          "update": true,
+          "hash": "root-hash",
+          "name": "root",
+          "description": "rd",
+          "metaInfo": "rm",
+          "diff": "a.hdiff",
+          "pdiff": "b.phdiff",
+          "full": "c.ppk",
+          "paths": [
+            "cdn.example.com"
+          ],
+          "expVersion": {
+            "name": "gray",
+            "hash": "gray-hash",
+            "description": "d",
+            "metaInfo": "m",
+            "config": {
+              "rollout": {
+                "2.3.4": 62
+              }
+            }
+          }
+        },
+        {
+          "packageVersion": "2.3.4",
+          "currentVersion": "current-hash",
+          "uuid": "test1"
+        }
+      ],
+      "expected": {
+        "update": true,
+        "hash": "root-hash",
+        "name": "root",
+        "description": "rd",
+        "metaInfo": "rm",
+        "diff": "a.hdiff",
+        "pdiff": "b.phdiff",
+        "full": "c.ppk",
+        "paths": [
+          "cdn.example.com"
+        ]
+      }
+    },
+    {
+      "fn": "resolveCheckResult",
+      "args": [
+        {
+          "update": true,
+          "hash": "root-hash",
+          "name": "root",
+          "description": "rd",
+          "metaInfo": "rm",
+          "diff": "a.hdiff",
+          "pdiff": "b.phdiff",
+          "full": "c.ppk",
+          "paths": [
+            "cdn.example.com"
+          ],
+          "expVersion": {
+            "name": "gray",
+            "hash": "current-hash",
+            "description": "d",
+            "metaInfo": "m",
+            "config": {
+              "rollout": {
+                "2.3.4": 100
+              }
+            }
+          }
+        },
+        {
+          "packageVersion": "2.3.4",
+          "currentVersion": "current-hash",
+          "uuid": "test1"
+        }
+      ],
+      "expected": {
+        "upToDate": true
+      }
+    },
+    {
+      "fn": "resolveCheckResult",
+      "args": [
+        {
+          "update": true,
+          "hash": "root-hash",
+          "name": "root",
+          "description": "rd",
+          "metaInfo": "rm",
+          "diff": "a.hdiff",
+          "pdiff": "b.phdiff",
+          "full": "c.ppk",
+          "paths": [
+            "cdn.example.com"
+          ]
+        },
+        {
+          "packageVersion": "2.3.4",
+          "currentVersion": "current-hash",
+          "uuid": "test1"
+        }
+      ],
+      "expected": {
+        "update": true,
+        "hash": "root-hash",
+        "name": "root",
+        "description": "rd",
+        "metaInfo": "rm",
+        "diff": "a.hdiff",
+        "pdiff": "b.phdiff",
+        "full": "c.ppk",
+        "paths": [
+          "cdn.example.com"
+        ]
+      }
+    },
+    {
+      "fn": "resolveCheckResult",
+      "args": [
+        {
+          "update": true,
+          "hash": "current-hash",
+          "name": "root",
+          "description": "rd",
+          "metaInfo": "rm",
+          "diff": "a.hdiff",
+          "pdiff": "b.phdiff",
+          "full": "c.ppk",
+          "paths": [
+            "cdn.example.com"
+          ]
+        },
+        {
+          "packageVersion": "2.3.4",
+          "currentVersion": "current-hash",
+          "uuid": "test1"
+        }
+      ],
+      "expected": {
+        "upToDate": true
+      }
+    },
+    {
+      "fn": "resolveCheckResult",
+      "args": [
+        {
+          "upToDate": true
+        },
+        {
+          "packageVersion": "2.3.4",
+          "currentVersion": "current-hash",
+          "uuid": "test1"
+        }
+      ],
+      "expected": {
+        "upToDate": true
+      }
+    },
+    {
+      "fn": "resolveCheckResult",
+      "args": [
+        {
+          "update": false,
+          "hash": "x"
+        },
+        {
+          "packageVersion": "2.3.4",
+          "currentVersion": "current-hash",
+          "uuid": "test1"
+        }
+      ],
+      "expected": {
+        "update": false,
+        "hash": "x"
+      }
+    },
+    {
+      "fn": "resolveCheckResult",
+      "args": [
+        {
+          "update": true,
+          "hash": "root-hash",
+          "name": "root",
+          "description": "rd",
+          "metaInfo": "rm",
+          "diff": "a.hdiff",
+          "pdiff": "b.phdiff",
+          "full": "c.ppk",
+          "paths": [
+            "cdn.example.com"
+          ],
+          "expVersion": {
+            "name": "gray",
+            "hash": "gray-hash",
+            "description": "d",
+            "metaInfo": "m",
+            "config": {
+              "rollout": {
+                "other": 100
+              }
+            }
+          }
+        },
+        {
+          "packageVersion": "2.3.4",
+          "currentVersion": "current-hash",
+          "uuid": "test1"
+        }
+      ],
+      "expected": {
+        "update": true,
+        "hash": "root-hash",
+        "name": "root",
+        "description": "rd",
+        "metaInfo": "rm",
+        "diff": "a.hdiff",
+        "pdiff": "b.phdiff",
+        "full": "c.ppk",
+        "paths": [
+          "cdn.example.com"
+        ]
+      }
+    },
+    {
+      "fn": "resolveCheckResult",
+      "args": [
+        {
+          "update": true,
+          "hash": "root-hash",
+          "expVersion": {
+            "name": "gray",
+            "hash": "gray-hash",
+            "description": "d",
+            "metaInfo": "m",
+            "config": {
+              "rollout": {
+                "2.3.4": 63
+              }
+            }
+          }
+        },
+        {
+          "packageVersion": "2.3.4",
+          "currentVersion": "current-hash",
+          "uuid": "test1"
+        }
+      ],
+      "expected": {
+        "update": true,
+        "name": "gray",
+        "hash": "gray-hash",
+        "description": "d",
+        "metaInfo": "m",
+        "config": {
+          "rollout": {
+            "2.3.4": 63
+          }
+        }
+      }
+    },
+    {
+      "fn": "resolveCheckResult",
+      "args": [
+        {
+          "update": true,
+          "hash": "root-hash",
+          "expVersion": {
+            "name": "gray",
+            "description": "d",
+            "metaInfo": "m",
+            "config": {
+              "rollout": {
+                "2.3.4": 63
+              }
+            }
+          }
+        },
+        {
+          "packageVersion": "2.3.4",
+          "uuid": "test1"
+        }
+      ],
+      "expected": {
+        "update": true,
+        "name": "gray",
+        "description": "d",
+        "metaInfo": "m",
+        "config": {
+          "rollout": {
+            "2.3.4": 63
+          }
+        }
+      }
+    },
+    {
+      "fn": "decideDownload",
+      "args": [
+        {
+          "upToDate": true
+        },
+        {
+          "currentVersion": "current-hash",
+          "rolledBackVersion": "bad-hash"
+        },
+        false
+      ],
+      "expected": {
+        "action": "none",
+        "reason": "noUpdate"
+      }
+    },
+    {
+      "fn": "decideDownload",
+      "args": [
+        {
+          "update": true
+        },
+        {
+          "currentVersion": "current-hash",
+          "rolledBackVersion": "bad-hash"
+        },
+        false
+      ],
+      "expected": {
+        "action": "none",
+        "reason": "noUpdate"
+      }
+    },
+    {
+      "fn": "decideDownload",
+      "args": [
+        {
+          "update": true,
+          "hash": "current-hash",
+          "diff": "cur-next.hdiff",
+          "pdiff": "pkg-next.phdiff",
+          "full": "next.ppk",
+          "paths": [
+            "cdn.example.com",
+            "https://mirror.example.com/base/"
+          ]
+        },
+        {
+          "currentVersion": "current-hash",
+          "rolledBackVersion": "bad-hash"
+        },
+        false
+      ],
+      "expected": {
+        "action": "none",
+        "reason": "alreadyCurrent"
+      }
+    },
+    {
+      "fn": "decideDownload",
+      "args": [
+        {
+          "update": true,
+          "hash": "bad-hash",
+          "diff": "cur-next.hdiff",
+          "pdiff": "pkg-next.phdiff",
+          "full": "next.ppk",
+          "paths": [
+            "cdn.example.com",
+            "https://mirror.example.com/base/"
+          ]
+        },
+        {
+          "currentVersion": "current-hash",
+          "rolledBackVersion": "bad-hash"
+        },
+        false
+      ],
+      "expected": {
+        "action": "none",
+        "reason": "rolledBack"
+      }
+    },
+    {
+      "fn": "decideDownload",
+      "args": [
+        {
+          "update": true,
+          "hash": "bad-hash",
+          "diff": "cur-next.hdiff",
+          "pdiff": "pkg-next.phdiff",
+          "full": "next.ppk",
+          "paths": [
+            "cdn.example.com",
+            "https://mirror.example.com/base/"
+          ]
+        },
+        {
+          "currentVersion": "current-hash"
+        },
+        false
+      ],
+      "expected": {
+        "action": "download",
+        "hash": "bad-hash",
+        "attempts": [
+          {
+            "type": "diff",
+            "urls": [
+              "https://cdn.example.com/cur-next.hdiff",
+              "https://mirror.example.com/base/cur-next.hdiff"
+            ]
+          },
+          {
+            "type": "pdiff",
+            "urls": [
+              "https://cdn.example.com/pkg-next.phdiff",
+              "https://mirror.example.com/base/pkg-next.phdiff"
+            ]
+          },
+          {
+            "type": "full",
+            "urls": [
+              "https://cdn.example.com/next.ppk",
+              "https://mirror.example.com/base/next.ppk"
+            ]
+          }
+        ],
+        "devNoop": false
+      }
+    },
+    {
+      "fn": "decideDownload",
+      "args": [
+        {
+          "update": true,
+          "hash": "next-hash",
+          "diff": "cur-next.hdiff",
+          "pdiff": "pkg-next.phdiff",
+          "full": "next.ppk",
+          "paths": [
+            "cdn.example.com",
+            "https://mirror.example.com/base/"
+          ]
+        },
+        {
+          "currentVersion": "current-hash",
+          "rolledBackVersion": "bad-hash"
+        },
+        false
+      ],
+      "expected": {
+        "action": "download",
+        "hash": "next-hash",
+        "attempts": [
+          {
+            "type": "diff",
+            "urls": [
+              "https://cdn.example.com/cur-next.hdiff",
+              "https://mirror.example.com/base/cur-next.hdiff"
+            ]
+          },
+          {
+            "type": "pdiff",
+            "urls": [
+              "https://cdn.example.com/pkg-next.phdiff",
+              "https://mirror.example.com/base/pkg-next.phdiff"
+            ]
+          },
+          {
+            "type": "full",
+            "urls": [
+              "https://cdn.example.com/next.ppk",
+              "https://mirror.example.com/base/next.ppk"
+            ]
+          }
+        ],
+        "devNoop": false
+      }
+    },
+    {
+      "fn": "decideDownload",
+      "args": [
+        {
+          "update": true,
+          "hash": "next-hash",
+          "pdiff": "pkg-next.phdiff",
+          "full": "next.ppk",
+          "paths": [
+            "cdn.example.com",
+            "https://mirror.example.com/base/"
+          ]
+        },
+        {
+          "currentVersion": "current-hash",
+          "rolledBackVersion": "bad-hash"
+        },
+        false
+      ],
+      "expected": {
+        "action": "download",
+        "hash": "next-hash",
+        "attempts": [
+          {
+            "type": "pdiff",
+            "urls": [
+              "https://cdn.example.com/pkg-next.phdiff",
+              "https://mirror.example.com/base/pkg-next.phdiff"
+            ]
+          },
+          {
+            "type": "full",
+            "urls": [
+              "https://cdn.example.com/next.ppk",
+              "https://mirror.example.com/base/next.ppk"
+            ]
+          }
+        ],
+        "devNoop": false
+      }
+    },
+    {
+      "fn": "decideDownload",
+      "args": [
+        {
+          "update": true,
+          "hash": "next-hash",
+          "diff": "cur-next.hdiff",
+          "full": "next.ppk",
+          "paths": [
+            "cdn.example.com",
+            "https://mirror.example.com/base/"
+          ]
+        },
+        {
+          "currentVersion": "current-hash",
+          "rolledBackVersion": "bad-hash"
+        },
+        false
+      ],
+      "expected": {
+        "action": "download",
+        "hash": "next-hash",
+        "attempts": [
+          {
+            "type": "diff",
+            "urls": [
+              "https://cdn.example.com/cur-next.hdiff",
+              "https://mirror.example.com/base/cur-next.hdiff"
+            ]
+          },
+          {
+            "type": "full",
+            "urls": [
+              "https://cdn.example.com/next.ppk",
+              "https://mirror.example.com/base/next.ppk"
+            ]
+          }
+        ],
+        "devNoop": false
+      }
+    },
+    {
+      "fn": "decideDownload",
+      "args": [
+        {
+          "update": true,
+          "hash": "next-hash",
+          "paths": [
+            "cdn.example.com",
+            "https://mirror.example.com/base/"
+          ]
+        },
+        {
+          "currentVersion": "current-hash",
+          "rolledBackVersion": "bad-hash"
+        },
+        false
+      ],
+      "expected": {
+        "action": "none",
+        "reason": "noArtifact"
+      }
+    },
+    {
+      "fn": "decideDownload",
+      "args": [
+        {
+          "update": true,
+          "hash": "next-hash",
+          "diff": "cur-next.hdiff",
+          "pdiff": "pkg-next.phdiff",
+          "full": "next.ppk",
+          "paths": []
+        },
+        {
+          "currentVersion": "current-hash",
+          "rolledBackVersion": "bad-hash"
+        },
+        false
+      ],
+      "expected": {
+        "action": "none",
+        "reason": "noArtifact"
+      }
+    },
+    {
+      "fn": "decideDownload",
+      "args": [
+        {
+          "update": true,
+          "hash": "next-hash",
+          "full": "next.ppk"
+        },
+        {
+          "currentVersion": "current-hash",
+          "rolledBackVersion": "bad-hash"
+        },
+        false
+      ],
+      "expected": {
+        "action": "none",
+        "reason": "noArtifact"
+      }
+    },
+    {
+      "fn": "decideDownload",
+      "args": [
+        {
+          "update": true,
+          "hash": "next-hash",
+          "diff": "cur-next.hdiff",
+          "pdiff": "pkg-next.phdiff",
+          "full": "next.ppk",
+          "paths": [
+            "cdn.example.com",
+            "https://mirror.example.com/base/"
+          ]
+        },
+        {
+          "currentVersion": "current-hash",
+          "rolledBackVersion": "bad-hash"
+        },
+        true
+      ],
+      "expected": {
+        "action": "download",
+        "hash": "next-hash",
+        "attempts": [
+          {
+            "type": "full",
+            "urls": [
+              "https://cdn.example.com/next.ppk",
+              "https://mirror.example.com/base/next.ppk"
+            ]
+          }
+        ],
+        "devNoop": false
+      }
+    },
+    {
+      "fn": "decideDownload",
+      "args": [
+        {
+          "update": true,
+          "hash": "next-hash",
+          "diff": "cur-next.hdiff",
+          "pdiff": "pkg-next.phdiff",
+          "paths": [
+            "cdn.example.com",
+            "https://mirror.example.com/base/"
+          ]
+        },
+        {
+          "currentVersion": "current-hash",
+          "rolledBackVersion": "bad-hash"
+        },
+        true
+      ],
+      "expected": {
+        "action": "download",
+        "hash": "next-hash",
+        "attempts": [],
+        "devNoop": true
+      }
+    },
+    {
+      "fn": "shouldActivateAfterDownload",
+      "args": [
+        {
+          "hash": "x"
+        },
+        "setNeedUpdate"
+      ],
+      "expected": true
+    },
+    {
+      "fn": "shouldActivateAfterDownload",
+      "args": [
+        {
+          "hash": "x"
+        },
+        "none"
+      ],
+      "expected": false
+    },
+    {
+      "fn": "shouldActivateAfterDownload",
+      "args": [
+        {
+          "hash": "x",
+          "config": {
+            "forceBoot": true
+          }
+        },
+        "none"
+      ],
+      "expected": true
+    },
+    {
+      "fn": "shouldActivateAfterDownload",
+      "args": [
+        {
+          "hash": "x",
+          "config": {
+            "forceBoot": false
+          }
+        },
+        "none"
+      ],
+      "expected": false
+    },
+    {
+      "fn": "shouldActivateAfterDownload",
+      "args": [
+        {
+          "hash": "x",
+          "config": {
+            "forceBoot": 1
+          }
+        },
+        "none"
+      ],
+      "expected": true
+    },
+    {
+      "fn": "shouldActivateAfterDownload",
+      "args": [
+        {
+          "hash": "x",
+          "config": {}
+        },
+        "none"
+      ],
+      "expected": false
+    },
+    {
+      "fn": "shouldActivateAfterDownload",
+      "args": [
+        {
+          "hash": "x",
+          "config": {
+            "forceBoot": true
+          }
+        }
+      ],
+      "expected": true
+    },
+    {
+      "fn": "shouldActivateAfterDownload",
+      "args": [
+        {
+          "upToDate": true
+        },
+        "none"
+      ],
+      "expected": false
+    }
+  ]
+}
