@@ -115,8 +115,12 @@ class DownloadTask implements Runnable {
             if (remainingNanos <= 0) {
                 throw new IOException("Download deadline expired before start");
             }
+            long remainingMillis = Math.max(
+                1L,
+                java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(remainingNanos)
+            );
             requestClient = HTTP_CLIENT.newBuilder()
-                .callTimeout(remainingNanos, java.util.concurrent.TimeUnit.NANOSECONDS)
+                .callTimeout(remainingMillis, java.util.concurrent.TimeUnit.MILLISECONDS)
                 .build();
         }
 

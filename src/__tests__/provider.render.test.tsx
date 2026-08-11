@@ -182,6 +182,22 @@ describe('UpdateProvider rendering', () => {
     expect(mockAlert).not.toHaveBeenCalled();
   });
 
+  test('a rolled-back update is never shown as actionable', async () => {
+    const client = createClient({ updateStrategy: 'alwaysAlert' });
+    client.checkUpdate.mockImplementation(async () => ({
+      update: true,
+      hash: 'rolled-back-hash',
+      full: 'rolled-back-hash.ppk',
+      paths: ['https://cdn.example.com'],
+    }));
+
+    await renderProvider(client);
+
+    expect(client.reportInvalidUpdateOnce).not.toHaveBeenCalled();
+    expect(client.downloadUpdate).not.toHaveBeenCalled();
+    expect(mockAlert).not.toHaveBeenCalled();
+  });
+
   test('silentAndNow strategy downloads and switches without alerts', async () => {
     const client = createClient({ updateStrategy: 'silentAndNow' });
     await renderProvider(client);

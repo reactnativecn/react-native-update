@@ -1534,6 +1534,10 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
     std::string bodyJson =
         flowjson::Stringify(updateflow::BuildCheckRequestBody(input));
     NSString *body = [NSString stringWithUTF8String:bodyJson.c_str()];
+    if (body == nil) {
+        RCTLogWarn(@"RCTPushy -- native check: request body is not valid UTF-8");
+        return;
+    }
 
     NSString *responseText = [self runCheckRequest:config appKey:appKey body:body];
     if (responseText == nil) {

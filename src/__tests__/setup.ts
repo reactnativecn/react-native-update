@@ -55,7 +55,7 @@ const installBaseMocks = () => {
           packageVersion: '1.0.0',
           currentVersion: 'hash',
           isFirstTime: false,
-          rolledBackVersion: '',
+          rolledBackVersion: 'rolled-back-hash',
           buildTime: '2023-01-01',
           uuid: 'uuid',
           setLocalHashInfo: () => {},

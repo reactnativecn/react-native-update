@@ -250,9 +250,12 @@ export const UpdateProvider = ({
           { currentVersion, rolledBackVersion },
           __DEV__
         );
-        if (decision.action === 'none' && decision.reason === 'noArtifact') {
-          // Do not show an alert whose confirm action can only return silently.
-          client.reportInvalidUpdateOnce('noArtifact', info.hash || '');
+        if (decision.action === 'none') {
+          if (decision.reason === 'noArtifact') {
+            // Invalid server data is worth reporting; local rollout guards are
+            // expected no-ops and stay silent.
+            client.reportInvalidUpdateOnce('noArtifact', info.hash || '');
+          }
           info = { upToDate: true };
         }
       }

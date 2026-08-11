@@ -376,10 +376,21 @@ public class UpdateContext {
         if (!isSafePathComponent(hash)) {
             throw new IllegalArgumentException("Invalid hash: " + hash);
         }
-        if (!new File(rootDir, hash+"/index.bundlejs").exists()) {
+        File versionDir = new File(rootDir, hash);
+        File bundleFile = new File(versionDir, "index.bundlejs");
+        if (!bundleFile.isFile()) {
             throw new IllegalStateException("Bundle version " + hash + " not found.");
         }
         StateCoreResult currentState = getStateSnapshot();
+        boolean isLegacyActivatedVersion = hash.equals(currentState.currentVersion)
+            || hash.equals(currentState.lastVersion);
+        if (!new File(versionDir, VERSION_COMPLETE_FILE).isFile()
+            && !isLegacyActivatedVersion) {
+            // Versions activated before completion markers were introduced are
+            // explicitly grandfathered through current/last state. An arbitrary
+            // markerless directory may be a crash-left partial install.
+            throw new IllegalStateException("Bundle version " + hash + " is incomplete.");
+        }
         StateCoreResult nextState = runStateCore(
             STATE_OP_SWITCH_VERSION,
             currentState,
