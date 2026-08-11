@@ -234,6 +234,7 @@ export const UpdateProvider = ({
         log
       );
       if (
+        !info.expired &&
         info.update &&
         (typeof info.hash !== 'string' || info.hash.length === 0)
       ) {

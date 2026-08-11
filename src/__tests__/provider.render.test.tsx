@@ -146,6 +146,23 @@ describe('UpdateProvider rendering', () => {
     expect(mockAlert).not.toHaveBeenCalled();
   });
 
+  test('an expired app package without a bundle hash keeps its download action', async () => {
+    const client = createClient({ updateStrategy: 'alwaysAlert' });
+    client.checkUpdate.mockImplementation(async () => ({
+      expired: true,
+      update: true,
+      downloadUrl: 'https://cdn.example.com/app-release.apk',
+    }));
+
+    await renderProvider(client);
+
+    expect(client.reportInvalidUpdateOnce).not.toHaveBeenCalled();
+    expect(mockAlert).toHaveBeenCalledTimes(1);
+    const [, , buttons] = mockAlert.mock.calls[0] as any[];
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].text).toBe('alert_update_button');
+  });
+
   test('an update without a downloadable artifact is never shown as actionable', async () => {
     const client = createClient({ updateStrategy: 'alwaysAlert' });
     client.checkUpdate.mockImplementation(async () => ({

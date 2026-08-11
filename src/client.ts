@@ -96,6 +96,11 @@ const cloneServerConfig = (server: UpdateServerConfig): UpdateServerConfig => ({
   queryUrls: server.queryUrls ? [...server.queryUrls] : undefined,
 });
 
+// Persist an object (rather than an empty string) so every native bridge keeps
+// accepting the payload while the orchestrators treat the missing appKey and
+// endpoints as an explicit disabled state.
+const NATIVE_CONFIG_DISABLED_JSON = '{"disabled":true}';
+
 const excludeConfiguredEndpoints = (
   endpoints: string[],
   configuredEndpoints: string[]
@@ -339,10 +344,14 @@ export class Pushy {
   };
 
   private syncNativeConfig = () => {
-    const configJson = this.getNativeConfigJson();
-    if (!configJson) {
+    if (
+      Platform.OS === 'web' ||
+      typeof PushyModule.syncNativeConfig !== 'function'
+    ) {
       return;
     }
+    const configJson =
+      this.getNativeConfigJson() ?? NATIVE_CONFIG_DISABLED_JSON;
     // Always record the latest desired value, even when it matches the last
     // completed write. Example: A synced -> B in flight -> options revert to
     // A. Comparing only with synced(A) would drop the revert and leave native

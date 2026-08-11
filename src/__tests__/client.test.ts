@@ -1451,6 +1451,23 @@ describe('syncNativeConfig', () => {
     expect(config.afterDownload).toBe('setNeedUpdate');
   });
 
+  test('persists an explicit disabled state when the config becomes invalid', async () => {
+    const syncNativeConfig = mock(() => Promise.resolve());
+    setupClientMocks({ syncNativeConfig });
+    const { Pushy } = await importFreshClient('sync-config-disabled');
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    client.setOptions({ appKey: '' });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(syncNativeConfig).toHaveBeenCalledTimes(2);
+    expect(
+      JSON.parse((syncNativeConfig.mock.calls.at(-1) as unknown as string[])[0])
+    ).toEqual({ disabled: true });
+  });
+
   test('persists and exposes the effective overridden package version', async () => {
     const syncNativeConfig = mock(() => Promise.resolve());
     setupClientMocks({ syncNativeConfig });
