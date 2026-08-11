@@ -25,7 +25,19 @@ See the docs:
 7. Built-in crash rollback keeps updates safe and reliable, and health monitoring helps you catch and stop a bad release early.
 8. Meta information and open APIs make the system more extensible.
 9. An **MCP server** lets you connect the update service to Claude Desktop, an IDE or your own agent, ask in plain language why a device never received an update, and investigate alongside GitHub, Sentry or CI. Everything is read-only and scoped per app ([Cresc docs](https://cresc.dev/docs/mcp) / [Pushy docs](https://pushy.reactnative.cn/docs/mcp)).
-10. Paid technical support is available.
+10. **Native cold-start recovery**: even when an update is broken badly enough that JS never runs (white screen, crash on launch), the device pulls the fixed version on its next launch from the native side — no reinstall, no app-store release (see [Native cold-start check](#native-cold-start-check)).
+11. Paid technical support is available.
+
+## Native cold-start check
+
+Since 10.51.0 every cold start runs one background update check a few seconds after launch that **does not depend on the app bundle** — the request, the download, the patch and the version switch all happen natively. It exists for exactly one reason: **when the running update is broken enough that JS never starts, something still has to be able to fetch the fix.** Normal updates remain the JS flow's job; the JS check reuses this result instead of issuing its own request.
+
+What to know:
+
+- **It never blocks startup**: it is delayed by a few seconds, runs off the main thread, and its result takes effect on the *next* launch.
+- **Whether it activates depends on your configuration**: only with `updateStrategy` set to `silentAndNow` / `silentAndLater` *and* automatic checks left on (`checkStrategy` not `null`) will the native side mark a downloaded version for the next launch. Otherwise it downloads and leaves activation to JS.
+- **Rescue directive**: the dashboard can mark a version "force boot", which activates on the next launch regardless of the strategies above — this is how a fleet stuck on a broken version is recovered. The device-local crash-rollback guard still wins: a version this device already rolled back from is never reinstalled.
+- **It can be turned off**: `disableNativeCheck: true` removes one background request per cold start, at the cost of **giving up the recovery above** — a device bricked by a bad update can no longer heal itself. Choose it only when that request is itself the problem (traffic/battery budgets, privacy manifests, consent-gated networking).
 
 ## Diff Algorithm Comparison
 

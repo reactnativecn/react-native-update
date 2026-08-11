@@ -22,6 +22,13 @@ const appKeyToPlatform = Object.fromEntries(
   ])
 );
 
+// Flipped by the /control/force-boot endpoint. When on, every update response
+// carries config.forceBoot so the client's native cold-start check activates
+// the version it downloads — the brick-rescue path, which by definition has to
+// work without any JS check. Off by default so the other suites keep full
+// control over when a version becomes active.
+let forceBootEnabled = false;
+
 const contentTypes: Record<string, string> = {
   '.json': 'application/json; charset=utf-8',
   '.ppk': 'application/octet-stream',
@@ -170,6 +177,17 @@ const server = Bun.serve({
       });
     }
 
+    if (url.pathname === '/control/force-boot') {
+      if (request.method !== 'POST') {
+        return new Response('method not allowed', { status: 405 });
+      }
+      const body = (await request.json().catch(() => ({}))) as {
+        enabled?: unknown;
+      };
+      forceBootEnabled = body.enabled === true;
+      return json({ forceBoot: forceBootEnabled });
+    }
+
     if (url.pathname.startsWith('/checkUpdate/')) {
       if (request.method !== 'POST') {
         return new Response('method not allowed', { status: 405 });
@@ -188,9 +206,16 @@ const server = Bun.serve({
       const currentHash = typeof payload.hash === 'string' ? payload.hash : '';
       const diffV = typeof payload.diffV === 'number' ? payload.diffV : 0;
 
-      return json(
-        buildUpdateResponse(platform, currentHash, diffV, url.origin)
+      const response = buildUpdateResponse(
+        platform,
+        currentHash,
+        diffV,
+        url.origin
       );
+      if (forceBootEnabled && 'update' in response) {
+        return json({ ...response, config: { forceBoot: true } });
+      }
+      return json(response);
     }
 
     if (url.pathname.startsWith('/artifacts/')) {

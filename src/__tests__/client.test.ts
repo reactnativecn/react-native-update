@@ -1459,6 +1459,25 @@ describe('syncNativeConfig', () => {
     expect(config.afterDownload).toBe('setNeedUpdate');
   });
 
+  test('disableNativeCheck writes a disabling config the natives bail on', async () => {
+    const syncNativeConfig = mock(() => Promise.resolve());
+    setupClientMocks({ syncNativeConfig });
+    const { Pushy } = await importFreshClient('sync-config-optout');
+    new Pushy({
+      appKey: 'demo-app',
+      updateStrategy: 'silentAndNow',
+      disableNativeCheck: true,
+    });
+
+    const config = JSON.parse(
+      (syncNativeConfig.mock.calls.at(-1) as unknown as string[])[0]
+    );
+    expect(config.disabled).toBe(true);
+    // No endpoints: the orchestrators return on `disabled` before any IO.
+    expect(config.endpoints).toBeUndefined();
+    expect(config.appKey).toBe('demo-app');
+  });
+
   test('alert strategies keep activation with JS (afterDownload none)', async () => {
     const syncNativeConfig = mock(() => Promise.resolve());
     setupClientMocks({ syncNativeConfig });
