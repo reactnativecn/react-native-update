@@ -309,10 +309,21 @@ update 降级为日志 + 遥测而非弹窗;若无意,恢复"无 hash 条目不�
 3. **Harmony 单调钟**:`TimeType.STARTUP` → `TimeType.ACTIVE`,与 iOS
    `systemUptime` / Android `nanoTime` 的"睡眠时停走"语义对齐。
 
+**补强(2026-08-11,CodeRabbit 复核后)**:初版守卫是 compare-and-act,且
+`hash_<hash>` 元信息写在守卫之前——reset 若落在"比对通过"与"写入"之间仍
+可被覆盖。现改为**一次原子提交**:版本元信息 + 激活 + 响应缓存合并为
+`commitNativeCheckResult(expectedGeneration, ...)`,内部先复核代数再落全部
+写入;`resetToPackagedBundle` 与之互斥并**先失效代数再清状态**。互斥手段按
+端选取:iOS 复用既有 `PushyWithStateLock`(为此把 switchVersion 拆出无锁核
+`PushySwitchVersionLocked`,避免不可重入死锁)、Android 用共享
+`commitLock`、Harmony 是 ArkTS 单线程且提交内无 await,天然原子(已注释说
+明)。三处落点(元信息/激活/缓存)与三个调用点(nothing-to-do、未下载、成功)
+全部走同一入口。
+
 验证:JS 178 项(新增 2 项 checkStrategy 折算用例)、Biome/tsc/DevEco
 strict、77 金标向量 + ASan/UBSan、`.so` 符号与 16KB 对齐、iOS clang
-(DEBUG=0/1)、Android javac(main+oldarch)。本轮不触 `cpp/`,无需重生成
-向量或重编 `.so`。
+(DEBUG=0/1)、Android javac(main+oldarch)、OHOS 工具链语法。本轮不触
+`cpp/`,无需重生成向量或重编 `.so`。
 
 ### 后续小版本
 

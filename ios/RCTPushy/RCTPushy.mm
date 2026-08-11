@@ -415,6 +415,21 @@ static void PushyApplyStateToDefaults(NSUserDefaults *defaults, const pushy::sta
         PushyFromStdString(state.rolled_back_version));
 }
 
+// Version switch without acquiring the state lock: the caller must already
+// hold it. Lets the cold-start check commit its whole result (version info,
+// switch, response cache) inside one lock acquisition, so resetToPackagedBundle
+// can never interleave between the generation check and the writes.
+static void PushySwitchVersionLocked(NSString *hash) {
+    NSUserDefaults *defaults = PushyDefaults();
+    pushy::state::State next = pushy::state::SwitchVersion(
+        PushyStateFromDefaults(defaults),
+        PushyToStdString(hash)
+    );
+    PushyApplyStateToDefaults(defaults, next);
+    // Re-enable first-load consumption and rollback checks for the newly selected bundle.
+    ignoreRollback = false;
+}
+
 @interface RCTPushy ()
 - (void)downloadUpdate:(PushyType)type
                options:(NSDictionary *)options
@@ -457,10 +472,13 @@ static void PushyApplyStateToDefaults(NSUserDefaults *defaults, const pushy::sta
 @interface RCTPushyOrchestrator : NSObject
 + (void)scheduleFromColdStart:(NSString *)launchRolledBackVersion;
 + (void)runOnce:(NSString *)launchRolledBackVersion;
-+ (void)persistResponseCache:(NSString *)responseText
-                     request:(NSString *)requestBody
-                      config:(NSString *)configJson
-                  responseAt:(long long)responseAtSeconds;
++ (BOOL)commitRoundWithGeneration:(uint64_t)generation
+                         hashInfo:(NSDictionary *)hashInfoEntry
+                         activate:(NSString *)hashToActivate
+                     responseText:(NSString *)responseText
+                          request:(NSString *)requestBody
+                           config:(NSString *)configJson
+                       responseAt:(long long)responseAtSeconds;
 @end
 
 // Shared by the getBundleHash RCT method and the native cold-start check.
@@ -855,6 +873,10 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
     // for gray release bucketing and must not change on reset.
     __block NSString *keepVersion = nil;
     PushyWithStateLock(^{
+        // Invalidate any in-flight cold-start round before clearing state, so
+        // a round that commits under this same lock afterwards always sees the
+        // new generation and drops its result.
+        pushyResetGeneration.fetch_add(1);
         NSUserDefaults *defaults = PushyDefaults();
         keepVersion = pushyLaunchVersion;
 
@@ -878,8 +900,6 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
         // removed; dropping it stops the JS side from reusing that answer.
         [defaults removeObjectForKey:keyNativeCheckCache];
         ignoreRollback = false;
-        // Invalidate any cold-start check that is already in flight.
-        pushyResetGeneration.fetch_add(1);
     });
 
     dispatch_async(_fileQueue, ^{
@@ -1215,14 +1235,7 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
     }
 
     PushyWithStateLock(^{
-        NSUserDefaults *defaults = PushyDefaults();
-        pushy::state::State next = pushy::state::SwitchVersion(
-            PushyStateFromDefaults(defaults),
-            PushyToStdString(hash)
-        );
-        PushyApplyStateToDefaults(defaults, next);
-        // Re-enable first-load consumption and rollback checks for the newly selected bundle.
-        ignoreRollback = false;
+        PushySwitchVersionLocked(hash);
     });
     return YES;
 }
@@ -1571,10 +1584,13 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
         PushyToStdString(responseText), identity, false,
         config.Get("afterDownload").AsString());
     if (decision.Get("action").AsString() != "download") {
-        if (pushyResetGeneration.load() == resetGeneration) {
-            [self persistResponseCache:responseText request:body config:configJson
-                            responseAt:responseAtSeconds];
-        }
+        [self commitRoundWithGeneration:resetGeneration
+                               hashInfo:nil
+                               activate:nil
+                           responseText:responseText
+                                request:body
+                                 config:configJson
+                             responseAt:responseAtSeconds];
         RCTLogInfo(@"RCTPushy -- native check: nothing to do (%s)",
                    decision.Get("reason").AsString().c_str());
         return;
@@ -1592,52 +1608,57 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
                                 originHash:currentVersion];
     }
     if (!downloaded) {
-        if (pushyResetGeneration.load() == resetGeneration) {
-            [self persistResponseCache:responseText request:body config:configJson
-                            responseAt:responseAtSeconds];
-        }
+        [self commitRoundWithGeneration:resetGeneration
+                               hashInfo:nil
+                               activate:nil
+                           responseText:responseText
+                                request:body
+                                 config:configJson
+                             responseAt:responseAtSeconds];
         return;
     }
 
     // Persist name/description/metaInfo alongside the version, mirroring the
     // JS side's setLocalHashInfo after a successful download.
     const flowjson::Value &info = decision.Get("info");
-    flowjson::Value hashInfo = flowjson::Value::Object();
+    NSMutableDictionary *versionInfo = [NSMutableDictionary dictionary];
     for (const char *key : {"name", "description", "metaInfo"}) {
         if (info.Get(key).IsString()) {
-            hashInfo.Set(key, info.Get(key));
+            versionInfo[@(key)] = PushyFromStdString(info.Get(key).AsString()) ?: @"";
         }
     }
-    [defaults setObject:[NSString stringWithUTF8String:flowjson::Stringify(hashInfo).c_str()]
-                 forKey:PushyHashInfoKey(hash)];
-
-    if (pushyResetGeneration.load() != resetGeneration) {
+    // Silent strategies or a server-marked forceBoot version (per-version
+    // remote override — the brick rescue) activate for the next launch;
+    // otherwise activation stays with the JS side (§6/§10.1).
+    BOOL activate = decision.Get("activate").Truthy();
+    BOOL committed = [self commitRoundWithGeneration:resetGeneration
+                                            hashInfo:@{@"hash": hash, @"info": versionInfo}
+                                            activate:activate ? hash : nil
+                                        responseText:responseText
+                                             request:body
+                                              config:configJson
+                                          responseAt:responseAtSeconds];
+    if (!committed) {
         RCTLogInfo(@"RCTPushy -- native check: reset during round, dropping result");
-        return;
-    }
-
-    if (decision.Get("activate").Truthy()) {
-        // Silent strategies or a server-marked forceBoot version (per-version
-        // remote override — the brick rescue): activate for the next launch.
-        // Otherwise activation stays with the JS side (§6/§10.1).
-        NSError *error = nil;
-        if ([[self engine] switchVersion:hash error:&error]) {
-            RCTLogInfo(@"RCTPushy -- native check: downloaded %@ and set for next launch", hash);
-        } else {
-            RCTLogWarn(@"RCTPushy -- native check: switchVersion failed: %@",
-                       error.localizedDescription);
-        }
+    } else if (activate) {
+        RCTLogInfo(@"RCTPushy -- native check: downloaded %@ and set for next launch", hash);
     } else {
         RCTLogInfo(@"RCTPushy -- native check: downloaded %@, activation left to JS", hash);
     }
-    [self persistResponseCache:responseText request:body config:configJson
-                    responseAt:responseAtSeconds];
 }
 
-+ (void)persistResponseCache:(NSString *)responseText
-                     request:(NSString *)requestBody
-                      config:(NSString *)configJson
-                  responseAt:(long long)responseAtSeconds {
+// Everything a round persists — version info, the activation, the response
+// cache — is written inside ONE state-lock acquisition that first re-checks the
+// reset generation. resetToPackagedBundle bumps that generation under the same
+// lock, so there is no compare-and-act window: either the whole round commits,
+// or the reset wins and none of it does.
++ (BOOL)commitRoundWithGeneration:(uint64_t)generation
+                         hashInfo:(NSDictionary *)hashInfoEntry
+                         activate:(NSString *)hashToActivate
+                     responseText:(NSString *)responseText
+                          request:(NSString *)requestBody
+                           config:(NSString *)configJson
+                       responseAt:(long long)responseAtSeconds {
     NSDictionary *cacheEntry = @{
         @"ts": @(responseAtSeconds),
         @"body": responseText,
@@ -1645,10 +1666,31 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
         @"config": configJson,
     };
     NSData *cacheData = [NSJSONSerialization dataWithJSONObject:cacheEntry options:0 error:nil];
-    if (cacheData != nil) {
-        [PushyDefaults() setObject:[[NSString alloc] initWithData:cacheData encoding:NSUTF8StringEncoding]
-                           forKey:keyNativeCheckCache];
-    }
+    __block BOOL committed = NO;
+    PushyWithStateLock(^{
+        if (pushyResetGeneration.load() != generation) {
+            return;
+        }
+        NSUserDefaults *defaults = PushyDefaults();
+        if (hashInfoEntry != nil) {
+            NSData *infoData = [NSJSONSerialization dataWithJSONObject:hashInfoEntry[@"info"]
+                                                              options:0
+                                                                error:nil];
+            if (infoData != nil) {
+                [defaults setObject:[[NSString alloc] initWithData:infoData encoding:NSUTF8StringEncoding]
+                             forKey:PushyHashInfoKey(hashInfoEntry[@"hash"])];
+            }
+        }
+        if (hashToActivate != nil) {
+            PushySwitchVersionLocked(hashToActivate);
+        }
+        if (cacheData != nil) {
+            [defaults setObject:[[NSString alloc] initWithData:cacheData encoding:NSUTF8StringEncoding]
+                         forKey:keyNativeCheckCache];
+        }
+        committed = YES;
+    });
+    return committed;
 }
 
 // Sequential fallback over the ordered candidates (§5.1): one request at a

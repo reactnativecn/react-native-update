@@ -9,7 +9,10 @@ import { DownloadTaskParams } from './DownloadTaskParams';
 import { bundleManager } from '@kit.AbilityKit';
 import { util } from '@kit.ArkTS';
 import logger from './Logger';
-import { scheduleNativeCheck } from './NativeCheckOrchestrator';
+import {
+  KEY_RESP_CACHE,
+  scheduleNativeCheck,
+} from './NativeCheckOrchestrator';
 import NativePatchCore, {
   STATE_OP_CLEAR_FIRST_TIME,
   STATE_OP_CLEAR_ROLLBACK_MARK,
@@ -450,15 +453,17 @@ export class UpdateContext {
         console.error('Failed to clear hash info on reset:', e);
       }
     }
+    // 先让在飞的原生检测轮次失效,再清理状态:随后在同一(单线程)执行序里
+    // 提交的轮次会看到新代数并整轮丢弃。
+    UpdateContext.resetGeneration += 1;
     this.persistState(resetState, { clearFirstLoadMarker: true });
     // 缓存里的响应仍在宣告本次 reset 刚删掉的版本,一并丢弃,避免 JS 侧复用。
     try {
-      this.preferences.deleteSync('nativeCheckResp');
+      this.preferences.deleteSync(KEY_RESP_CACHE);
     } catch (e: any) {
       console.error('Failed to clear native check cache on reset:', e);
     }
     UpdateContext.ignoreRollback = false;
-    UpdateContext.resetGeneration += 1;
 
     // maxAgeDays=0：删除下载目录内容，仅保留当前运行版本的目录（残留目录由
     // 下次常规清理回收）。挂到串行任务链尾，避免与在飞的解压/打补丁并发。
@@ -478,6 +483,34 @@ export class UpdateContext {
   /** 供原生检测编排器采样/比对的 reset 代数(见 resetGeneration 注释)。 */
   public getResetGeneration(): number {
     return UpdateContext.resetGeneration;
+  }
+
+  /**
+   * 一次性提交原生检测轮次的全部持久化结果(版本元信息、激活、响应缓存):
+   * 先复核 reset 代数,再落所有写入。ArkTS 单线程 + 本方法内无 await,因此
+   * 校验与写入之间不存在可插入 reset 的窗口(iOS/Android 用锁达到同一效果)。
+   * 返回是否提交成功。
+   */
+  public commitNativeCheckResult(
+    expectedGeneration: number,
+    hash: string,
+    hashInfoJson: string,
+    activate: boolean,
+    responseCacheJson: string,
+  ): boolean {
+    if (UpdateContext.resetGeneration !== expectedGeneration) {
+      return false;
+    }
+    if (hash && hashInfoJson) {
+      this.setKv(`hash_${hash}`, hashInfoJson);
+    }
+    if (activate && hash) {
+      this.switchVersion(hash);
+    }
+    if (responseCacheJson) {
+      this.setKv(KEY_RESP_CACHE, responseCacheJson);
+    }
+    return true;
   }
 
   public async downloadFullUpdate(

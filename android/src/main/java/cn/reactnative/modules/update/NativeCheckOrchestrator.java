@@ -158,10 +158,9 @@ final class NativeCheckOrchestrator {
         }
         JSONObject decision = new JSONObject(decisionJson);
         if (!"download".equals(decision.optString("action"))) {
-            if (UpdateContext.getResetGeneration() == resetGeneration) {
-                persistResponseCache(
-                    context, configJson, body, responseText, responseAtSeconds);
-            }
+            context.commitNativeCheckResult(
+                resetGeneration, null, null, false,
+                buildResponseCacheJson(configJson, body, responseText, responseAtSeconds));
             Log.i(UpdateContext.TAG,
                 "native check: nothing to do (" + decision.optString("reason") + ")");
             return;
@@ -179,15 +178,16 @@ final class NativeCheckOrchestrator {
         if (!downloaded) {
             // The native attempt has finished, so JS may safely reuse the
             // response and retry through its own strategy chain.
-            if (UpdateContext.getResetGeneration() == resetGeneration) {
-                persistResponseCache(
-                    context, configJson, body, responseText, responseAtSeconds);
-            }
+            context.commitNativeCheckResult(
+                resetGeneration, null, null, false,
+                buildResponseCacheJson(configJson, body, responseText, responseAtSeconds));
             return;
         }
 
-        // Persist name/description/metaInfo alongside the version, mirroring
-        // the JS side's setLocalHashInfo after a successful download.
+        // Version info (mirroring the JS side's setLocalHashInfo), the
+        // activation and the response cache all land in one atomic commit —
+        // see UpdateContext.commitNativeCheckResult.
+        String hashInfoJson = null;
         JSONObject info = decision.optJSONObject("info");
         if (info != null) {
             JSONObject hashInfo = new JSONObject();
@@ -197,37 +197,36 @@ final class NativeCheckOrchestrator {
                     hashInfo.put(key, value);
                 }
             }
-            context.setKv("hash_" + hash, hashInfo.toString());
+            hashInfoJson = hashInfo.toString();
         }
-
-        if (UpdateContext.getResetGeneration() != resetGeneration) {
-            Log.i(UpdateContext.TAG, "native check: reset during round, dropping result");
+        // Silent strategies or a server-marked forceBoot version (per-version
+        // remote override — the brick rescue) activate for the next launch;
+        // otherwise activation stays with the JS side.
+        boolean activate = decision.optBoolean("activate", false);
+        boolean committed;
+        try {
+            committed = context.commitNativeCheckResult(
+                resetGeneration,
+                hash,
+                hashInfoJson,
+                activate,
+                buildResponseCacheJson(configJson, body, responseText, responseAtSeconds));
+        } catch (Exception e) {
+            Log.w(UpdateContext.TAG, "native check: commit failed: " + e);
             return;
         }
-
-        if (decision.optBoolean("activate", false)) {
-            // Silent strategies or a server-marked forceBoot version
-            // (per-version remote override — the brick rescue): activate for
-            // the next launch. Otherwise activation stays with the JS side.
-            try {
-                context.switchVersion(hash);
-                Log.i(UpdateContext.TAG,
-                    "native check: downloaded " + hash + " and set for next launch");
-            } catch (Exception e) {
-                Log.w(UpdateContext.TAG, "native check: switchVersion failed: " + e);
-            }
+        if (!committed) {
+            Log.i(UpdateContext.TAG, "native check: reset during round, dropping result");
+        } else if (activate) {
+            Log.i(UpdateContext.TAG,
+                "native check: downloaded " + hash + " and set for next launch");
         } else {
             Log.i(UpdateContext.TAG,
                 "native check: downloaded " + hash + ", activation left to JS");
         }
-        // Publish the response only after native file/state work is complete;
-        // otherwise JS can observe it and start a competing download.
-        persistResponseCache(
-            context, configJson, body, responseText, responseAtSeconds);
     }
 
-    private static void persistResponseCache(
-        UpdateContext context,
+    private static String buildResponseCacheJson(
         String configJson,
         String requestBody,
         String responseText,
@@ -238,7 +237,7 @@ final class NativeCheckOrchestrator {
         cacheEntry.put("body", responseText);
         cacheEntry.put("request", requestBody);
         cacheEntry.put("config", configJson);
-        context.setKv(KEY_RESP_CACHE, cacheEntry.toString());
+        return cacheEntry.toString();
     }
 
     private static final OkHttpClient httpClient = new OkHttpClient.Builder()

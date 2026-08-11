@@ -187,15 +187,13 @@ async function runOnce(
   }
   const decision = JSON.parse(decisionJson) as Decision;
   if (decision.action !== 'download') {
-    if (context.getResetGeneration() === resetGeneration) {
-      persistResponseCache(
-        context,
-        configJson,
-        body,
-        responseText,
-        responseAtSeconds,
-      );
-    }
+    context.commitNativeCheckResult(
+      resetGeneration,
+      '',
+      '',
+      false,
+      buildResponseCacheJson(configJson, body, responseText, responseAtSeconds),
+    );
     logger.debug(TAG, `nothing to do (${decision.reason ?? ''})`);
     return;
   }
@@ -214,20 +212,19 @@ async function runOnce(
     );
   }
   if (!downloaded) {
-    if (context.getResetGeneration() === resetGeneration) {
-      persistResponseCache(
-        context,
-        configJson,
-        body,
-        responseText,
-        responseAtSeconds,
-      );
-    }
+    context.commitNativeCheckResult(
+      resetGeneration,
+      '',
+      '',
+      false,
+      buildResponseCacheJson(configJson, body, responseText, responseAtSeconds),
+    );
     return;
   }
 
   // 与 JS 侧下载成功后的 setLocalHashInfo 对齐,持久化版本元信息。
   const info = decision.info;
+  let hashInfoJson = '';
   if (info) {
     const hashInfo: DecisionInfo = {};
     if (typeof info.name === 'string') {
@@ -239,50 +236,48 @@ async function runOnce(
     if (typeof info.metaInfo === 'string') {
       hashInfo.metaInfo = info.metaInfo;
     }
-    context.setKv(`hash_${hash}`, JSON.stringify(hashInfo));
+    hashInfoJson = JSON.stringify(hashInfo);
   }
 
-  if (context.getResetGeneration() !== resetGeneration) {
-    logger.debug(TAG, 'reset during round, dropping result');
+  // 版本元信息、激活与响应缓存一次性原子提交(见 commitNativeCheckResult);
+  // 缓存只在原生文件/状态工作结束后公开,避免 JS 观察到响应后并发下载。
+  // 静默策略、或服务端按版本标记的 forceBoot(远程覆盖,救砖指令)才激活。
+  const activate = decision.activate === true;
+  let committed = false;
+  try {
+    committed = context.commitNativeCheckResult(
+      resetGeneration,
+      hash,
+      hashInfoJson,
+      activate,
+      buildResponseCacheJson(configJson, body, responseText, responseAtSeconds),
+    );
+  } catch (e) {
+    logger.error(TAG, `commit failed: ${e}`);
     return;
   }
-
-  if (decision.activate === true) {
-    // 静默策略、或服务端按版本标记的 forceBoot(远程覆盖,救砖指令):激活
-    // 到下次启动;否则激活权留给 JS(§6)。
-    try {
-      context.switchVersion(hash);
-      logger.debug(TAG, `downloaded ${hash} and set for next launch`);
-    } catch (e) {
-      logger.error(TAG, `switchVersion failed: ${e}`);
-    }
+  if (!committed) {
+    logger.debug(TAG, 'reset during round, dropping result');
+  } else if (activate) {
+    logger.debug(TAG, `downloaded ${hash} and set for next launch`);
   } else {
     logger.debug(TAG, `downloaded ${hash}, activation left to JS`);
   }
-  // 仅在原生文件/状态工作结束后公开缓存,避免 JS 观察到响应后并发下载。
-  persistResponseCache(
-    context,
-    configJson,
-    body,
-    responseText,
-    responseAtSeconds,
-  );
 }
 
-function persistResponseCache(
-  context: UpdateContext,
+function buildResponseCacheJson(
   configJson: string,
   requestBody: string,
   responseText: string,
   responseAtSeconds: number,
-): void {
+): string {
   const cacheEntry: RespCacheEntry = {
     ts: responseAtSeconds,
     body: responseText,
     request: requestBody,
     config: configJson,
   };
-  context.setKv(KEY_RESP_CACHE, JSON.stringify(cacheEntry));
+  return JSON.stringify(cacheEntry);
 }
 
 function isValidCheckResponse(responseText: string | undefined): boolean {

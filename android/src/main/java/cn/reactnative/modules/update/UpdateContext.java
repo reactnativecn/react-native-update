@@ -55,6 +55,9 @@ public class UpdateContext {
     // can never resurrect the version the app just reset away from.
     private static final java.util.concurrent.atomic.AtomicLong resetGeneration =
         new java.util.concurrent.atomic.AtomicLong(0);
+    // Held by resetToPackagedBundle and by the cold-start check's commit, so
+    // the generation check and the writes it guards are one atomic step.
+    private static final Object commitLock = new Object();
     
     // Singleton instance
     private static volatile UpdateContext sInstance;
@@ -491,6 +494,16 @@ public class UpdateContext {
      * for gray release bucketing and must not change on reset.
      */
     public void resetToPackagedBundle() {
+        synchronized (commitLock) {
+            resetToPackagedBundleLocked();
+        }
+    }
+
+    private void resetToPackagedBundleLocked() {
+        // Invalidate any in-flight cold-start round before clearing state: a
+        // round committing under the same lock afterwards sees the new
+        // generation and drops its result.
+        resetGeneration.incrementAndGet();
         StateCoreResult resetState = new StateCoreResult();
         resetState.packageVersion = getPackageVersion();
         resetState.buildTime = getBuildTime();
@@ -507,7 +520,6 @@ public class UpdateContext {
         ignoreRollback = false;
         // editor.clear() above already dropped the cached check response; it
         // still advertised the version this reset removed.
-        resetGeneration.incrementAndGet();
         Log.i(TAG, "Reset to packaged bundle");
 
         DownloadTaskParams params = new DownloadTaskParams();
@@ -645,6 +657,37 @@ public class UpdateContext {
     /** Sampled/compared by the native check orchestrator; see resetGeneration. */
     static long getResetGeneration() {
         return resetGeneration.get();
+    }
+
+    /**
+     * Commit everything a cold-start round persists — version info, the
+     * activation, the response cache — under one lock that first re-checks the
+     * reset generation. resetToPackagedBundle takes the same lock, so there is
+     * no compare-and-act window: either the whole round lands, or the reset
+     * wins and none of it does. Returns whether the round was committed.
+     */
+    boolean commitNativeCheckResult(
+        long expectedGeneration,
+        String hash,
+        String hashInfoJson,
+        boolean activate,
+        String responseCacheJson
+    ) {
+        synchronized (commitLock) {
+            if (resetGeneration.get() != expectedGeneration) {
+                return false;
+            }
+            if (hash != null && hashInfoJson != null) {
+                setKv("hash_" + hash, hashInfoJson);
+            }
+            if (activate && hash != null) {
+                switchVersion(hash);
+            }
+            if (responseCacheJson != null) {
+                setKv(NativeCheckOrchestrator.KEY_RESP_CACHE, responseCacheJson);
+            }
+            return true;
+        }
     }
 
     boolean hasCompletedVersion(String hash) {
