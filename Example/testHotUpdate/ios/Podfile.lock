@@ -1495,7 +1495,7 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
-  - react-native-update (10.48.2):
+  - react-native-update (10.51.0):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -1508,7 +1508,7 @@ PODS:
     - React-graphics
     - React-ImageManager
     - React-jsi
-    - react-native-update/RCTPushy (= 10.48.2)
+    - react-native-update/RCTPushy (= 10.51.0)
     - React-NativeModulesApple
     - React-RCTFabric
     - React-renderercss
@@ -1520,7 +1520,7 @@ PODS:
     - ReactNativeDependencies
     - SSZipArchive
     - Yoga
-  - react-native-update/RCTPushy (10.48.2):
+  - react-native-update/RCTPushy (10.51.0):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -2355,7 +2355,7 @@ SPEC CHECKSUMS:
   React-microtasksnativemodule: 2eb3f49d0d8e77b5343455eccd057010b8d38b6b
   React-mutationobservernativemodule: f0a0d5ae9b51caf7becbeabf836d716cfedb6bf2
   react-native-safe-area-context: fb5c8ee9f6dd62ef710611b3d370c501f42a4ac0
-  react-native-update: 64139b3a4590882519f3f60e43d83283222ad5b8
+  react-native-update: 42844d02222b7dc7790b6fcb8f85d0b5f2fd88fd
   React-NativeModulesApple: a092d89b58f635ebfab88048b0eda9fb516819fd
   React-networking: 968bbbe73590149feb1e72b2af4f6a68e4796ece
   React-oscompat: 0b72a7e926954a0415ccd83e0748b6561fe45367
