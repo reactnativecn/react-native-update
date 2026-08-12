@@ -141,7 +141,12 @@ jobs:
           # --maxWorkers 1 below). Unpin once a run proves 37.x stable.
           emulator-build: 15507667
           emulator-boot-timeout: 900
-          script: cd Example/e2etest && E2E_PLATFORM=android bunx detox test --configuration android.emu.release --headless --record-logs all --retries 1 --maxWorkers 1
+          script: |
+            cd Example/e2etest
+            E2E_PLATFORM=android bunx detox test --configuration android.emu.release --headless --record-logs all --retries 1 --maxWorkers 1
+            # 原生冷启动检测有自己的 runner 配置(见 e2e/native/jest.config.js);
+            # Android 这个 job 有预算,不必像 iOS 那样拆成独立 job
+            E2E_PLATFORM=android bunx detox test --configuration android.emu.release --headless --record-logs all --retries 1 --maxWorkers 1 --config e2e/native/jest.config.js
 
       - name: Upload Detox artifacts
         # cancelled() 覆盖 job 超时被杀的场景,否则超时时拿不到现场
@@ -373,7 +378,10 @@ jobs:
           # --maxWorkers 1 below). Unpin once a run proves 37.x stable.
           emulator-build: 15507667
           emulator-boot-timeout: 900
-          script: cd .e2e-rn077-oldarch/AwesomeProject && E2E_PLATFORM=android bunx detox test --configuration android.emu.release --headless --record-logs all --retries 1 --maxWorkers 1
+          script: |
+            cd .e2e-rn077-oldarch/AwesomeProject
+            E2E_PLATFORM=android bunx detox test --configuration android.emu.release --headless --record-logs all --retries 1 --maxWorkers 1
+            E2E_PLATFORM=android bunx detox test --configuration android.emu.release --headless --record-logs all --retries 1 --maxWorkers 1 --config e2e/native/jest.config.js
 
       - name: Upload Detox artifacts
         # cancelled() 覆盖 job 超时被杀的场景,否则超时时拿不到现场

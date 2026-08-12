@@ -4,7 +4,7 @@ import {
   LOCAL_UPDATE_HASHES,
   LOCAL_UPDATE_LABELS,
   LOCAL_UPDATE_PORT,
-} from './localUpdateConfig.ts';
+} from '../localUpdateConfig.ts';
 
 // The native cold-start check (NATIVE_CHECKUPDATE_DESIGN §10) exists for one
 // scenario: the running update is broken badly enough that JS never starts, so
