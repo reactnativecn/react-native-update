@@ -103,11 +103,173 @@ class DownloadTask implements Runnable {
         });
     }
 
+    // Sidecar next to the archive recording what a partial download belongs
+    // to (url + validators + total). An archive without a matching sidecar is
+    // untrusted and restarted from zero; the pair is deleted together with
+    // the archive once it is consumed or classified as poisoned.
+    private static File resumeSidecarFile(File archive) {
+        return new File(archive.getPath() + ".resume");
+    }
+
+    static void deleteResumeSidecar(File archive) {
+        File sidecar = resumeSidecarFile(archive);
+        if (sidecar.exists() && !sidecar.delete() && UpdateContext.DEBUG) {
+            Log.w(UpdateContext.TAG, "Failed to delete resume sidecar " + sidecar);
+        }
+    }
+
+    private JSONObject readResumeMeta(File sidecar, String url) {
+        if (!sidecar.isFile()) {
+            return null;
+        }
+        try {
+            byte[] bytes = readBytes(new java.io.FileInputStream(sidecar));
+            JSONObject meta = (JSONObject) new JSONTokener(
+                new String(bytes, StandardCharsets.UTF_8)).nextValue();
+            if (url.equals(meta.optString("url"))) {
+                return meta;
+            }
+        } catch (Throwable e) {
+            // A corrupt sidecar simply means "cannot resume".
+        }
+        return null;
+    }
+
+    private void writeResumeMeta(
+        File sidecar, String url, Response response, JSONObject previousMeta, long total
+    ) {
+        try {
+            JSONObject meta = new JSONObject();
+            meta.put("url", url);
+            String etag = response.header("ETag");
+            String lastModified = response.header("Last-Modified");
+            if (etag == null && previousMeta != null) {
+                etag = previousMeta.optString("etag", null);
+            }
+            if (lastModified == null && previousMeta != null) {
+                lastModified = previousMeta.optString("lastModified", null);
+            }
+            if (etag != null) {
+                meta.put("etag", etag);
+            }
+            if (lastModified != null) {
+                meta.put("lastModified", lastModified);
+            }
+            if (total > 0) {
+                meta.put("total", total);
+            }
+            UpdateFileUtils.ensureParentDirectory(sidecar);
+            try (java.io.FileOutputStream out = new java.io.FileOutputStream(sidecar)) {
+                out.write(meta.toString().getBytes(StandardCharsets.UTF_8));
+            }
+        } catch (Throwable e) {
+            // Non-fatal: without a sidecar the next attempt starts from zero.
+            Log.w(UpdateContext.TAG, "Failed to persist resume sidecar: " + e);
+        }
+    }
+
+    // "bytes <start>-<end>/<total>". Returns the total (0 when "*"), or -1
+    // when the header is missing/malformed or the start does not match the
+    // local partial — either way the appended bytes could not be trusted.
+    private static long parseContentRange(String header, long expectedStart) {
+        if (header == null || !header.startsWith("bytes ")) {
+            return -1;
+        }
+        try {
+            String range = header.substring("bytes ".length()).trim();
+            int slash = range.indexOf('/');
+            int dash = range.indexOf('-');
+            if (slash < 0 || dash < 0 || dash > slash) {
+                return -1;
+            }
+            long start = Long.parseLong(range.substring(0, dash).trim());
+            if (start != expectedStart) {
+                return -1;
+            }
+            String totalPart = range.substring(slash + 1).trim();
+            return totalPart.equals("*") ? 0 : Long.parseLong(totalPart);
+        } catch (NumberFormatException e) {
+            return -1;
+        }
+    }
+
     private void downloadFile() throws IOException {
         this.hash = params.hash;
         String url = params.url;
         File writePath = params.targetFile;
-        Request request = new Request.Builder().url(url).build();
+        File sidecar = resumeSidecarFile(writePath);
+        UpdateFileUtils.ensureParentDirectory(writePath);
+
+        // Cross-launch resume (NATIVE_CHECKUPDATE_DESIGN §11.4): a brick gets
+        // a few hundred milliseconds per launch plus a bounded crash-rescue
+        // window, so every partial byte must survive process death and count.
+        long resumeOffset = 0;
+        JSONObject resumeMeta = readResumeMeta(sidecar, url);
+        if (resumeMeta != null && writePath.isFile() && writePath.length() > 0) {
+            long knownTotal = resumeMeta.optLong("total", 0);
+            long size = writePath.length();
+            if (knownTotal > 0 && size == knownTotal) {
+                // Fully received in a previous attempt (the process died
+                // between download end and unzip): nothing left to transfer.
+                downloadPhaseCompleted = true;
+                postProgress(knownTotal, knownTotal);
+                return;
+            }
+            if (knownTotal <= 0 || size < knownTotal) {
+                resumeOffset = size;
+            }
+        }
+        if (resumeOffset == 0) {
+            if (writePath.exists() && !writePath.delete()) {
+                throw new IOException("Failed to replace existing file: " + writePath);
+            }
+            deleteResumeSidecar(writePath);
+        }
+
+        if (!transferArchive(url, writePath, sidecar, resumeMeta, resumeOffset)) {
+            // The server rejected the range for a partial that no longer
+            // matches (416): drop it and retry once from zero.
+            if (writePath.exists() && !writePath.delete()) {
+                throw new IOException("Failed to replace existing file: " + writePath);
+            }
+            deleteResumeSidecar(writePath);
+            if (!transferArchive(url, writePath, sidecar, null, 0)) {
+                throw new IOException("Server rejected the download range for " + url);
+            }
+        }
+        downloadPhaseCompleted = true;
+    }
+
+    /**
+     * One HTTP transfer, appending from resumeOffset when the server honours
+     * the range. Returns false only for the retryable stale-partial case
+     * (416 with a size mismatch); throws on every other failure.
+     */
+    private boolean transferArchive(
+        String url, File writePath, File sidecar, JSONObject resumeMeta, long resumeOffset
+    ) throws IOException {
+        Request.Builder builder = new Request.Builder().url(url);
+        if (resumeOffset > 0) {
+            // Only resume requests pin the encoding: Range offsets must
+            // address the same bytes that are on disk. Fresh downloads keep
+            // OkHttp's transparent gzip (it decompresses and strips the
+            // headers itself), matching the pre-resume behaviour for servers
+            // that compress regardless.
+            builder.header("Accept-Encoding", "identity");
+            builder.header("Range", "bytes=" + resumeOffset + "-");
+            String validator = null;
+            if (resumeMeta != null) {
+                validator = resumeMeta.optString("etag", null);
+                if (validator == null) {
+                    validator = resumeMeta.optString("lastModified", null);
+                }
+            }
+            if (validator != null) {
+                // With a validator the server falls back to a full 200 when
+                // the file changed instead of appending mismatched bytes.
+                builder.header("If-Range", validator);
+            }
+        }
 
         OkHttpClient requestClient = HTTP_CLIENT;
         if (params.deadlineNanos > 0) {
@@ -124,12 +286,16 @@ class DownloadTask implements Runnable {
                 .build();
         }
 
-        UpdateFileUtils.ensureParentDirectory(writePath);
-        if (writePath.exists() && !writePath.delete()) {
-            throw new IOException("Failed to replace existing file: " + writePath);
-        }
-
-        try (Response response = requestClient.newCall(request).execute()) {
+        try (Response response = requestClient.newCall(builder.build()).execute()) {
+            if (response.code() == 416) {
+                long total = resumeMeta == null ? 0 : resumeMeta.optLong("total", 0);
+                if (total > 0 && writePath.length() == total) {
+                    // The partial is actually the complete file.
+                    postProgress(total, total);
+                    return true;
+                }
+                return false;
+            }
             if (!response.isSuccessful()) {
                 throw new IOException("Server error: " + response.code() + " " + response.message());
             }
@@ -139,30 +305,75 @@ class DownloadTask implements Runnable {
                 throw new IOException("Empty response body for " + url);
             }
 
+            String contentEncoding = response.header("Content-Encoding");
+            // Visible only when the server encoded the body itself (OkHttp
+            // strips the header when it transparently decompresses its own
+            // gzip). Byte offsets in an encoded representation do not match
+            // the decoded bytes on disk, so resume is off the table.
+            boolean encodedBody = contentEncoding != null
+                && !contentEncoding.equalsIgnoreCase("identity");
+            boolean append = response.code() == 206 && resumeOffset > 0;
+            if (append && encodedBody) {
+                // The server ignored Accept-Encoding: identity on a range
+                // request; the appended bytes could not be trusted.
+                return false;
+            }
+            long baseOffset = append ? resumeOffset : 0;
             long contentLength = body.contentLength();
+            long totalAll;
+            if (append) {
+                totalAll = parseContentRange(response.header("Content-Range"), resumeOffset);
+                if (totalAll < 0) {
+                    // Malformed or mismatched Content-Range: treat like a
+                    // stale partial (one clean retry from zero) instead of
+                    // failing — a throw would keep the partial and hit the
+                    // same wall on every future attempt.
+                    return false;
+                }
+            } else {
+                totalAll = contentLength > 0 ? contentLength : 0;
+            }
+            if (!append) {
+                // Destroy the old bytes before the sidecar can vouch for
+                // them with the new validators (a crash between the two
+                // writes must never leave a sidecar describing stale bytes).
+                if (writePath.exists() && !writePath.delete()) {
+                    throw new IOException("Failed to replace existing file: " + writePath);
+                }
+            }
+            if (encodedBody) {
+                // No resume across an encoded transfer.
+                deleteResumeSidecar(writePath);
+            } else {
+                // Persist before streaming so a mid-stream crash can resume.
+                writeResumeMeta(sidecar, url, response, resumeMeta, totalAll);
+            }
+
             long bytesRead;
             long received = 0;
             int currentPercentage = 0;
-            long lastPostedBytes = 0;
+            long lastPostedBytes = baseOffset;
 
             try (
                 BufferedSource source = body.source();
-                BufferedSink sink = Okio.buffer(Okio.sink(writePath))
+                BufferedSink sink = Okio.buffer(
+                    append ? Okio.appendingSink(writePath) : Okio.sink(writePath))
             ) {
                 while ((bytesRead = source.read(sink.buffer(), DOWNLOAD_CHUNK_SIZE)) != -1) {
                     received += bytesRead;
                     sink.emit();
 
-                    if (contentLength > 0) {
-                        int percentage = (int) (received * 100.0 / contentLength + 0.5);
+                    long overall = baseOffset + received;
+                    if (totalAll > 0) {
+                        int percentage = (int) (overall * 100.0 / totalAll + 0.5);
                         if (percentage > currentPercentage) {
                             currentPercentage = percentage;
-                            lastPostedBytes = received;
-                            postProgress(received, contentLength);
+                            lastPostedBytes = overall;
+                            postProgress(overall, totalAll);
                         }
-                    } else if (received - lastPostedBytes >= PROGRESS_BYTES_THRESHOLD) {
-                        lastPostedBytes = received;
-                        postProgress(received, contentLength);
+                    } else if (overall - lastPostedBytes >= PROGRESS_BYTES_THRESHOLD) {
+                        lastPostedBytes = overall;
+                        postProgress(overall, totalAll);
                     }
                 }
                 sink.flush();
@@ -171,14 +382,17 @@ class DownloadTask implements Runnable {
             if (contentLength >= 0 && received != contentLength) {
                 throw new IOException("Unexpected eof while reading downloaded update");
             }
+            if (totalAll > 0 && writePath.length() != totalAll) {
+                throw new IOException("Download incomplete: expected " + totalAll
+                    + " bytes, got " + writePath.length());
+            }
             // Final progress event, skipped when the loop already posted this
             // exact value (known length reaching 100% posts it in-loop).
-            if (received != lastPostedBytes) {
-                postProgress(received, contentLength);
+            if (baseOffset + received != lastPostedBytes) {
+                postProgress(baseOffset + received, totalAll);
             }
         }
-
-        downloadPhaseCompleted = true;
+        return true;
     }
 
     private byte[] readBytes(InputStream input) throws IOException {
@@ -312,9 +526,17 @@ class DownloadTask implements Runnable {
             }
         }
 
+        deleteConsumedArchive();
+    }
+
+    // The archive and its resume sidecar live and die together: once the
+    // archive is consumed (or classified as poisoned) the sidecar must not
+    // survive to vouch for a file that no longer exists or cannot be trusted.
+    private void deleteConsumedArchive() {
         if (params.targetFile.exists()) {
             params.targetFile.delete();
         }
+        deleteResumeSidecar(params.targetFile);
     }
 
     private void doPatchFromApk() throws IOException, JSONException {
@@ -358,9 +580,7 @@ class DownloadTask implements Runnable {
         }
 
         bundledResourceCopier.copyFromResource(copyList, contents.copyCrcs);
-        if (params.targetFile.exists()) {
-            params.targetFile.delete();
-        }
+        deleteConsumedArchive();
     }
 
     private void doPatchFromPpk() throws IOException, JSONException {
@@ -388,9 +608,7 @@ class DownloadTask implements Runnable {
             contents.deletes.toArray(new String[0]),
             contents.hbcTransformMetaFor("index.bundlejs.patch")
         );
-        if (params.targetFile.exists()) {
-            params.targetFile.delete();
-        }
+        deleteConsumedArchive();
     }
 
     private void doCleanUp() {
@@ -412,6 +630,13 @@ class DownloadTask implements Runnable {
                 } catch (IOException ioException) {
                     Log.e(UpdateContext.TAG, "Failed to clean patched directory", ioException);
                 }
+                if (downloadPhaseCompleted) {
+                    // Fully received but failed to unzip/patch: the archive is
+                    // poisoned, and resuming it would fail the same way on
+                    // every future attempt. A download-phase failure keeps the
+                    // partial + sidecar instead — that is the resume state.
+                    deleteConsumedArchive();
+                }
                 break;
             case DownloadTaskParams.TASK_TYPE_PLAIN_DOWNLOAD:
                 if (
@@ -421,6 +646,7 @@ class DownloadTask implements Runnable {
                 ) {
                     Log.w(UpdateContext.TAG, "Failed to clean partial download " + params.targetFile);
                 }
+                deleteResumeSidecar(params.targetFile);
                 break;
             default:
                 break;
@@ -496,6 +722,13 @@ class DownloadTask implements Runnable {
                 params.listener.onDownloadFailed(classified);
             }
             return;
+        }
+
+        if (taskType == DownloadTaskParams.TASK_TYPE_PLAIN_DOWNLOAD) {
+            // A plain download's file is final at completion — a surviving
+            // sidecar would make a later download of the same URL return
+            // these bytes without ever asking the server again.
+            deleteResumeSidecar(params.targetFile);
         }
 
         if (isPatchTask(taskType) && !alreadyCompleted) {

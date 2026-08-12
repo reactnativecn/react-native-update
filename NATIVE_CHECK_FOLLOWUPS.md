@@ -387,3 +387,25 @@ strict、77 金标向量 + ASan/UBSan、`.so` 符号与 16KB 对齐、iOS clang
 
 在此之前,产品口径应明确:forceBoot 救的是"能活过启动阶段、之后才出问题"的砖,
 不覆盖"启动即刻崩"的场景。文档与卖点文案不应过度承诺。
+
+## 2026-08-12 缺口闭环(10.52.0):crash-handler hold + 断点续传
+
+上面三个方向重新评审后全部改判,最终方案见设计文档 §11:
+
+- **主机制 = 崩溃时刻扣留进程**(维护者提出):uncaught handler 里 hold 住
+  垂死进程数秒完成检查+下载。崩溃即信号,零误判、零检测态、首崩即救,
+  且修复在垂死会话末尾 commit,下次启动零阻塞直接进修复版。方向 2(独立
+  进程)与方向 3(启动阻塞)被它整体取代;方向 1(续传)保留为地基。
+- **断点续传三端落地**:sidecar(url/验证器/总长)+ Range/If-Range,
+  206/200/416 全处理;归档与 sidecar 同生共死;下载阶段失败保留 partial,
+  patch 阶段失败判定归档有毒连 sidecar 一起删。
+- **round-incomplete 标记**:轮次开始落盘、结束清除;残留 = 上个进程死于
+  轮中,下次启动跳过 5s 延迟立即续传。
+- **救援轮强制激活** + hashInfo `crashRescue` 标记(与 forceBootRescue 对
+  称);本机 rolledBack 黑名单与 first_time 保护语义不变。
+- **边界**:只逮 exception 形态崩溃(native signal/ANR/OOM 逃逸);鸿蒙本
+  版无 crash hold(errorManager 同步回调驱动不了 ArkTS 异步 IO),只有续
+  传+零延迟。
+
+- [ ] 10.52.0 发版后按本节上方同一实验复测 crash-on-launch 砖,时序记录
+      回此文件

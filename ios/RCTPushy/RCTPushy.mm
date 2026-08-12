@@ -47,6 +47,10 @@ static NSString *const keyNativeConfig = @"REACTNATIVECN_PUSHY_NATIVE_CONFIG_KEY
 // Raw response cache written by the native cold-start check for the JS side
 // to reuse (§10.3), scoped to the request and config that produced it.
 static NSString *const keyNativeCheckCache = @"REACTNATIVECN_PUSHY_NATIVE_CHECK_RESP_KEY";
+// Set when a native check round starts, cleared when it ends (§11.4). Residue
+// on the next launch means the previous process died mid-round (a crash
+// rescue was truncated): that launch resumes immediately instead of waiting.
+static NSString *const keyNativeCheckIncomplete = @"REACTNATIVECN_PUSHY_NATIVE_CHECK_INCOMPLETE_KEY";
 static NSString *const PushyErrorDomain = @"cn.reactnative.pushy";
 
 // file def
@@ -471,7 +475,9 @@ static void PushySwitchVersionLocked(NSString *hash) {
 // launch. Decisions come from cpp/update_flow_core; this class is IO glue.
 @interface RCTPushyOrchestrator : NSObject
 + (void)scheduleFromColdStart:(NSString *)launchRolledBackVersion;
-+ (void)runOnce:(NSString *)launchRolledBackVersion;
++ (void)startRoundWithDeadline:(NSTimeInterval)deadlineUptime;
++ (void)runOnce:(NSString *)launchRolledBackVersion deadline:(NSTimeInterval)deadlineUptime;
++ (void)runRescueWithDeadline:(NSTimeInterval)deadlineUptime;
 + (BOOL)commitRoundWithGeneration:(uint64_t)generation
                          hashInfo:(NSDictionary *)hashInfoEntry
                          activate:(NSString *)hashToActivate
@@ -480,6 +486,102 @@ static void PushySwitchVersionLocked(NSString *hash) {
                            config:(NSString *)configJson
                        responseAt:(long long)responseAtSeconds;
 @end
+
+// One round per process, whoever starts it first — the delayed cold-start
+// path or the crash-rescue thread (§11.3). The semaphore lets the rescue
+// wait out an in-flight round instead of racing it.
+static std::atomic<bool> pushyRoundStarted{false};
+static std::atomic<bool> pushyRoundCompleted{false};
+// Flipped the moment a crash is being held. JS is dead from that point on,
+// so there is no second decision maker: the round force-activates whatever
+// it downloads (§11.3).
+static std::atomic<bool> pushyCrashRescueActive{false};
+static std::atomic<bool> pushyRescueAttempted{false};
+static dispatch_semaphore_t pushyRoundDone;
+static NSString *pushyLaunchRolledBackForRescue = nil;
+// A version this process downloaded but left for JS to activate. If the
+// process then crashes, JS will never activate it — the crash handler
+// activates it directly (bounded local work, no network). The generation is
+// the one the round committed under: a reset that lands afterwards bumps it,
+// and the late activation must lose to that reset exactly like the round
+// itself would. Guarded by @synchronized (RCTPushyOrchestrator class).
+static NSString *pushyUnactivatedHash = nil;
+static uint64_t pushyUnactivatedGeneration = 0;
+static NSUncaughtExceptionHandler *pushyPreviousExceptionHandler = NULL;
+// ≈ process start: scheduleFromColdStart runs during the first bundleURL.
+static NSTimeInterval pushyProcessAnchorUptime = 0;
+
+static const NSTimeInterval kPushyRescueTriggerUptime = 60;
+static const NSTimeInterval kPushyRescueBudgetBackgroundThread = 10;
+// A held main thread freezes UI teardown; stay well under the watchdog.
+static const NSTimeInterval kPushyRescueBudgetMainThread = 3.5;
+
+static void PushyMaybeHoldForRescue(void) {
+    // Once per process; a second crashing thread passes straight through
+    // instead of waiting behind the first (§11.3: prefer under-rescuing over
+    // wedging the teardown).
+    bool expected = false;
+    if (!pushyRescueAttempted.compare_exchange_strong(expected, true)) {
+        return;
+    }
+    NSTimeInterval uptime = PushyMonotonicNow() - pushyProcessAnchorUptime;
+    bool roundInFlight = pushyRoundStarted.load() && !pushyRoundCompleted.load();
+    // Early crashes are the brick signature; a crash with an in-flight round
+    // is worth finishing regardless of uptime. Everything else is an ordinary
+    // crash whose UX must not be delayed.
+    if (uptime >= kPushyRescueTriggerUptime && !roundInFlight) {
+        return;
+    }
+    NSTimeInterval budget = [NSThread isMainThread]
+        ? kPushyRescueBudgetMainThread
+        : kPushyRescueBudgetBackgroundThread;
+    NSTimeInterval deadline = PushyMonotonicNow() + budget;
+    NSLog(@"RCTPushy -- crash rescue: holding process for up to %.1fs "
+          @"(uptime %.1fs)", budget, uptime);
+
+    // The rescue runs on its own queue and the dying thread only waits with a
+    // hard timeout: even a deadlocked rescue (a thread that died holding a
+    // lock — uncaught ObjC exceptions skip @finally) can only delay the
+    // process death, never prevent it.
+    dispatch_semaphore_t done = dispatch_semaphore_create(0);
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        @try {
+            [RCTPushyOrchestrator runRescueWithDeadline:deadline];
+        } @catch (NSException *exception) {
+            NSLog(@"RCTPushy -- crash rescue failed: %@", exception.reason);
+        }
+        dispatch_semaphore_signal(done);
+    });
+    if (dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW,
+            (int64_t)(budget * NSEC_PER_SEC))) != 0) {
+        NSLog(@"RCTPushy -- crash rescue: budget exhausted, letting go");
+    }
+}
+
+// Crash-moment brick rescue (§11): when the app is dying of an uncaught
+// exception during startup (RCTFatal raises NSException in release), the
+// process is still alive and JS will never run again — a natural,
+// false-positive-free window to finish the cold-start check. The previous
+// handler (crash reporters chain the same way) always runs afterwards.
+static void PushyCrashRescueExceptionHandler(NSException *exception) {
+    @try {
+        PushyMaybeHoldForRescue();
+    } @catch (NSException *inner) {
+        // The dying process owes the previous handler its turn no matter
+        // what the rescue did.
+    }
+    if (pushyPreviousExceptionHandler != NULL) {
+        pushyPreviousExceptionHandler(exception);
+    }
+}
+
+static void PushyInstallCrashRescueHandler(void) {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        pushyPreviousExceptionHandler = NSGetUncaughtExceptionHandler();
+        NSSetUncaughtExceptionHandler(&PushyCrashRescueExceptionHandler);
+    });
+}
 
 // Shared by the getBundleHash RCT method and the native cold-start check.
 // Returns @"" when unknown; blocking (sha256 of the embedded bundle on first
@@ -1300,6 +1402,11 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
                       progressHandler:nil
                     completionHandler:^(NSString *archivePath, BOOL succeeded, NSError *error) {
             [fileManager removeItemAtPath:archivePath error:nil];
+            // The resume sidecar dies with its archive (§11.4): whether the
+            // unzip consumed it or classified it as poisoned, nothing must
+            // survive to vouch for bytes that are gone.
+            [fileManager removeItemAtPath:[archivePath stringByAppendingString:@".resume"]
+                                    error:nil];
             if (completionHandler == nil) {
                 return;
             }
@@ -1471,19 +1578,113 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
 #if !DEBUG
     // Once per process; a few seconds of delay keeps the check away from the
     // cold-start critical path (§7 R5) — its result targets the NEXT launch.
+    // Unless the previous process died mid-round (residual incomplete
+    // marker), in which case every launch second counts (§11.4).
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)),
+        pushyRoundDone = dispatch_semaphore_create(0);
+        pushyProcessAnchorUptime = PushyMonotonicNow();
+        pushyLaunchRolledBackForRescue = [launchRolledBackVersion copy];
+        NSUserDefaults *defaults = PushyDefaults();
+        // The crash-hold rescue shares the orchestrator's rollout gate: no
+        // persisted config, no handler (§11.3).
+        if ([defaults stringForKey:keyNativeConfig].length > 0) {
+            PushyInstallCrashRescueHandler();
+        }
+        int64_t delaySeconds =
+            [defaults objectForKey:keyNativeCheckIncomplete] != nil ? 0 : 5;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, delaySeconds * NSEC_PER_SEC),
                        dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-            @try {
-                [self runOnce:launchRolledBackVersion];
-            } @catch (NSException *exception) {
-                // The rescue path must never take the app down with it.
-                RCTLogWarn(@"RCTPushy -- native check crashed: %@", exception.reason);
-            }
+            [self startRoundWithDeadline:0];
         });
     });
 #endif
+}
+
+// Runs the process's single round on the calling thread if nobody has
+// started it yet. deadlineUptime > 0 (crash rescue) caps every HTTP call and
+// download phase to the remaining budget.
++ (void)startRoundWithDeadline:(NSTimeInterval)deadlineUptime {
+    bool expected = false;
+    if (!pushyRoundStarted.compare_exchange_strong(expected, true)) {
+        return;
+    }
+    @try {
+        [self runOnce:pushyLaunchRolledBackForRescue deadline:deadlineUptime];
+    } @catch (NSException *exception) {
+        // The rescue path must never take the app down with it.
+        RCTLogWarn(@"RCTPushy -- native check crashed: %@", exception.reason);
+    } @finally {
+        pushyRoundCompleted.store(true);
+        dispatch_semaphore_signal(pushyRoundDone);
+    }
+}
+
+// Crash-rescue entry (§11.3), called from the handler's worker queue while
+// the uncaught-exception handler holds the dying process. Ensures this
+// process's round runs to completion within the budget, then activates a
+// downloaded-but-unactivated version if one exists — the last chance before
+// the process is gone.
++ (void)runRescueWithDeadline:(NSTimeInterval)deadlineUptime {
+    pushyCrashRescueActive.store(true);
+    [self startRoundWithDeadline:deadlineUptime];
+    if (!pushyRoundCompleted.load()) {
+        NSTimeInterval remaining = deadlineUptime - PushyMonotonicNow();
+        if (remaining > 0) {
+            dispatch_semaphore_wait(pushyRoundDone, dispatch_time(DISPATCH_TIME_NOW,
+                (int64_t)(remaining * NSEC_PER_SEC)));
+        }
+    }
+    [self activatePendingVersion];
+}
+
+// The alert-strategy variant of the §10.7 hole: the round downloaded a fix
+// but deferred activation to JS, and JS is now dead. Activation is local and
+// bounded (a state switch under the commit lock).
++ (void)activatePendingVersion {
+    NSString *hash = nil;
+    uint64_t generation = 0;
+    @synchronized (self) {
+        hash = pushyUnactivatedHash;
+        generation = pushyUnactivatedGeneration;
+    }
+    if (hash == nil) {
+        return;
+    }
+    // Unlike Android's switchVersion, PushySwitchVersionLocked does not
+    // validate the version directory; never point the next launch at bytes
+    // that are gone (e.g. wiped by a reset whose generation bump we would
+    // catch below anyway, or by cleanup).
+    NSString *versionDir = [[RCTPushy downloadDir] stringByAppendingPathComponent:hash];
+    if (!PushyHasCompletedVersionAtPath(versionDir)) {
+        NSLog(@"RCTPushy -- crash rescue: version %@ no longer on disk, dropping activation", hash);
+        return;
+    }
+    NSDictionary *hashInfoEntry = nil;
+    NSString *existingInfo = [PushyDefaults() stringForKey:PushyHashInfoKey(hash)];
+    NSData *existingData = [existingInfo dataUsingEncoding:NSUTF8StringEncoding];
+    id parsed = existingData == nil ? nil :
+        [NSJSONSerialization JSONObjectWithData:existingData options:0 error:nil];
+    if ([parsed isKindOfClass:[NSDictionary class]]) {
+        NSMutableDictionary *merged = [parsed mutableCopy];
+        merged[@"crashRescue"] = @YES;
+        hashInfoEntry = @{@"hash": hash, @"info": merged};
+    }
+    BOOL committed = [self commitRoundWithGeneration:generation
+                                            hashInfo:hashInfoEntry
+                                            activate:hash
+                                        responseText:nil
+                                             request:nil
+                                              config:nil
+                                          responseAt:0];
+    if (committed) {
+        @synchronized (self) {
+            pushyUnactivatedHash = nil;
+        }
+        NSLog(@"RCTPushy -- crash rescue: activated downloaded version %@", hash);
+    } else {
+        NSLog(@"RCTPushy -- crash rescue: reset since download, dropping activation");
+    }
 }
 
 // A bare module instance drives the existing download/patch pipeline without
@@ -1498,7 +1699,7 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
     return engine;
 }
 
-+ (void)runOnce:(NSString *)launchRolledBackVersion {
++ (void)runOnce:(NSString *)launchRolledBackVersion deadline:(NSTimeInterval)deadlineUptime {
     // Sampled before any IO: resetToPackagedBundle bumps it, and a reset that
     // lands while this round is running must win over the round's decision.
     const uint64_t resetGeneration = pushyResetGeneration.load();
@@ -1518,6 +1719,28 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
     if (appKey.length == 0) {
         return;
     }
+    // From here on the round does real work: leave the breadcrumb that the
+    // next launch reads to skip its 5s delay if we die mid-round (§11.4).
+    [defaults setObject:@YES forKey:keyNativeCheckIncomplete];
+    @try {
+        [self runConfiguredRound:config
+                      configJson:configJson
+                          appKey:appKey
+        launchRolledBackVersion:launchRolledBackVersion
+                 resetGeneration:resetGeneration
+                        deadline:deadlineUptime];
+    } @finally {
+        [defaults removeObjectForKey:keyNativeCheckIncomplete];
+    }
+}
+
++ (void)runConfiguredRound:(const flowjson::Value &)config
+                configJson:(NSString *)configJson
+                    appKey:(NSString *)appKey
+   launchRolledBackVersion:(NSString *)launchRolledBackVersion
+           resetGeneration:(uint64_t)resetGeneration
+                  deadline:(NSTimeInterval)deadlineUptime {
+    NSUserDefaults *defaults = PushyDefaults();
     NSString *packageVersion =
         PushyFromStdString(config.Get("packageVersion").AsString());
     if (packageVersion.length == 0) {
@@ -1573,7 +1796,10 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
         return;
     }
 
-    NSString *responseText = [self runCheckRequest:config appKey:appKey body:body];
+    NSString *responseText = [self runCheckRequest:config
+                                            appKey:appKey
+                                              body:body
+                                          deadline:deadlineUptime];
     if (responseText == nil) {
         RCTLogInfo(@"RCTPushy -- native check: no endpoint reachable, giving up until next launch");
         return;
@@ -1605,7 +1831,8 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
     if (!downloaded) {
         downloaded = [self performAttempts:decision.Get("attempts")
                                       hash:hash
-                                originHash:currentVersion];
+                                originHash:currentVersion
+                                  deadline:deadlineUptime];
     }
     if (!downloaded) {
         [self commitRoundWithGeneration:resetGeneration
@@ -1627,10 +1854,22 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
             versionInfo[@(key)] = PushyFromStdString(info.Get(key).AsString()) ?: @"";
         }
     }
+    // A forceBoot activation is the brick-rescue path: mark it in the
+    // persisted info so JS can report force_boot_rescue when this version
+    // survives to markSuccess. Only the server-sent directive counts — a
+    // silent-strategy activation is ordinary delivery.
+    if (info.Get("config").Get("forceBoot").Truthy()) {
+        versionInfo[@"forceBootRescue"] = @YES;
+    }
+    if (pushyCrashRescueActive.load()) {
+        versionInfo[@"crashRescue"] = @YES;
+    }
     // Silent strategies or a server-marked forceBoot version (per-version
     // remote override — the brick rescue) activate for the next launch;
-    // otherwise activation stays with the JS side (§6/§10.1).
-    BOOL activate = decision.Get("activate").Truthy();
+    // otherwise activation stays with the JS side (§6/§10.1). Unless a crash
+    // is being held: JS is dead, deferring to it would leave the fix on disk
+    // forever (§11.3).
+    BOOL activate = decision.Get("activate").Truthy() || pushyCrashRescueActive.load();
     BOOL committed = [self commitRoundWithGeneration:resetGeneration
                                             hashInfo:@{@"hash": hash, @"info": versionInfo}
                                             activate:activate ? hash : nil
@@ -1641,8 +1880,17 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
     if (!committed) {
         RCTLogInfo(@"RCTPushy -- native check: reset during round, dropping result");
     } else if (activate) {
+        @synchronized (self) {
+            pushyUnactivatedHash = nil;
+        }
         RCTLogInfo(@"RCTPushy -- native check: downloaded %@ and set for next launch", hash);
     } else {
+        // Remembered so a crash later in this process can still activate it
+        // (activatePendingVersion) — JS never will.
+        @synchronized (self) {
+            pushyUnactivatedHash = [hash copy];
+            pushyUnactivatedGeneration = resetGeneration;
+        }
         RCTLogInfo(@"RCTPushy -- native check: downloaded %@, activation left to JS", hash);
     }
 }
@@ -1659,13 +1907,18 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
                           request:(NSString *)requestBody
                            config:(NSString *)configJson
                        responseAt:(long long)responseAtSeconds {
-    NSDictionary *cacheEntry = @{
-        @"ts": @(responseAtSeconds),
-        @"body": responseText,
-        @"request": requestBody,
-        @"config": configJson,
-    };
-    NSData *cacheData = [NSJSONSerialization dataWithJSONObject:cacheEntry options:0 error:nil];
+    // responseText is nil for the crash handler's activation-only commit
+    // (activatePendingVersion): no round ran, so there is no cache to write.
+    NSData *cacheData = nil;
+    if (responseText != nil) {
+        NSDictionary *cacheEntry = @{
+            @"ts": @(responseAtSeconds),
+            @"body": responseText,
+            @"request": requestBody,
+            @"config": configJson,
+        };
+        cacheData = [NSJSONSerialization dataWithJSONObject:cacheEntry options:0 error:nil];
+    }
     __block BOOL committed = NO;
     PushyWithStateLock(^{
         if (pushyResetGeneration.load() != generation) {
@@ -1697,9 +1950,19 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
 // time with its own timeout; after the configured round fails, queryUrls
 // discovery merges remote candidates (excluding the already-tried) for one
 // more round. No hedged race on purpose — this path is latency-insensitive.
+// Per-request timeout, capped to the crash-rescue budget when one is active.
+// <= 0 means the budget is gone and the round must stop issuing requests.
+static NSTimeInterval PushyCheckRequestTimeout(NSTimeInterval deadlineUptime) {
+    if (deadlineUptime <= 0) {
+        return 10;
+    }
+    return MIN(10, deadlineUptime - PushyMonotonicNow());
+}
+
 + (NSString *)runCheckRequest:(const flowjson::Value &)config
                        appKey:(NSString *)appKey
-                         body:(NSString *)body {
+                         body:(NSString *)body
+                     deadline:(NSTimeInterval)deadlineUptime {
     double sample = arc4random() / 4294967296.0;
     flowjson::Value ordered =
         updateflow::OrderEndpointCandidates(config.Get("endpoints"), sample);
@@ -1716,9 +1979,13 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
             return nil;
         }
         [tried addObject:base];
+        NSTimeInterval timeout = PushyCheckRequestTimeout(deadlineUptime);
+        if (timeout <= 0) {
+            return nil;
+        }
         NSString *response = PushyHttpRequest(
             [NSString stringWithFormat:@"%@/checkUpdate/%@", base, appKey],
-            @"POST", body, 10);
+            @"POST", body, timeout);
         if (PushyIsValidCheckResponse(response)) {
             return response;
         }
@@ -1731,7 +1998,11 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
         if (httpAttempts++ >= maxHttpAttempts) {
             return nil;
         }
-        NSString *listText = PushyHttpRequest(listUrl, @"GET", nil, 10);
+        NSTimeInterval listTimeout = PushyCheckRequestTimeout(deadlineUptime);
+        if (listTimeout <= 0) {
+            return nil;
+        }
+        NSString *listText = PushyHttpRequest(listUrl, @"GET", nil, listTimeout);
         if (listText == nil) {
             continue;
         }
@@ -1750,9 +2021,13 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
                 return nil;
             }
             [tried addObject:base];
+            NSTimeInterval timeout = PushyCheckRequestTimeout(deadlineUptime);
+            if (timeout <= 0) {
+                return nil;
+            }
             NSString *response = PushyHttpRequest(
                 [NSString stringWithFormat:@"%@/checkUpdate/%@", base, appKey],
-                @"POST", body, 10);
+                @"POST", body, timeout);
             if (PushyIsValidCheckResponse(response)) {
                 return response;
             }
@@ -1764,9 +2039,14 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
 
 + (BOOL)performAttempts:(const flowjson::Value &)attempts
                    hash:(NSString *)hash
-             originHash:(NSString *)originHash {
+             originHash:(NSString *)originHash
+               deadline:(NSTimeInterval)rescueDeadline {
     RCTPushy *engine = [self engine];
+    // Crash-rescue budget caps every phase; 0 keeps the normal 10min windows.
     NSTimeInterval incrementalDeadline = PushyMonotonicNow() + 600;
+    if (rescueDeadline > 0) {
+        incrementalDeadline = MIN(incrementalDeadline, rescueDeadline);
+    }
     NSTimeInterval fullDeadline = 0;
     for (const auto &attempt : attempts.elements()) {
         const std::string &type = attempt.Get("type").AsString();
@@ -1780,6 +2060,9 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
         if (isFullAttempt && fullDeadline == 0) {
             // diff/pdiff cannot starve the last-resort full download.
             fullDeadline = PushyMonotonicNow() + 600;
+            if (rescueDeadline > 0) {
+                fullDeadline = MIN(fullDeadline, rescueDeadline);
+            }
         }
         NSTimeInterval deadline = isFullAttempt ? fullDeadline : incrementalDeadline;
         for (const auto &urlValue : attempt.Get("urls").elements()) {

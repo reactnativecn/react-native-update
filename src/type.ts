@@ -85,6 +85,12 @@ export type EventType =
   | 'errorUpdate'
   | 'markSuccess'
   | 'errorMarkSuccess'
+  // 救砖回执:被 forceBoot / 崩溃时刻救援送进来的版本活到了 markSuccess。
+  // 原生在下载提交时往 hashInfo 写对应标记(§10.7 / §11.3),JS 在
+  // markSuccess 后各补报一条;老服务端对未知 type 400,report 本就是
+  // best-effort 静默丢弃,无害。
+  | 'forceBootRescue'
+  | 'crashRescue'
   | 'reset'
   | 'errorReset'
   // Server reported bundleStatus: unknownBundle — the installed binary is not

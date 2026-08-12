@@ -384,6 +384,11 @@ export class UpdateContext {
     return this.readString(key);
   }
 
+  public removeKv(key: string): void {
+    this.preferences.deleteSync(key);
+    this.flushPreferences(`remove key ${key}`);
+  }
+
   public isFirstTime(): boolean {
     return this.getStateSnapshot().firstTime;
   }

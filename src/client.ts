@@ -838,6 +838,14 @@ export class Pushy {
     }
     sharedState.marked = true;
     this.report({ type: 'markSuccess' });
+    // 救砖回执:这个版本是被救援通道送进来的,且活过了健康确认——遥测里
+    // 一条 rescue 回执就是"这台设备被捞回来了"的证据。
+    if (currentVersionInfo.forceBootRescue) {
+      this.report({ type: 'forceBootRescue' });
+    }
+    if (currentVersionInfo.crashRescue) {
+      this.report({ type: 'crashRescue' });
+    }
   };
   switchVersion = async (hash: string) => {
     if (!this.assertDebug('switchVersion()')) {

@@ -17,6 +17,11 @@ const TAG = 'NativeCheck';
 export const KEY_CONFIG = 'nativeConfig';
 // 供 JS 侧复用的原始响应缓存(§10.3),同时记录请求与配置指纹以限定命中范围。
 export const KEY_RESP_CACHE = 'nativeCheckResp';
+// 轮次开始落盘、结束清除(§11.4)。下次启动读到残留 = 上个进程死于轮中
+// (砖机的签名),该次启动跳过 5s 延迟立即续传。鸿蒙本版不做 crash-hold
+// (errorManager 的同步回调驱动不了 ArkTS 异步网络 IO),续传 + 零延迟
+// 标记是收敛砖机的全部机制。
+export const KEY_ROUND_INCOMPLETE = 'nativeCheckIncomplete';
 const REQUEST_TIMEOUT_MS = 10000;
 const REQUEST_CALL_TIMEOUT_MS = 15000;
 const MAX_CHECK_HTTP_ATTEMPTS = 8;
@@ -96,13 +101,15 @@ export function scheduleNativeCheck(
     return;
   }
   scheduled = true;
-  // 结果本来就是"下次启动生效",延迟几秒让开冷启动关键路径(§7 R5)。
+  // 结果本来就是"下次启动生效",延迟几秒让开冷启动关键路径(§7 R5)——
+  // 除非上个进程死于轮中(残留标记),那时每一秒启动时间都要用来续传。
+  const delayMs = context.getKv(KEY_ROUND_INCOMPLETE) ? 0 : START_DELAY_MS;
   setTimeout(() => {
     runOnce(context, launchRolledBackVersion).catch((e: Object) => {
       // 救援路径自身绝不能把应用拖垮。
       logger.error(TAG, `native check failed: ${e}`);
     });
-  }, START_DELAY_MS);
+  }, delayMs);
 }
 
 async function runOnce(
@@ -130,7 +137,30 @@ async function runOnce(
   if (!appKey) {
     return;
   }
+  // 从这里起本轮开始做真实工作:留下面包屑,死于轮中时下次启动零延迟续传。
+  context.setKv(KEY_ROUND_INCOMPLETE, '1');
+  try {
+    await runConfiguredRound(
+      context,
+      launchRolledBackVersion,
+      resetGeneration,
+      configJson,
+      config,
+      appKey,
+    );
+  } finally {
+    context.removeKv(KEY_ROUND_INCOMPLETE);
+  }
+}
 
+async function runConfiguredRound(
+  context: UpdateContext,
+  launchRolledBackVersion: string,
+  resetGeneration: number,
+  configJson: string,
+  config: NativeConfig,
+  appKey: string,
+): Promise<void> {
   const currentVersion = context.getCurrentVersion();
   // getConstants consumes the persisted rollback marker during startup; use
   // the launch-path snapshot captured before that happens.

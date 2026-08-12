@@ -420,3 +420,111 @@ afterDownload)`：本地 silent 策略 或 响应标记 forceBoot 即激活。
 `binding.config.forceBoot` 合成进下发 config（灰度与全量两分支）,绑定列表
 接口补 select config;pushy-admin / cresc-admin 发布菜单加"全量+强制启动
 （救砖）",已绑定行显示⚡标记 + 切换项（重发同绑定翻转标记）。
+
+## 11. 崩溃时刻救援 + 断点续传（10.52.0,补"启动即崩"的架构缺口）
+
+### 11.1 缺口（2026-08-12 Android 真机实测,见 NATIVE_CHECK_FOLLOWUPS.md）
+
+§10 的编排器救得了"markSuccess 后 10s 才崩"的砖（原生 commit 领先崩溃点
+567ms）,救不了"启动 230ms 即崩"的砖:5s 延迟 + 检查/下载本身 ~4.4s,而 JS
+崩溃杀掉整个进程,该轮进度全部丢弃——重启多少次都不收敛。
+
+根因不是延迟参数,是**时序**:编排器的救援窗口永远排在崩溃点之后。修复原则
+只有两条,满足其一即可——把救援挪到 JS 执行之前,或放进不跑 JS 的执行上下
+文。本节方案属于前者的极限形式:**崩溃发生的那一刻,进程还活着,JS 已永远
+不会再跑——这是天然的、无误判的救援窗口。**
+
+### 11.2 选型:crash-handler hold,弃用启动阻塞与本地熔断
+
+- **主机制:uncaught handler 扣住进程完成救援。** 崩溃本身就是触发信号,
+  确定性 100%:不需要崩溃环检测(marker/退出原因/计数阈值)那套状态机,也
+  没有"误判阻塞健康用户启动"的脚枪。首次崩溃当场救,修复在垂死会话末尾
+  commit,下次启动零阻塞直接进修复版——比任何检测方案快一个启动身位。
+- **启动阻塞式检查:否决。** 它必须依赖检测态(至少崩 2-3 次才敢升级),
+  误判代价是惩罚健康启动;iOS 还要与 watchdog 抢预算。crash-handler 在
+  触发确定性、生效速度、健康路径成本三个维度全面占优。
+- **本地熔断(Phase 2/Rung 1,自动 reset 回内置包):本版不做**(维护者
+  2026-08-12 裁定)。取舍记录:熔断能自治救"坏热更包本身"类砖,但需要
+  检测态且有"多计数毁好版本"的历史教训(§7、Phase 2 评审);crash-rescue
+  + 服务端重绑同时覆盖"坏包"与"毒化存储"两类砖(重绑即远程回滚,§10.7),
+  单一机制更简。代价是救援依赖服务端动作(运营重绑/发修复版),无网或无
+  人值守时坏包砖不会自愈——接受,写进产品口径。
+- **崩溃处理器与 crash reporter 的关系:链式委托,不是抢钩子。** 保存前任
+  handler、救援结束必须调用它——Sentry/Crashlytics/Bugly 全都遵守同一惯
+  例,两个安装顺序方向都成立。残余风险:个别 reporter 拿到控制权后不回调
+  前任直接终止,救援被截胡——接受,靠遥测观察。
+
+### 11.3 handler 机制规格(Android/iOS 一致)
+
+- **安装点** = 编排器锚点:Android `getBundleUrl`(schedule 时)、iOS
+  `+bundleURL`(scheduleFromColdStart 时),严格早于任何 JS 执行,而 JS 崩
+  溃必然晚于 bundle 加载,覆盖天然完整。与编排器同门控:`#if !DEBUG` /
+  `BuildConfig.DEBUG`,且落盘 config 存在才安装(灰度开关语义一致)。
+- **触发门控**(handler 内,全部本地判断):进程存活 < 60s,**或**当前有
+  在途检查轮(语义是"把没跑完的轮次收尾",覆盖实测里 5~9.4s 之间被打断
+  的窗口)。中途随机崩溃(uptime ≥ 60s 且无在途轮)不触发,不拖慢正常崩
+  溃 UX。本轮已完成 → 直接放行(无 hold)。
+- **预算按崩溃线程分档**:主线程崩溃 3.5s(Android ANR ~5s / iOS watchdog
+  约束),其余线程 10s(RN release 的 JS fatal 重抛在 mqt/exception 线程,
+  是常态)。
+- **死锁免疫靠结构,不靠协作**:救援工作跑在**新线程**上,handler 只
+  latch/semaphore 带超时等待。即使救援线程死锁(如某线程带着状态锁崩了、
+  ObjC uncaught 路径不跑 @finally),handler 超时后照常委托前任 → 进程终
+  止,卡死线程陪葬。handler 自身 try-catch-all + once 守卫,第二个线程再
+  崩不等待、直接委托(多崩场景宁可少救,绝不挂死)。
+- **救援轮语义 = "确保本进程有一轮跑完"**:在途 → 等其完成(至多预算);
+  未开跑 → 立即跑一轮受限轮(HTTP 超时与下载 deadline 全部被剩余预算钳
+  制);已跑完 → 返回。与延迟线程的竞态由 roundStarted CAS 收敛为单轮。
+- **救援轮强制激活**:`activate = decision.activate || rescue`。JS 已死,
+  没有第二决策者;alert 类策略下不强制激活,修复版就永远躺在磁盘上(§10.7
+  同一个洞的 handler 变体)。守卫不变:本机 rolledBack 黑名单仍赢过一切、
+  first_time 崩溃保护对激活版本仍生效、服务端 fromHash==toHash 天然防循
+  环。hashInfo 追加 `crashRescue: true`(与 forceBootRescue 对称,供 JS
+  在该版本活到 markSuccess 时上报遥测)。
+- **覆盖边界(产品口径)**:只逮 exception 形态的崩溃(JS fatal 的原生重
+  抛)。native signal(SIGSEGV)、ANR、OOM、watchdog 杀逃逸——与威胁模型
+  匹配(热更砖的崩溃源就是 JS bundle),但不得在文案里过度承诺。
+
+### 11.4 断点续传(所有 rung 的地基)
+
+每次启动的进度必须**单调累积**,handler 窗口被截断才有意义。三端同一规格:
+
+- **sidecar**:`<archive>.resume`(JSON:url/etag/lastModified/total),
+  下载响应头到达后写入。归档与 sidecar 同生共死:解压成功删归档时一并删;
+  patch 阶段失败(downloadPhaseCompleted 后)两者都删——坏归档绝不能变成
+  永久毒药;**有归档无 sidecar = 不可信,删掉重来**。
+- **续传请求**:归档存在且 sidecar 匹配 url 时,`Range: bytes=<size>-`,
+  有验证器(etag/lastModified)则带 `If-Range`。响应 206 → 校验
+  Content-Range 起点后追加;200 → 服务端不支持/文件已变,截断重写并更新
+  sidecar;416 → size == sidecar.total 视为下载阶段已完成直接进解压(覆
+  盖"下载完、解压前死"的窗口),否则删两者本次内重发一次全量请求。
+- **完整性**:无逐字节 hash 可校(版本 hash 不是归档 hash),依赖三层:
+  If-Range 验证器防混拼、最终长度对账、解压/patch 本身的结构校验;任何一
+  层失败走"删两者重来",自愈。
+- **进度事件**:received 含续传偏移量,total 取 Content-Range 总长。
+- **round-incomplete 标记**:runOnce 入口落盘 KV 标记、finally 清除。进程
+  死于轮中 → 标记残留 → **下次启动编排器跳过 5s 延迟立即(异步)续传**。
+  这不是阻塞、没有误判成本,是"上次没救完"最诚实的信号,让被截断的
+  handler 窗口在后续启动快速收敛。
+
+### 11.5 分端落地
+
+- **Android**:`Thread.setDefaultUncaughtExceptionHandler` 链式;uptime 用
+  `Process.getStartElapsedRealtime()`;OkHttp/DownloadTask 全程可用(Java
+  monitor 随异常解栈释放,无带锁死线程问题,但结构性预算仍兜底)。
+- **iOS**:`NSSetUncaughtExceptionHandler` 链式;RCTFatal 在 release 下
+  raise NSException → uncaught → 进入本 handler;NSURLSession/信号量模式
+  照旧可用。下载器从 NSURLSessionDownloadTask 改为 data task 流式追加写
+  (downloadTask 的临时文件失败即丢,存不下 partial,是续传的硬前提)。
+- **Harmony:本版只做续传 + 零延迟标记,不做 crash hold。** errorManager
+  的 error observer 是同步回调,而 ArkTS 网络 IO 只有异步形态——回调里阻
+  塞主线程即死锁,救援无法在退出前完成;OHOS 也没有可在崩溃上下文同步驱动
+  的 C HTTP 面。备选路线(未验证,留待 spike):`appRecovery` 的 JS_CRASH
+  自动重启 × 零延迟续传,靠多次自动重启累积进度。文档如实标注鸿蒙边界。
+
+### 11.6 验证
+
+三端语法/编译校验照旧(javac / clang -fsyntax-only / DevEco tsc),无 C++
+改动不触发 .so 重编。发版 10.52.0 后按 2026-08-12 同一实验复测:markSuccess
+→ 落盘标记 → 每次启动 ~230ms 即崩,验证 handler 窗口完成 check+download+
+commit、下次启动进修复版,时序记录回 NATIVE_CHECK_FOLLOWUPS.md。

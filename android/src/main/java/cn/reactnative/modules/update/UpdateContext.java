@@ -425,6 +425,12 @@ public class UpdateContext {
         return sp.getString(key, null);
     }
 
+    void removeKv(String key) {
+        SharedPreferences.Editor editor = sp.edit();
+        editor.remove(key);
+        persistEditor(editor, "remove key " + key);
+    }
+
     public String getCurrentVersion() {
         return sp.getString("currentVersion", null);
     }

@@ -29,10 +29,35 @@ final class NativeCheckOrchestrator {
     // Raw response cache for the JS side to reuse (§10.3), scoped to the
     // exact logical request and native config that produced it.
     static final String KEY_RESP_CACHE = "nativeCheckResp";
+    // Set when a round starts, cleared when it ends (§11.4). Residue on the
+    // next launch means the previous process died mid-round (a crash rescue
+    // was truncated): that launch resumes immediately instead of waiting 5s.
+    static final String KEY_ROUND_INCOMPLETE = "nativeCheckIncomplete";
     private static final int MAX_CHECK_HTTP_ATTEMPTS = 8;
     private static final long DOWNLOAD_PHASE_TIMEOUT_SECONDS = 600;
 
     private static final AtomicBoolean scheduled = new AtomicBoolean(false);
+    // One round per process, whoever starts it first — the delayed cold-start
+    // thread or the crash-rescue thread (§11.3). roundDone lets the rescue
+    // wait for an in-flight round instead of racing it.
+    private static final AtomicBoolean roundStarted = new AtomicBoolean(false);
+    private static final CountDownLatch roundDone = new CountDownLatch(1);
+    private static volatile boolean roundCompleted = false;
+    // Flipped the moment a crash is being held. JS is dead from that point
+    // on, so there is no second decision maker: the round force-activates
+    // whatever it downloads (§11.3).
+    private static volatile boolean crashRescueActive = false;
+    // A version this process downloaded but left for JS to activate. If the
+    // process then crashes, JS will never activate it — the crash handler
+    // activates it directly (bounded local work, no network). The generation
+    // is the one the round committed under: a reset that lands afterwards
+    // bumps it, and the late activation must lose to that reset exactly like
+    // the round itself would. Written generation-first, read hash-first, so
+    // a torn read can only see a stricter (newer) generation.
+    private static volatile String unactivatedHash;
+    private static volatile long unactivatedGeneration;
+    private static volatile UpdateContext sContext;
+    private static volatile String sLaunchRolledBackVersion;
 
     private NativeCheckOrchestrator() {
     }
@@ -44,14 +69,24 @@ final class NativeCheckOrchestrator {
         if (!scheduled.compareAndSet(false, true)) {
             return;
         }
+        sContext = context;
+        sLaunchRolledBackVersion = launchRolledBackVersion;
+        // The crash-hold rescue shares the orchestrator's rollout gate: no
+        // persisted config, no handler (§11.3).
+        if (context.getKv(KEY_CONFIG) != null) {
+            CrashRescue.install();
+        }
         Thread thread = new Thread(new Runnable() {
             @Override
             public void run() {
                 try {
                     // Keep the check away from the cold-start critical path
-                    // (§7 R5) — its result targets the NEXT launch anyway.
-                    Thread.sleep(5000);
-                    runOnce(context, launchRolledBackVersion);
+                    // (§7 R5) — unless the previous process died mid-round,
+                    // in which case every launch second counts (§11.4).
+                    if (context.getKv(KEY_ROUND_INCOMPLETE) == null) {
+                        Thread.sleep(5000);
+                    }
+                    startRound(0);
                 } catch (Throwable e) {
                     // The rescue path must never take the app down with it.
                     Log.w(UpdateContext.TAG, "native check failed: " + e);
@@ -63,9 +98,94 @@ final class NativeCheckOrchestrator {
         thread.start();
     }
 
+    static boolean isRoundInFlight() {
+        return roundStarted.get() && !roundCompleted;
+    }
+
+    /**
+     * Runs the process's single round on the calling thread if nobody has
+     * started it yet. deadlineNanos > 0 (crash rescue) caps every HTTP call
+     * and download phase to the remaining budget.
+     */
+    private static void startRound(long deadlineNanos) {
+        if (!roundStarted.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            runOnce(sContext, sLaunchRolledBackVersion, deadlineNanos);
+        } catch (Throwable e) {
+            Log.w(UpdateContext.TAG, "native check failed: " + e);
+        } finally {
+            roundCompleted = true;
+            roundDone.countDown();
+        }
+    }
+
+    /**
+     * Crash-rescue entry (§11.3), called from the handler's worker thread
+     * while the uncaught-exception handler holds the dying process. Ensures
+     * this process's round runs to completion within the budget, then
+     * activates a downloaded-but-unactivated version if one exists — the
+     * last chance before the process is gone.
+     */
+    static void runRescue(long deadlineNanos) {
+        UpdateContext context = sContext;
+        if (context == null) {
+            return;
+        }
+        crashRescueActive = true;
+        startRound(deadlineNanos);
+        if (!roundCompleted) {
+            long remainingNanos = deadlineNanos - System.nanoTime();
+            if (remainingNanos > 0) {
+                try {
+                    roundDone.await(remainingNanos, TimeUnit.NANOSECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
+        }
+        activatePendingVersion(context);
+    }
+
+    // The alert-strategy variant of the §10.7 hole: the round downloaded a
+    // fix but deferred activation to JS, and JS is now dead. Activation is
+    // local and bounded (a state switch under the commit lock).
+    private static void activatePendingVersion(UpdateContext context) {
+        String hash = unactivatedHash;
+        if (hash == null) {
+            return;
+        }
+        String hashInfoJson = null;
+        String existingInfo = context.getKv("hash_" + hash);
+        if (existingInfo != null) {
+            try {
+                JSONObject info = new JSONObject(existingInfo);
+                info.put("crashRescue", true);
+                hashInfoJson = info.toString();
+            } catch (JSONException ignored) {
+            }
+        }
+        try {
+            if (context.commitNativeCheckResult(
+                    unactivatedGeneration, hash, hashInfoJson, true, null)) {
+                unactivatedHash = null;
+                Log.i(UpdateContext.TAG,
+                    "crash rescue: activated downloaded version " + hash);
+            } else {
+                Log.i(UpdateContext.TAG,
+                    "crash rescue: reset since download, dropping activation");
+            }
+        } catch (Exception e) {
+            Log.w(UpdateContext.TAG, "crash rescue: activation failed: " + e);
+        }
+    }
+
     private static void runOnce(
         UpdateContext context,
-        String launchRolledBackVersion
+        String launchRolledBackVersion,
+        long deadlineNanos
     ) throws JSONException {
         // Sampled before any IO: a reset landing while this round runs must
         // win over the round's decision.
@@ -89,6 +209,27 @@ final class NativeCheckOrchestrator {
         if (appKey.isEmpty()) {
             return;
         }
+        // From here on the round does real work: leave the breadcrumb that
+        // the next launch reads to skip its 5s delay if we die mid-round.
+        context.setKv(KEY_ROUND_INCOMPLETE, "1");
+        try {
+            runConfiguredRound(
+                context, launchRolledBackVersion, deadlineNanos,
+                resetGeneration, configJson, config, appKey);
+        } finally {
+            context.removeKv(KEY_ROUND_INCOMPLETE);
+        }
+    }
+
+    private static void runConfiguredRound(
+        UpdateContext context,
+        String launchRolledBackVersion,
+        long deadlineNanos,
+        long resetGeneration,
+        String configJson,
+        JSONObject config,
+        String appKey
+    ) throws JSONException {
         String packageVersion = config.optString(
             "packageVersion", context.getPackageVersion());
         if (packageVersion.isEmpty()) {
@@ -141,7 +282,7 @@ final class NativeCheckOrchestrator {
             return;
         }
 
-        String responseText = runCheckRequest(config, appKey, body);
+        String responseText = runCheckRequest(config, appKey, body, deadlineNanos);
         if (responseText == null) {
             Log.i(UpdateContext.TAG,
                 "native check: no endpoint reachable, giving up until next launch");
@@ -173,7 +314,8 @@ final class NativeCheckOrchestrator {
         boolean downloaded = context.hasCompletedVersion(hash);
         if (!downloaded) {
             downloaded = performAttempts(
-                context, decision.optJSONArray("attempts"), hash, currentVersion);
+                context, decision.optJSONArray("attempts"), hash, currentVersion,
+                deadlineNanos);
         }
         if (!downloaded) {
             // The native attempt has finished, so JS may safely reuse the
@@ -197,12 +339,25 @@ final class NativeCheckOrchestrator {
                     hashInfo.put(key, value);
                 }
             }
+            // A forceBoot activation is the brick-rescue path: mark it in the
+            // persisted info so JS can report force_boot_rescue when this
+            // version survives to markSuccess. Only the server-sent directive
+            // counts — a silent-strategy activation is ordinary delivery.
+            JSONObject infoConfig = info.optJSONObject("config");
+            if (infoConfig != null && infoConfig.optBoolean("forceBoot", false)) {
+                hashInfo.put("forceBootRescue", true);
+            }
+            if (crashRescueActive) {
+                hashInfo.put("crashRescue", true);
+            }
             hashInfoJson = hashInfo.toString();
         }
         // Silent strategies or a server-marked forceBoot version (per-version
         // remote override — the brick rescue) activate for the next launch;
-        // otherwise activation stays with the JS side.
-        boolean activate = decision.optBoolean("activate", false);
+        // otherwise activation stays with the JS side. Unless a crash is
+        // being held: JS is dead, deferring to it would leave the fix on
+        // disk forever (§11.3).
+        boolean activate = decision.optBoolean("activate", false) || crashRescueActive;
         boolean committed;
         try {
             committed = context.commitNativeCheckResult(
@@ -218,9 +373,14 @@ final class NativeCheckOrchestrator {
         if (!committed) {
             Log.i(UpdateContext.TAG, "native check: reset during round, dropping result");
         } else if (activate) {
+            unactivatedHash = null;
             Log.i(UpdateContext.TAG,
                 "native check: downloaded " + hash + " and set for next launch");
         } else {
+            // Remembered so a crash later in this process can still activate
+            // it (activatePendingVersion) — JS never will.
+            unactivatedGeneration = resetGeneration;
+            unactivatedHash = hash;
             Log.i(UpdateContext.TAG,
                 "native check: downloaded " + hash + ", activation left to JS");
         }
@@ -246,7 +406,7 @@ final class NativeCheckOrchestrator {
         .callTimeout(15, TimeUnit.SECONDS)
         .build();
 
-    private static String httpRequest(String url, String postBody) {
+    private static String httpRequest(String url, String postBody, long deadlineNanos) {
         try {
             Request.Builder builder =
                 new Request.Builder().url(url).header("Accept", "application/json");
@@ -254,7 +414,22 @@ final class NativeCheckOrchestrator {
                 builder.post(RequestBody.create(
                     postBody, MediaType.parse("application/json; charset=utf-8")));
             }
-            try (Response response = httpClient.newCall(builder.build()).execute()) {
+            OkHttpClient client = httpClient;
+            if (deadlineNanos > 0) {
+                // Crash-rescue budget: never let a single request outlive the
+                // handler's hold window.
+                long remainingMillis = TimeUnit.NANOSECONDS.toMillis(
+                    deadlineNanos - System.nanoTime());
+                if (remainingMillis <= 0) {
+                    return null;
+                }
+                if (remainingMillis < 15000) {
+                    client = httpClient.newBuilder()
+                        .callTimeout(remainingMillis, TimeUnit.MILLISECONDS)
+                        .build();
+                }
+            }
+            try (Response response = client.newCall(builder.build()).execute()) {
                 if (!response.isSuccessful() || response.body() == null) {
                     return null;
                 }
@@ -291,7 +466,9 @@ final class NativeCheckOrchestrator {
      * already-tried) for one more round. No hedged race on purpose — this
      * path is latency-insensitive.
      */
-    private static String runCheckRequest(JSONObject config, String appKey, String body) {
+    private static String runCheckRequest(
+        JSONObject config, String appKey, String body, long deadlineNanos
+    ) {
         JSONArray endpoints = config.optJSONArray("endpoints");
         String orderedJson = NativeUpdateFlow.orderEndpointCandidates(
             endpoints == null ? "[]" : endpoints.toString(), Math.random());
@@ -311,7 +488,8 @@ final class NativeCheckOrchestrator {
             if (httpAttempts++ >= MAX_CHECK_HTTP_ATTEMPTS) {
                 return null;
             }
-            String response = httpRequest(base + "/checkUpdate/" + appKey, body);
+            String response = httpRequest(
+                base + "/checkUpdate/" + appKey, body, deadlineNanos);
             if (isValidCheckResponse(response)) {
                 return response;
             }
@@ -328,7 +506,7 @@ final class NativeCheckOrchestrator {
             if (httpAttempts++ >= MAX_CHECK_HTTP_ATTEMPTS) {
                 return null;
             }
-            String listText = httpRequest(listUrl, null);
+            String listText = httpRequest(listUrl, null, deadlineNanos);
             if (listText == null) {
                 continue;
             }
@@ -347,7 +525,8 @@ final class NativeCheckOrchestrator {
                     return null;
                 }
                 tried.add(base);
-                String response = httpRequest(base + "/checkUpdate/" + appKey, body);
+                String response = httpRequest(
+                    base + "/checkUpdate/" + appKey, body, deadlineNanos);
                 if (isValidCheckResponse(response)) {
                     return response;
                 }
@@ -358,14 +537,23 @@ final class NativeCheckOrchestrator {
         return null;
     }
 
+    private static long capToRescueBudget(long phaseDeadlineNanos, long rescueDeadlineNanos) {
+        if (rescueDeadlineNanos <= 0) {
+            return phaseDeadlineNanos;
+        }
+        return Math.min(phaseDeadlineNanos, rescueDeadlineNanos);
+    }
+
     private static boolean performAttempts(
-        UpdateContext context, JSONArray attempts, String hash, String originHash
+        UpdateContext context, JSONArray attempts, String hash, String originHash,
+        long rescueDeadlineNanos
     ) {
         if (attempts == null) {
             return false;
         }
-        final long incrementalDeadlineNanos = System.nanoTime()
-            + TimeUnit.SECONDS.toNanos(DOWNLOAD_PHASE_TIMEOUT_SECONDS);
+        final long incrementalDeadlineNanos = capToRescueBudget(
+            System.nanoTime() + TimeUnit.SECONDS.toNanos(DOWNLOAD_PHASE_TIMEOUT_SECONDS),
+            rescueDeadlineNanos);
         long fullDeadlineNanos = 0;
         for (int i = 0; i < attempts.length(); i++) {
             JSONObject attempt = attempts.optJSONObject(i);
@@ -381,8 +569,10 @@ final class NativeCheckOrchestrator {
             if (isFullAttempt && fullDeadlineNanos == 0) {
                 // Incremental failures must not consume the last-resort full
                 // download's budget. Each phase gets one bounded 10min window.
-                fullDeadlineNanos = System.nanoTime()
-                    + TimeUnit.SECONDS.toNanos(DOWNLOAD_PHASE_TIMEOUT_SECONDS);
+                fullDeadlineNanos = capToRescueBudget(
+                    System.nanoTime()
+                        + TimeUnit.SECONDS.toNanos(DOWNLOAD_PHASE_TIMEOUT_SECONDS),
+                    rescueDeadlineNanos);
             }
             final long deadlineNanos = isFullAttempt
                 ? fullDeadlineNanos : incrementalDeadlineNanos;

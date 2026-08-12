@@ -100,14 +100,115 @@ const TEMP_ORIGIN_BUNDLE_ENTRY = '.origin.bundle.harmony.js';
 const FILE_COPY_BUFFER_SIZE = 64 * 1024;
 const DOWNLOAD_CALL_TIMEOUT_MS = 10 * 60 * 1000;
 
+// 断点续传 sidecar(NATIVE_CHECKUPDATE_DESIGN §11.4):记录 partial 属于
+// 哪个 url、验证器与总长。归档与 sidecar 同生共死;有归档无 sidecar(或
+// url 不符)一律视为不可信,删掉重来。
+interface ResumeMeta {
+  url: string;
+  etag?: string;
+  lastModified?: string;
+  total?: number;
+}
+
+// "bytes <start>-<end>/<total>"。返回总长(“*”记 0);缺失/畸形/起点与
+// 本地 partial 不符返回 -1——那样追加的字节不可信。
+export function parseContentRangeTotal(
+  header: string,
+  expectedStart: number,
+): number {
+  if (!header.startsWith('bytes ')) {
+    return -1;
+  }
+  const range = header.substring('bytes '.length).trim();
+  const slash = range.indexOf('/');
+  const dash = range.indexOf('-');
+  if (slash < 0 || dash < 0 || dash > slash) {
+    return -1;
+  }
+  const start = parseInt(range.substring(0, dash).trim(), 10);
+  if (Number.isNaN(start) || start !== expectedStart) {
+    return -1;
+  }
+  const totalPart = range.substring(slash + 1).trim();
+  if (totalPart === '*') {
+    return 0;
+  }
+  const total = parseInt(totalPart, 10);
+  return Number.isNaN(total) || total <= 0 ? -1 : total;
+}
+
 export class DownloadTask {
   private context: common.Context;
   private hash = '';
   private eventHub: EventHub;
+  // 一经 downloadFile 正常返回即置位:之后的失败是 patch 应用失败,归档
+  // 已被判定有毒,清理时必须连 sidecar 一起删,绝不能续传进同一个失败。
+  private downloadPhaseCompleted = false;
 
   constructor(context: common.Context) {
     this.context = context;
     this.eventHub = EventHub.getInstance();
+  }
+
+  private resumeSidecarPath(targetFile: string): string {
+    return `${targetFile}.resume`;
+  }
+
+  private async readResumeMeta(
+    targetFile: string,
+    url: string,
+  ): Promise<ResumeMeta | null> {
+    const sidecar = this.resumeSidecarPath(targetFile);
+    if (!fileIo.accessSync(sidecar)) {
+      return null;
+    }
+    try {
+      const meta = this.parseJsonEntry(
+        await this.readFileContent(sidecar),
+      ) as ResumeMeta;
+      if (meta && meta.url === url) {
+        return meta;
+      }
+    } catch (e) {
+      // 坏 sidecar 只意味着“无法续传”。
+    }
+    return null;
+  }
+
+  private async writeResumeMeta(
+    targetFile: string,
+    meta: ResumeMeta,
+  ): Promise<void> {
+    try {
+      const encoded = new util.TextEncoder().encodeInto(JSON.stringify(meta));
+      await this.writeFileContent(this.resumeSidecarPath(targetFile), encoded);
+    } catch (e) {
+      // 非致命:没有 sidecar,下次从零开始。
+      console.error('Failed to persist resume sidecar:', e);
+    }
+  }
+
+  private async deleteResumeSidecar(targetFile: string): Promise<void> {
+    try {
+      const sidecar = this.resumeSidecarPath(targetFile);
+      if (fileIo.accessSync(sidecar)) {
+        await fileIo.unlink(sidecar);
+      }
+    } catch (e) {
+      console.error('Failed to delete resume sidecar:', e);
+    }
+  }
+
+  // 归档连同 sidecar 一起删除(被消费或被判定有毒)。
+  private async deleteArchiveAndSidecar(targetFile: string): Promise<void> {
+    try {
+      if (fileIo.accessSync(targetFile)) {
+        await fileIo.unlink(targetFile);
+      }
+    } catch (e) {
+      console.error('Failed to delete archive:', e);
+    }
+    await this.deleteResumeSidecar(targetFile);
   }
 
   private async removeDirectory(path: string): Promise<void> {
@@ -338,15 +439,45 @@ export class DownloadTask {
   }
 
   private async downloadFile(params: DownloadTaskParams): Promise<void> {
-    const httpRequest = http.createHttp();
     this.hash = params.hash;
+    // 跨启动断点续传(§11.4):砖机每次启动只有几百毫秒,每个已到手的字节
+    // 都必须在进程死亡后仍然算数、单调累积。
+    const outcome = await this.transferArchive(params, true);
+    if (outcome === 'staleRange') {
+      // 416 且本地 partial 与服务端不再匹配:删掉重来,仅此一次。
+      await this.deleteArchiveAndSidecar(params.targetFile);
+      const retry = await this.transferArchive(params, false);
+      if (retry !== 'done') {
+        throw Error(`Server rejected the download range for ${params.url}`);
+      }
+    }
+    this.downloadPhaseCompleted = true;
+  }
+
+  private async transferArchive(
+    params: DownloadTaskParams,
+    allowResume: boolean,
+  ): Promise<'done' | 'staleRange'> {
+    const httpRequest = http.createHttp();
     let writer: fileIo.File | null = null;
-    let contentLength = 0;
+    let contentLength = 0; // 本次响应体长度(206 时是剩余部分)
+    let totalAll = 0; // 整个文件的总长(0 = 未知)
+    let baseOffset = 0; // 响应许可的续传起点
     let received = 0;
     let writeError: Error | null = null;
     let writeQueue = Promise.resolve();
     let lastReportedPercentage = -1;
     let lastReportedBytes = 0;
+    let etagHeader = '';
+    let lastModifiedHeader = '';
+    let contentRangeHeader = '';
+    let contentEncodingHeader = '';
+    // headersReceive 与 requestInStream promise 的先后顺序平台不保证;
+    // 依赖 Content-Range 的续传路径必须显式等到响应头到达。
+    let headersResolve: (() => void) | null = null;
+    const headersPromise = new Promise<void>(resolve => {
+      headersResolve = resolve;
+    });
     const deadlineUptimeMs = params.deadlineUptimeMs > 0
       ? params.deadlineUptimeMs
       : monotonicNowMs() + DOWNLOAD_CALL_TIMEOUT_MS;
@@ -354,22 +485,63 @@ export class DownloadTask {
       throw Error('Download deadline expired before start');
     }
 
-    // Emit at most one progress event per whole-percent change (or per 256KB
-    // when the total is unknown), and only from the dataReceive handler, so the
-    // two HarmonyOS callbacks don't each fire an event per chunk.
+    // 续传状态盘点:有匹配的 sidecar 且 partial 未收齐才发 Range。
+    let resumeMeta: ResumeMeta | null = allowResume
+      ? await this.readResumeMeta(params.targetFile, params.url)
+      : null;
+    let resumeOffset = 0;
+    if (resumeMeta && fileIo.accessSync(params.targetFile)) {
+      const stat = await fileIo.stat(params.targetFile);
+      const knownTotal = resumeMeta.total ?? 0;
+      if (stat.size > 0 && knownTotal > 0 && stat.size === knownTotal) {
+        // 上次尝试已收齐(进程死在下载结束与解压之间):无需再传。
+        httpRequest.destroy();
+        this.onProgressUpdate(knownTotal, knownTotal);
+        return 'done';
+      }
+      if (stat.size > 0 && (knownTotal <= 0 || stat.size < knownTotal)) {
+        resumeOffset = stat.size;
+      }
+    }
+    if (resumeOffset === 0) {
+      if (fileIo.accessSync(params.targetFile)) {
+        await fileIo.unlink(params.targetFile);
+      } else {
+        await this.ensureParentDirectory(params.targetFile);
+      }
+      await this.deleteResumeSidecar(params.targetFile);
+      resumeMeta = null;
+    }
+
+    // 响应体在状态码判定前一律只进内存缓冲:416/5xx 的错误体若被追加进
+    // partial,续传状态就永久污染了。requestInStream 的 promise 在响应头
+    // 到达时解决,缓冲窗口只有头与首批数据之间的间隙。
+    let pendingChunks: ArrayBuffer[] | null = [];
+    let discardBody = false;
+    let authorize: (() => void) | null = null;
+    const authorization = new Promise<void>(resolve => {
+      authorize = resolve;
+    });
+
     const reportProgress = () => {
-      if (contentLength > 0) {
-        const percentage = Math.round((received * 100) / contentLength);
+      const overall = baseOffset + received;
+      const overallTotal = totalAll > 0
+        ? totalAll
+        : contentLength > 0
+          ? baseOffset + contentLength
+          : 0;
+      if (overallTotal > 0) {
+        const percentage = Math.round((overall * 100) / overallTotal);
         if (percentage <= lastReportedPercentage) {
           return;
         }
         lastReportedPercentage = percentage;
-      } else if (received - lastReportedBytes < 256 * 1024) {
+      } else if (overall - lastReportedBytes < 256 * 1024) {
         return;
       } else {
-        lastReportedBytes = received;
+        lastReportedBytes = overall;
       }
-      this.onProgressUpdate(received, contentLength);
+      this.onProgressUpdate(overall, overallTotal);
     };
 
     const closeWriter = async () => {
@@ -377,6 +549,20 @@ export class DownloadTask {
         await fileIo.close(writer);
         writer = null;
       }
+    };
+
+    const enqueueWrite = (data: ArrayBuffer) => {
+      received += data.byteLength;
+      writeQueue = writeQueue.then(async () => {
+        if (!writer || writeError) {
+          return;
+        }
+        try {
+          await fileIo.write(writer.fd, data);
+        } catch (error) {
+          writeError = error as Error;
+        }
+      });
     };
 
     // Watchdog: reject the download if no data is received for a while, so a
@@ -411,7 +597,10 @@ export class DownloadTask {
     const dataEndPromise = new Promise<void>((resolve, reject) => {
       httpRequest.on('dataEnd', () => {
         clearWatchdog();
-        writeQueue
+        // dataEnd 可能先于状态码判定到达(小响应):flush 必须等鉴权,
+        // 否则缓冲中的字节还没进 writeQueue 就被当成“全部写完”。
+        authorization
+          .then(() => writeQueue)
           .then(async () => {
             if (writeError) {
               throw writeError;
@@ -434,51 +623,44 @@ export class DownloadTask {
     });
 
     try {
-      let exists = fileIo.accessSync(params.targetFile);
-      if (exists) {
-        await fileIo.unlink(params.targetFile);
-      } else {
-        await this.ensureParentDirectory(params.targetFile);
-      }
-
-      writer = await fileIo.open(
-        params.targetFile,
-        fileIo.OpenMode.CREATE | fileIo.OpenMode.READ_WRITE,
-      );
-
       httpRequest.on('headersReceive', (header: Object) => {
         if (!header) {
           return;
         }
         const headers = header as Record<string, string>;
-        const lengthKey = Object.keys(headers).find(
-          key => key.toLowerCase() === 'content-length',
-        );
-        if (!lengthKey) {
-          return;
+        for (const key of Object.keys(headers)) {
+          const lower = key.toLowerCase();
+          if (lower === 'content-length') {
+            const length = parseInt(headers[key], 10);
+            if (!Number.isNaN(length)) {
+              contentLength = length;
+            }
+          } else if (lower === 'etag') {
+            etagHeader = headers[key];
+          } else if (lower === 'last-modified') {
+            lastModifiedHeader = headers[key];
+          } else if (lower === 'content-range') {
+            contentRangeHeader = headers[key];
+          } else if (lower === 'content-encoding') {
+            contentEncodingHeader = headers[key];
+          }
         }
-        const length = parseInt(headers[lengthKey], 10);
-        if (!Number.isNaN(length)) {
-          contentLength = length;
+        const signalHeaders = headersResolve as (() => void) | null;
+        if (signalHeaders) {
+          signalHeaders();
         }
       });
 
       httpRequest.on('dataReceive', (data: ArrayBuffer) => {
         refreshWatchdog();
-        if (writeError) {
+        if (writeError || discardBody) {
           return;
         }
-        received += data.byteLength;
-        writeQueue = writeQueue.then(async () => {
-          if (!writer || writeError) {
-            return;
-          }
-          try {
-            await fileIo.write(writer.fd, data);
-          } catch (error) {
-            writeError = error as Error;
-          }
-        });
+        if (pendingChunks) {
+          pendingChunks.push(data);
+          return;
+        }
+        enqueueWrite(data);
         reportProgress();
       });
 
@@ -493,6 +675,22 @@ export class DownloadTask {
         },
       );
 
+      const requestHeader: Record<string, string> = {
+        'Content-Type': 'application/octet-stream',
+      };
+      if (resumeOffset > 0) {
+        // 只有续传请求钉死编码:Range 偏移必须与盘上字节一一对应。
+        // 全新下载保留平台默认的压缩处理,与引入续传前的行为一致。
+        requestHeader['Accept-Encoding'] = 'identity';
+        requestHeader.Range = `bytes=${resumeOffset}-`;
+        const validator = resumeMeta?.etag || resumeMeta?.lastModified;
+        if (validator) {
+          // 带验证器时文件已变更的服务端会退回完整 200,而不是把不匹配
+          // 的字节接上来。
+          requestHeader['If-Range'] = validator;
+        }
+      }
+
       const deadlinePromise = new Promise<never>((_, reject) => {
         deadlineTimer = setTimeout(() => {
           reject(Error('Download exceeded its whole-call deadline'));
@@ -503,14 +701,103 @@ export class DownloadTask {
           method: http.RequestMethod.GET,
           readTimeout: 60000,
           connectTimeout: 60000,
-          header: {
-            'Content-Type': 'application/octet-stream',
-          },
+          header: requestHeader,
         }),
         deadlinePromise,
       ]);
+
+      if (responseCode === 416) {
+        discardBody = true;
+        pendingChunks = null;
+        const knownTotal = resumeMeta?.total ?? 0;
+        if (knownTotal > 0 && fileIo.accessSync(params.targetFile)) {
+          const stat = await fileIo.stat(params.targetFile);
+          if (stat.size === knownTotal) {
+            // partial 实际上就是完整文件。
+            this.onProgressUpdate(knownTotal, knownTotal);
+            return 'done';
+          }
+        }
+        return 'staleRange';
+      }
       if (responseCode > 299) {
+        // 响应体从未落盘,partial + sidecar 原样保留——那就是续传状态。
+        discardBody = true;
+        pendingChunks = null;
         throw Error(`Server error: ${responseCode}`);
+      }
+
+      let encodedBody = false;
+      if (resumeOffset > 0 && responseCode === 206) {
+        // Content-Range 只能从 headersReceive 拿到,而它与 promise 的先后
+        // 顺序不保证——等头到达(dataEnd 前必到,兜底 5s)再判定。
+        let headersTimer = 0;
+        await Promise.race([
+          headersPromise,
+          new Promise<void>(resolve => {
+            headersTimer = setTimeout(resolve, 5000);
+          }),
+        ]);
+        clearTimeout(headersTimer);
+        encodedBody =
+          !!contentEncodingHeader &&
+          contentEncodingHeader.toLowerCase() !== 'identity';
+        const parsedTotal = encodedBody
+          ? -1
+          : parseContentRangeTotal(contentRangeHeader, resumeOffset);
+        if (parsedTotal < 0) {
+          // 编码过的 range 字节、或 Content-Range 缺失/畸形/起点不符:
+          // 追加不可信。按“partial 已过期”处理(删掉、干净地重来一次),
+          // 而不是抛错——抛错会保留 partial,之后每次都撞同一堵墙。
+          discardBody = true;
+          pendingChunks = null;
+          return 'staleRange';
+        }
+        baseOffset = resumeOffset;
+        totalAll = parsedTotal;
+        writer = await fileIo.open(
+          params.targetFile,
+          fileIo.OpenMode.WRITE_ONLY | fileIo.OpenMode.APPEND,
+        );
+      } else {
+        // 服务端忽略了 Range(或本就没发):从零开始。
+        if (fileIo.accessSync(params.targetFile)) {
+          await fileIo.unlink(params.targetFile);
+        }
+        baseOffset = 0;
+        totalAll = contentLength > 0 ? contentLength : 0;
+        writer = await fileIo.open(
+          params.targetFile,
+          fileIo.OpenMode.CREATE | fileIo.OpenMode.WRITE_ONLY,
+        );
+      }
+      // 先落 sidecar 再放行写入,流中崩溃才有得续。
+      const meta: ResumeMeta = { url: params.url };
+      const etag = etagHeader || resumeMeta?.etag;
+      const lastModified = lastModifiedHeader || resumeMeta?.lastModified;
+      if (etag) {
+        meta.etag = etag;
+      }
+      if (lastModified) {
+        meta.lastModified = lastModified;
+      }
+      if (totalAll > 0) {
+        meta.total = totalAll;
+      }
+      await this.writeResumeMeta(params.targetFile, meta);
+
+      // 鉴权通过:回放缓冲,之后的数据直写。
+      const buffered = pendingChunks ?? [];
+      pendingChunks = null;
+      for (const chunk of buffered) {
+        enqueueWrite(chunk);
+      }
+      if (buffered.length > 0) {
+        reportProgress();
+      }
+      const grant = authorize as (() => void) | null;
+      if (grant) {
+        grant();
       }
 
       // watchdog 到这里才首次启动：requestInStream 阶段已有 connect/readTimeout
@@ -519,13 +806,38 @@ export class DownloadTask {
       // 即使随后数据正常流入，race 也必然以 "Download stalled" 失败。
       refreshWatchdog();
       await Promise.race([dataEndPromise, inactivityPromise, deadlinePromise]);
+      // dataEnd 之后响应头必然已到齐,此时才能可靠判定编码。
+      const finalEncoded =
+        !!contentEncodingHeader &&
+        contentEncodingHeader.toLowerCase() !== 'identity';
       const stats = await fileIo.stat(params.targetFile);
-      const fileSize = stats.size;
-      if (contentLength > 0 && fileSize !== contentLength) {
-        throw Error(
-          `Download incomplete: expected ${contentLength} bytes but got ${stats.size} bytes`,
-        );
+      if (!finalEncoded) {
+        if (contentLength > 0 && received !== contentLength) {
+          throw Error(
+            `Download incomplete: expected ${contentLength} bytes but got ${received} bytes`,
+          );
+        }
+        if (totalAll > 0 && stats.size !== totalAll) {
+          throw Error(
+            `Download incomplete: expected ${totalAll} total bytes but got ${stats.size} bytes`,
+          );
+        }
+        // 用最终观测值刷新 sidecar:首次写入可能因头部竞态缺 total/验证器,
+        // 补齐后“下载完、解压前死”的窗口才能被 complete 检测覆盖。
+        const finalMeta: ResumeMeta = { url: params.url, total: stats.size };
+        if (etagHeader || resumeMeta?.etag) {
+          finalMeta.etag = etagHeader || resumeMeta?.etag;
+        }
+        if (lastModifiedHeader || resumeMeta?.lastModified) {
+          finalMeta.lastModified =
+            lastModifiedHeader || resumeMeta?.lastModified;
+        }
+        await this.writeResumeMeta(params.targetFile, finalMeta);
+      } else {
+        // 编码传输不可续传:盘上是解码后的字节,编码域的长度与偏移都失效。
+        await this.deleteResumeSidecar(params.targetFile);
       }
+      return 'done';
     } catch (error) {
       console.error('Download failed:', error);
       throw error;
@@ -533,6 +845,11 @@ export class DownloadTask {
       clearWatchdog();
       if (deadlineTimer !== null) {
         clearTimeout(deadlineTimer);
+      }
+      // 解除 dataEnd 对鉴权的等待(失败路径上可能从未放行)。
+      const release = authorize as (() => void) | null;
+      if (release) {
+        release();
       }
       try {
         await closeWriter();
@@ -559,13 +876,7 @@ export class DownloadTask {
     await this.downloadFile(params);
     await this.recreateDirectory(params.unzipDirectory);
     await zlib.decompressFile(params.targetFile, params.unzipDirectory);
-    try {
-      if (fileIo.accessSync(params.targetFile)) {
-        await fileIo.unlink(params.targetFile);
-      }
-    } catch (e) {
-      console.error('Failed to delete temporary zip file after decompression:', e);
-    }
+    await this.deleteArchiveAndSidecar(params.targetFile);
   }
 
   private async doPatchFromApp(params: DownloadTaskParams): Promise<void> {
@@ -633,13 +944,7 @@ export class DownloadTask {
       params.unzipDirectory,
       crcByFrom,
     );
-    try {
-      if (fileIo.accessSync(params.targetFile)) {
-        await fileIo.unlink(params.targetFile);
-      }
-    } catch (e) {
-      console.error('Failed to delete temporary zip file after patching:', e);
-    }
+    await this.deleteArchiveAndSidecar(params.targetFile);
   }
 
   private async doPatchFromPpk(params: DownloadTaskParams): Promise<void> {
@@ -686,13 +991,7 @@ export class DownloadTask {
       bundleHbcTransformMeta: manifestArrays.hbcTransformMeta,
     });
     console.info('Patch from PPK completed');
-    try {
-      if (fileIo.accessSync(params.targetFile)) {
-        await fileIo.unlink(params.targetFile);
-      }
-    } catch (e) {
-      console.error('Failed to delete temporary patch file after patching:', e);
-    }
+    await this.deleteArchiveAndSidecar(params.targetFile);
   }
 
   private async copyFromResource(
@@ -840,6 +1139,9 @@ export class DownloadTask {
           break;
         case DownloadTaskParams.TASK_TYPE_PLAIN_DOWNLOAD:
           await this.downloadFile(params);
+          // 文件在完成时即是最终产物——残留的 sidecar 会让下次同 URL 的
+          // 下载不发请求直接返回这份旧字节。
+          await this.deleteResumeSidecar(params.targetFile);
           break;
         default:
           throw Error(`Unknown task type: ${params.type}`);
@@ -856,6 +1158,7 @@ export class DownloadTask {
         try {
           if (params.type === DownloadTaskParams.TASK_TYPE_PLAIN_DOWNLOAD) {
             await fileIo.unlink(params.targetFile);
+            await this.deleteResumeSidecar(params.targetFile);
           } else if (
             !fileIo.accessSync(
               `${params.unzipDirectory}/${VERSION_COMPLETE_FILE_NAME}`,
@@ -865,6 +1168,12 @@ export class DownloadTask {
             // Never let a failed duplicate task remove an install already
             // handed off by an earlier task via marker + bundle.
             await this.removeDirectory(params.unzipDirectory);
+            if (this.downloadPhaseCompleted) {
+              // 收齐后才失败的是解压/patch 失败:归档有毒,续传只会撞上
+              // 同一个失败。下载阶段的失败则保留 partial + sidecar——那
+              // 就是续传状态。
+              await this.deleteArchiveAndSidecar(params.targetFile);
+            }
           }
         } catch (cleanupError: any) {
           console.error('Cleanup after error failed:', cleanupError.message);
