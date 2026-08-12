@@ -435,4 +435,41 @@ JS 紧跟着上报一条 `crashRescue` 回执(logcat 实测 23:00:16.180 markSuc
 
 对比 2026-08-12 上午同一台设备的旧结论:230ms 砖连续 4 次冷启动不收敛。
 10.52.0 下**一次崩溃即救回**——崩溃本身触发 hold,进度不再随进程死亡丢弃。
-iOS/鸿蒙真机复测待补(iOS 机制同构,鸿蒙只有续传+零延迟无 hold)。
+鸿蒙真机复测待补(只有续传+零延迟无 hold)。
+
+### 2026-08-12 iOS 模拟器实测:同一场景救回(Release-iphonesimulator + 本地服务端)
+
+e2e 基建复用:本地 rnu 副本刷到 10.52.0 源码 → pod install → Release 模拟器
+构建(e2e-ios 的常态形态,`#if !DEBUG` 门控激活);Detox 逮不住 JS 起不来的
+app,绕开它直接 simctl + 文件系统/崩溃报告观察。实验脚手架已入库:
+`e2e/entry.brick.ts` / `e2e/entry.fix.ts` / `scripts/ios-rescue-server.ts`
+(端口 31337,链:base→brick(带 forceBoot 投放)→fix(**刻意不带 forceBoot**))。
+
+砖状态与 Android 同构:brick 经 forceBoot 装上、首启健康 markSuccess
+(isFirstTime 消费、isFirstLoadOK=true)、8s 后 arm 标记;磁盘上预下载的
+fix 版本目录删除,逼救援窗口真下载。
+
+armed 冷启动结果(procLaunch 23:24:44.233,崩溃报告 .ips 为证):
+
+- JS fatal 重抛在 **com.meta.react.turbomodulemanager.queue**(后台线程 →
+  10s 预算档;此前对"JS 崩落在哪个线程"的分析在 bridgeless 下得到证实)
+- 救援窗口内完成整轮:服务端记录到 checkUpdate(hash=brick)→ 下发 fix →
+  **fix.ppk 真实下载** → commit;本地服务端下全程 <0.9s(captureTime
+  23:24:45.156,远低于预算——4.4s 是生产网络的数字)
+- **强制激活的独立证据**:fix 响应无 forceBoot、app 配置
+  checkStrategy:null/afterDownload:none——常规路径绝不会激活,而
+  currentVersion 已切到 fix 且 hashInfo 带 `crashRescue:true`,只能来自
+  crashRescueActive
+- 链式礼仪:hold 结束后前任 handler 照常执行,SIGABRT 崩溃报告正常生成
+  (崩溃上报不丢)
+- 下次启动进 fix、disarm 标记、markSuccess
+
+**主线程 3.5s 预算档不做人工实测,理由记录**:iOS 上落主线程的 RCTFatal 只有
+bundle 加载失败一族(RCTInstance 先 RCTExecuteOnMainQueue 再 RCTFatal),而
+加载失败的包永远跑不到 markSuccess,一律被既有 first_time 回滚接住,不构成
+真实砖形态;JS 运行时错误(砖的实际形态)实证落在后台线程。另:主线程档
+3.5s 是按 Android ANR 定的,iOS watchdog 上限 ~20s,未来可放宽。
+
+**iOS 覆盖边界补记**:若宿主 app 调用了 `RCTSetFatalHandler`,RCTFatal 走
+handler 分支不再抛异常,crash-rescue 不会触发(Android 无对应抢占点)。
+文档口径需含此项。
