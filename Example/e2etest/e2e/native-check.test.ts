@@ -69,30 +69,15 @@ async function waitForHash(hash: string) {
     .withTimeout(LABEL_TIMEOUT);
 }
 
-async function resetToPackagedBundle() {
-  await waitFor(element(by.id('reset-to-packaged')))
-    .toBeVisible()
-    .withTimeout(READY_TIMEOUT);
-  await element(by.id('reset-to-packaged')).tap();
-  await waitFor(element(by.id('last-event')))
-    .toHaveText('lastEvent: resetDone')
-    .withTimeout(15000);
-}
-
 describe('Native cold-start check', () => {
   beforeAll(async () => {
-    await device.launchApp({ delete: true, ...getDetoxLaunchArgs() });
-  });
-
-  beforeEach(async () => {
     await setForceBoot(false);
-    await relaunchAppPreservingData();
-    await waitForReady();
-    await resetToPackagedBundle();
-    await relaunchAppPreservingData();
+    // A fresh install already sits on the packaged bundle, which is the state
+    // both halves below start from — no reset round-trip needed.
+    await device.launchApp({ delete: true, ...getDetoxLaunchArgs() });
+    await device.setURLBlacklist([`.*:${LOCAL_UPDATE_PORT}.*`]);
     await waitForReady();
     await waitForBundleLabel(LOCAL_UPDATE_LABELS.base);
-    await waitForHash('');
   });
 
   afterAll(async () => {
@@ -101,39 +86,31 @@ describe('Native cold-start check', () => {
     await setForceBoot(false);
   });
 
-  it('installs a forceBoot version without any JS check', async () => {
-    await setForceBoot(true);
-
-    // This launch schedules the native round; the app itself never checks
-    // (checkStrategy is null and the check button is not tapped).
+  // Both directions live in one test on purpose: every extra app launch costs
+  // real wall clock on the iOS simulator, and this suite shares a 40-minute
+  // job budget with the rest of the e2e.
+  it('activates only what the server forces, with no JS check involved', async () => {
+    // Without the directive the round may download, but with automatic checks
+    // off (checkStrategy: null) it must never activate on its own.
+    await new Promise((resolve) => setTimeout(resolve, NATIVE_CHECK_SETTLE_MS));
     await relaunchAppPreservingData();
     await waitForReady();
     await waitForBundleLabel(LOCAL_UPDATE_LABELS.base);
-    await new Promise((resolve) =>
-      setTimeout(resolve, NATIVE_CHECK_SETTLE_MS)
-    );
+    await waitForHash('');
 
-    // Turn the directive off before observing, so the next launch cannot walk
-    // further along the update chain while the assertions run.
+    // Flip the directive before the launch whose round should honor it.
+    await setForceBoot(true);
+    await relaunchAppPreservingData();
+    await waitForReady();
+    await waitForBundleLabel(LOCAL_UPDATE_LABELS.base);
+    await new Promise((resolve) => setTimeout(resolve, NATIVE_CHECK_SETTLE_MS));
+
+    // Turn it off before observing, so the next launch cannot walk further
+    // along the update chain while the assertions run.
     await setForceBoot(false);
     await relaunchAppPreservingData();
     await waitForReady();
     await waitForBundleLabel(LOCAL_UPDATE_LABELS.full);
     await waitForHash(LOCAL_UPDATE_HASHES.full);
-  });
-
-  it('leaves the app on the packaged bundle when nothing is forced', async () => {
-    // Same wait, no directive: with checkStrategy null the native check may
-    // download but must never activate on its own.
-    await relaunchAppPreservingData();
-    await waitForReady();
-    await new Promise((resolve) =>
-      setTimeout(resolve, NATIVE_CHECK_SETTLE_MS)
-    );
-
-    await relaunchAppPreservingData();
-    await waitForReady();
-    await waitForBundleLabel(LOCAL_UPDATE_LABELS.base);
-    await waitForHash('');
   });
 });
