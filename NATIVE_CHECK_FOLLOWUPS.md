@@ -407,5 +407,32 @@ strict、77 金标向量 + ASan/UBSan、`.so` 符号与 16KB 对齐、iOS clang
   版无 crash hold(errorManager 同步回调驱动不了 ArkTS 异步 IO),只有续
   传+零延迟。
 
-- [ ] 10.52.0 发版后按本节上方同一实验复测 crash-on-launch 砖,时序记录
-      回此文件
+- [x] 10.52.0 发版后按本节上方同一实验复测 crash-on-launch 砖(见下)
+
+### 2026-08-12 实测:crash-on-launch 砖被救回(Android 真机 emu + 生产服务端)
+
+10.52.0 发布到 npm,testHotUpdate 升级并出 release APK(rnu 10.52.0)。
+复刻 crash-on-launch 砖:砖包活过一次启动并 markSuccess(first_time 保护
+解除),之后每次启动读到标记即在 JS 线程抛错。fix 版本绑定到同一原生版本
+1.87.1,砖包磁盘上的 fix 预下载被删除,逼救援在崩溃窗口内完整走
+检查+下载+commit。
+
+冷启动时序(同一进程 PID 11498):
+
+```
+22:59:52.365  JS 线程抛 BRICK(mqt_v_native),进程存活 122ms
+22:59:52.367  crash rescue: holding process for up to 10000ms (uptime 122ms)
+22:59:56.645  native check: downloaded -IxhPnHy(fix) and set for next launch
+22:59:56.651  前任 handler 接管,进程被 SIG9 终止
+```
+
+崩溃到 commit 全程 **4.28s**,落在 10s(后台线程)预算内。下次冷启动直接
+进 fix 版本(hot-fix-1052),不再崩溃;fix 立即把标记 disarm。
+
+遥测闭环:fix 的 currentVersionInfo 带 `crashRescue: true`,markSuccess 后
+JS 紧跟着上报一条 `crashRescue` 回执(logcat 实测 23:00:16.180 markSuccess
+→ 23:00:16.181 crashRescue)。
+
+对比 2026-08-12 上午同一台设备的旧结论:230ms 砖连续 4 次冷启动不收敛。
+10.52.0 下**一次崩溃即救回**——崩溃本身触发 hold,进度不再随进程死亡丢弃。
+iOS/鸿蒙真机复测待补(iOS 机制同构,鸿蒙只有续传+零延迟无 hold)。
