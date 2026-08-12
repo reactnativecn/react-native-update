@@ -60,6 +60,15 @@ PUSHY_ASYNC_METHOD(downloadPatchFromPpk)
 PUSHY_ASYNC_METHOD(downloadPatchFromPackage)
 PUSHY_ASYNC_METHOD(downloadFullUpdate)
 PUSHY_ASYNC_METHOD(downloadAndInstallApk)
+// 10.50+ additions. This table is the only bridge RNOH gives JS into the
+// ArkTS module: a method missing here is `undefined` on the JS side, and the
+// JS feature-detects then treat the whole capability as "old native" and
+// silently skip it — which is how the native cold-start check shipped dark
+// on Harmony. Every new spec method MUST be registered here.
+PUSHY_ASYNC_METHOD(syncNativeConfig)
+PUSHY_ASYNC_METHOD(getNativeCheckCache)
+PUSHY_ASYNC_METHOD(getBundleHash)
+PUSHY_ASYNC_METHOD(resetToPackagedBundle)
 
 #undef PUSHY_SYNC_METHOD
 #undef PUSHY_ASYNC_METHOD
@@ -93,4 +102,9 @@ PushyTurboModule::PushyTurboModule(
       "downloadAndInstallApk", 1, HostFunction_downloadAndInstallApk);
   registerMethod("addListener", 1, HostFunction_addListener);
   registerMethod("removeListeners", 1, HostFunction_removeListeners);
+  registerMethod("syncNativeConfig", 1, HostFunction_syncNativeConfig);
+  registerMethod("getNativeCheckCache", 0, HostFunction_getNativeCheckCache);
+  registerMethod("getBundleHash", 0, HostFunction_getBundleHash);
+  registerMethod(
+      "resetToPackagedBundle", 0, HostFunction_resetToPackagedBundle);
 }

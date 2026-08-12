@@ -516,11 +516,20 @@ afterDownload)`：本地 silent 策略 或 响应标记 forceBoot 即激活。
   raise NSException → uncaught → 进入本 handler;NSURLSession/信号量模式
   照旧可用。下载器从 NSURLSessionDownloadTask 改为 data task 流式追加写
   (downloadTask 的临时文件失败即丢,存不下 partial,是续传的硬前提)。
-- **Harmony:本版只做续传 + 零延迟标记,不做 crash hold。** errorManager
-  的 error observer 是同步回调,而 ArkTS 网络 IO 只有异步形态——回调里阻
-  塞主线程即死锁,救援无法在退出前完成;OHOS 也没有可在崩溃上下文同步驱动
-  的 C HTTP 面。备选路线(未验证,留待 spike):`appRecovery` 的 JS_CRASH
-  自动重启 × 零延迟续传,靠多次自动重启累积进度。文档如实标注鸿蒙边界。
+- **Harmony:不需要 crash hold——RNOH 的进程模型天然免疫(2026-08-13 模
+  拟器实证)。** 未捕获的 JS 错误在 RNOH release 下只记 #RNOH_JS 错误日志,
+  **不杀进程**:Hermes 跑在 RNOH 自管线程,异常不会重抛到 ArkTS 主线程触发
+  errorManager。ets 编排器跑在 ArkTS 主线程事件循环上,JS 死后照常完成整
+  轮(实测:+1s JS 崩溃,+5s 轮次检查→下载→forceBoot 激活,重启进修复
+  版)。因此 Android/iOS 的"救援窗口排在崩溃点之后"问题在鸿蒙不存在,
+  §10 原机制即完整覆盖 crash-on-launch 砖,且没有预算压力(600s 下载窗口
+  完整可用)。续传 + 零延迟标记仍有价值(设备重启/系统杀进程等场景)。
+  原 errorManager/appRecovery 的 spike 论述作废留档:当时的前提("JS 崩溃
+  杀进程")被实证推翻。
+  注意两个鸿蒙特有的工程事实:PushyTurboModule.cpp 的 C++ 方法表是 RNOH
+  给 JS 的唯一桥,**新增 spec 方法必须同步注册**(10.50~10.52.0 漏注册了
+  syncNativeConfig 等四个方法,原生检测因此从未生效,10.52.1 修复);鸿蒙
+  模拟器是 QEMU 虚机,app 内 127.0.0.1 不通宿主,人工验证需 `hdc rport`。
 
 ### 11.6 验证
 

@@ -473,3 +473,42 @@ bundle 加载失败一族(RCTInstance 先 RCTExecuteOnMainQueue 再 RCTFatal),�
 **iOS 覆盖边界补记**:若宿主 app 调用了 `RCTSetFatalHandler`,RCTFatal 走
 handler 分支不再抛异常,crash-rescue 不会触发(Android 无对应抢占点)。
 文档口径需含此项。
+
+## 2026-08-13 鸿蒙模拟器实测:两个实证 + 一个 10.51 以来的功能性断裂
+
+DevEco api20 模拟器(HarmonyOS 6.0 / arm64)+ harmony_use_pushy(RN 0.72 +
+RNOH 0.72.96)+ 本地 e2e 服务端。探针脚手架入库:
+`harmony_use_pushy/e2e/entry.crashprobe.ts`(+1s 未捕获 JS 错误)、
+`entry.diag.ts`(TM 方法表诊断)。
+
+**实证一(缺口 0 的分叉答案):RNOH 未捕获 JS 错误不杀进程。** +1s 抛错后
+进程存活 40s+ 无恙,错误只落 #RNOH_JS/#RNOH_ARK 日志。Hermes 在 RNOH 自管
+线程上,异常不重抛 ArkTS 主线程,errorManager 根本不参与。因此**鸿蒙不需要
+crash hold**:ets 编排器在 JS 死后照常跑完整轮。此前 §11.5 的
+errorManager/appRecovery 论述前提不成立,已改写。
+
+**实证二(端到端救砖):** crashprobe 作基座(每次启动 JS +1s 崩),服务端
+forceBoot 下发 v1:+5s 轮次照常检查→下载 v1.ppk→激活(currentVersion 写
+入),重启直接运行 e2e-full-v1,砖消失。JS 崩溃对轮次零影响,无预算压力。
+
+**功能性断裂(已修,severity 高):`PushyTurboModule.cpp` 的 C++ 方法表漏
+注册 10.50+ 的全部四个新方法**(syncNativeConfig / getNativeCheckCache /
+getBundleHash / resetToPackagedBundle)。RNOH 的 ArkTS TM 只有经 C++
+methodMap 注册的方法才对 JS 可见,缺失 = JS 侧 undefined → feature-detect
+判"老原生"静默跳过 → **原生冷启动检测在鸿蒙自 10.51.0 从未生效**
+(nativeConfig 从未落盘,ets 编排器+本次的续传/零延迟全是死代码);
+resetToPackagedBundle(10.50 Phase 1)在鸿蒙 JS 侧也一直不可用。诊断链:
+健康启动 preferences 无 nativeConfig → entry.diag 打 typeof=undefined +
+keys 只有 14 个老方法 → cpp 方法表对不上 ets 类。
+
+**为什么 CI 没逮住**:harmony e2e 套件 testMatch 只含 `e2e/harmony/**`
+(smoke + local-update),native-check.test.ts 从未在鸿蒙执行;而 JS 的
+feature-detect 把缺失当"老原生"优雅跳过——这是[[no-graceful-degradation]]
+教训的又一实例:兼容旧原生的降级路径把新原生的接线断裂藏了三个版本。
+
+- [x] cpp 方法表补注册(含"新增 spec 方法必须同步注册"的醒目注释)
+- [ ] harmony e2e 补 native-check 场景(driver 是 hdc+uitest 非 detox,
+      需移植;顺带把 `hdc rport` 写进用例基建——模拟器 127.0.0.1 不通宿主)
+- [ ] 发版 10.52.1(鸿蒙 bridging 修复;Android/iOS 无变化)
+- [ ] Logger.ts isDebug 硬编码 false,轮次全程无日志可观测,排障全靠副作用
+      (preferences/服务端流量);考虑 error 级关键节点或可配置开关
