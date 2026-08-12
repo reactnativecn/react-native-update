@@ -154,6 +154,16 @@ android {
         }
     }
 
+    // AGP 9 disables the resValues feature for libraries by default; the
+    // pushy_build_time resource below needs it back on. The block exists
+    // since AGP 4, so guard like supportsNamespace() does for old projects.
+    def agpMajor = com.android.Version.ANDROID_GRADLE_PLUGIN_VERSION.tokenize('.')[0].toInteger()
+    if (agpMajor >= 4) {
+        buildFeatures {
+            resValues true
+        }
+    }
+
     buildTypes {
         release {
             resValue("string", "pushy_build_time", "${minutesSinceEpoch}")
