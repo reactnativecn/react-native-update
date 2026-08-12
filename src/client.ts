@@ -97,8 +97,8 @@ const cloneServerConfig = (server: UpdateServerConfig): UpdateServerConfig => ({
 });
 
 // Persist an object (rather than an empty string) so every native bridge keeps
-// accepting the payload while the orchestrators treat the missing appKey and
-// endpoints as an explicit disabled state.
+// accepting the payload while the orchestrators read `disabled` and skip the
+// cold-start check entirely.
 const NATIVE_CONFIG_DISABLED_JSON = '{"disabled":true}';
 
 const excludeConfiguredEndpoints = (
@@ -286,8 +286,23 @@ export class Pushy {
       // and the feature-detect would false-positive.
       return undefined;
     }
-    const { appKey, server, updateStrategy, checkStrategy } = this.options;
+    const {
+      appKey,
+      server,
+      updateStrategy,
+      checkStrategy,
+      disableNativeCheck,
+    } = this.options;
+    if (disableNativeCheck) {
+      // Explicit opt-out: keep the identity fields so the persisted config
+      // still describes this app, and let the orchestrators bail on `disabled`
+      // before any IO.
+      return { disabled: true, appKey, rnu: cInfo.rnu, rn: cInfo.rn };
+    }
     if (!appKey || !server?.main?.length) {
+      // Unusable rather than merely absent: the JS check would fail on these
+      // options too (NO_ENDPOINTS / APPKEY_REQUIRED). The caller turns this
+      // into an explicit disabled state.
       return undefined;
     }
     // An app that turned automatic checks off (checkStrategy: null) must not

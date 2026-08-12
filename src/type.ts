@@ -177,6 +177,24 @@ export interface ClientOptions {
    * the version health view in the console. Default: false (enabled).
    */
   disableTelemetry?: boolean;
+  /**
+   * Disable the native cold-start update check: the background check that runs
+   * a few seconds after every launch, independent of JS
+   * (NATIVE_CHECKUPDATE_DESIGN §10). Default: false (enabled).
+   *
+   * That check is what rescues a device bricked by a bad update — its JS never
+   * runs, so nothing else can pull the fix. Turning it off gives up that
+   * recovery path (and the response cache the JS check reuses) in exchange for
+   * one fewer background request per cold start; choose it only when the extra
+   * request is itself the problem (traffic/battery budgets, privacy manifests,
+   * consent-gated networking).
+   *
+   * Orthogonal to `checkStrategy`, which governs activation authority rather
+   * than whether the check runs: with `checkStrategy: null` the native check
+   * still downloads but never activates on its own — only the server's
+   * per-version forceBoot directive may.
+   */
+  disableNativeCheck?: boolean;
 }
 
 export interface UpdateTestPayload {

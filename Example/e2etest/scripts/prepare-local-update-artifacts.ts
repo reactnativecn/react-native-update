@@ -118,6 +118,12 @@ const { diffCommands } = require(path.join(cliRoot, 'lib/exports.js')) as {
   diffCommands: DiffCommandRunner;
 };
 
+// A cold Metro bundle on a GitHub macOS runner regularly needs well over two
+// minutes, so the old 120s cap killed a healthy `pushy bundle` mid-flight
+// (spawnSync ETIMEDOUT). This is a stuck-process guard, not a perf budget —
+// the step and job timeouts already bound the happy path.
+const PUSHY_TIMEOUT_MS = 300_000;
+
 function runPushy(args: string[], cwd: string) {
   const cliNodeModules = path.join(cliRoot, 'node_modules');
   const projectNodeModules = path.join(projectRoot, 'node_modules');
@@ -135,7 +141,7 @@ function runPushy(args: string[], cwd: string) {
       PUSHY_REGISTRY: localRegistry,
       RNU_API: localRegistry,
     },
-    timeout: 120_000,
+    timeout: PUSHY_TIMEOUT_MS,
   });
 
   if (result.error) {
