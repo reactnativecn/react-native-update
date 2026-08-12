@@ -42,6 +42,8 @@ concurrency:
 
 jobs:
   e2e-ios:
+    # 不带 matrix 值全量拼名,否则 check 叫 "e2e-ios (native, --config e2e/…)"
+    name: e2e-ios (${{ matrix.suite }})
     runs-on: macos-26
     # 绿色基线 ~16 分钟;40 分钟覆盖最坏情况:一次 --retries 1 失败重试
     # (失败用例会等满各级长超时)
