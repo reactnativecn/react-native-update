@@ -30,7 +30,7 @@ See the docs:
 
 ## Native cold-start check
 
-Since 10.51.0 every cold start runs one background update check a few seconds after launch that **does not depend on the app bundle** — the request, the download, the patch and the version switch all happen natively. It exists for exactly one reason: **when the running update is broken enough that JS never starts, something still has to be able to fetch the fix.** Normal updates remain the JS flow's job; the JS check reuses this result instead of issuing its own request.
+Since 10.51.0 (HarmonyOS: 10.52.1 — earlier versions never armed the check there due to a bridging bug) every cold start runs one background update check a few seconds after launch that **does not depend on the app bundle** — the request, the download, the patch and the version switch all happen natively. It exists for exactly one reason: **when the running update is broken enough that JS never starts, something still has to be able to fetch the fix.** Normal updates remain the JS flow's job; the JS check reuses this result instead of issuing its own request.
 
 What to know:
 
