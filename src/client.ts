@@ -76,6 +76,10 @@ const SERVER_PRESETS = {
     main: [
       'https://update.react-native.cn/api',
       'https://update.reactnative.cn/api',
+      'https://1.rnupdate.online/api', 
+      'https://2.rnupdate.online/api', 
+      'https://3.rnupdate.online/api', 
+      'https://4.rnupdate.online/api'
     ],
     queryUrls: [
       'https://gitee.com/sunnylqm/react-native-pushy/raw/master/endpoints.json',
