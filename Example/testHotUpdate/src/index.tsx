@@ -21,7 +21,7 @@ import {
   Snackbar,
 } from 'react-native-paper';
 import { LocalSvg } from 'react-native-svg/css';
-import { Pushy, UpdateProvider, useUpdate } from 'react-native-update';
+import { Cresc, UpdateProvider, useUpdate } from 'react-native-update';
 
 import _updateConfig from '../update.json';
 import TestConsole from './TestConsole';
@@ -81,7 +81,7 @@ function App() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.welcome}>欢迎使用Pushy热更新服务</Text>
+      <Text style={styles.welcome}>欢迎使用Cresc热更新服务</Text>
       <View style={{ flexDirection: 'row' }}>
         <Text>
           {useDefaultAlert ? '当前使用' : '当前不使用'}默认的alert更新提示
@@ -146,7 +146,7 @@ function App() {
         />
       </View>
       <Text style={styles.instructions}>
-        这是版本一 {'\n'}
+        这是 Cresc 原生包基线版本 {'\n'}
         当前原生包版本号: {packageVersion}
         {'\n'}
         当前热更新版本Hash: {currentHash || '(空)'}
@@ -247,18 +247,12 @@ const styles = StyleSheet.create({
   image: {},
 });
 
-// use Pushy for China users
-const updateClient = new Pushy({
+// use Cresc for global users
+const updateClient = new Cresc({
   appKey,
   debug: true,
   // updateStrategy: 'silentAndLater',
 });
-
-// use Cresc for global users
-// const updateClient = new Cresc({
-//   appKey,
-//   debug: true,
-// });
 
 export default function Root() {
   return (
