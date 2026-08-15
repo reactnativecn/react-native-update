@@ -24,10 +24,23 @@ jobs:
         id: check
         shell: bash
         run: |
-          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          # The baseline has to be the newest ancestor tag that actually made it
+          # to npm, not merely the newest tag: a tag whose publish run failed
+          # (v10.52.2 died in prepack) exists in git but not on the registry, and
+          # "Fetch previous Harmony HAR" pulls that version's tarball from npm.
+          # Picking it would fail the whole publish on ETARGET.
+          PREV_TAG=""
+          for tag in $(git tag --sort=-v:refname --merged HEAD^ | head -20); do
+            case "$tag" in v[0-9]*) ;; *) continue ;; esac
+            if npm view "react-native-update@${tag#v}" version >/dev/null 2>&1; then
+              PREV_TAG="$tag"
+              break
+            fi
+            echo "Skipping $tag: tagged but never published to npm."
+          done
           echo "prev_tag=$PREV_TAG" >> $GITHUB_OUTPUT
           if [ -z "$PREV_TAG" ]; then
-            echo "No previous tag found, assuming harmony changed."
+            echo "No previous published tag found, assuming harmony changed."
             echo "changed=true" >> $GITHUB_OUTPUT
             exit 0
           fi
