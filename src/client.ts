@@ -76,10 +76,10 @@ const SERVER_PRESETS = {
     main: [
       'https://update.react-native.cn/api',
       'https://update.reactnative.cn/api',
-      'https://1.rnupdate.online/api', 
-      'https://2.rnupdate.online/api', 
-      'https://3.rnupdate.online/api', 
-      'https://4.rnupdate.online/api'
+      'https://1.rnupdate.online/api',
+      'https://2.rnupdate.online/api',
+      'https://3.rnupdate.online/api',
+      'https://4.rnupdate.online/api',
     ],
     queryUrls: [
       'https://gitee.com/sunnylqm/react-native-pushy/raw/master/endpoints.json',
@@ -1107,7 +1107,11 @@ export class Pushy {
         callback(payload);
       });
     };
-    const onNativeProgress = (progressData: ProgressData) => {
+    // RN >= 0.87 types native event listeners as `(...args: readonly Object[])`,
+    // which a `(data: ProgressData) => void` callback is not assignable to. Take
+    // the raw event and narrow it here so this compiles on every RN version.
+    const onNativeProgress = (event: unknown) => {
+      const progressData = event as ProgressData;
       if (progressData.hash === hash) {
         dispatchProgress(progressData);
       }
@@ -1329,7 +1333,8 @@ export class Pushy {
       sharedState.progressHandlers[progressKey] =
         pushyNativeEventEmitter.addListener(
           'RCTPushyDownloadProgress',
-          (progressData: ProgressData) => {
+          (event: unknown) => {
+            const progressData = event as ProgressData;
             if (progressData.hash === progressKey) {
               onDownloadProgress(progressData);
             }

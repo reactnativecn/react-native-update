@@ -456,7 +456,8 @@ export const UpdateProvider = ({
     if (!assertWeb()) {
       return;
     }
-    const parseLinking = (url: string | null) => {
+    // RN >= 0.87 widens getInitialURL() to `string | null | undefined`.
+    const parseLinking = (url?: string | null) => {
       if (!url) {
         return;
       }
