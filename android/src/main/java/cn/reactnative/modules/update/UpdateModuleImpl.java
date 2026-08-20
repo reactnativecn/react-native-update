@@ -61,23 +61,31 @@ public class UpdateModuleImpl {
         final ReadableMap options,
         final Promise promise
     ) {
-        final String url = options.getString("url");
-        String hash = options.getString("hash");
-        String target = options.getString("target");
-        if (!ApkInstaller.ensureInstallPermission(reactContext, promise)) {
-            return;
-        }
-        updateContext.downloadFile(url, hash, target, new UpdateContext.DownloadFileListener() {
-            @Override
-            public void onDownloadCompleted(DownloadTaskParams params) {
-                ApkInstaller.install(reactContext, params.targetFile, url, promise);
+        // A module call runs on the native modules thread: anything thrown here
+        // reaches the bridge's exception handler and kills the app. Every
+        // failure of this path — a missing REQUEST_INSTALL_PACKAGES declaration
+        // above all — has to come back as a promise rejection instead.
+        try {
+            final String url = options.getString("url");
+            String hash = options.getString("hash");
+            String target = options.getString("target");
+            if (!ApkInstaller.ensureInstallPermission(reactContext, promise)) {
+                return;
             }
+            updateContext.downloadFile(url, hash, target, new UpdateContext.DownloadFileListener() {
+                @Override
+                public void onDownloadCompleted(DownloadTaskParams params) {
+                    ApkInstaller.install(reactContext, params.targetFile, url, promise);
+                }
 
-            @Override
-            public void onDownloadFailed(Throwable error) {
-                promise.reject(ErrorCodes.DOWNLOAD_FAILED, error);
-            }
-        });
+                @Override
+                public void onDownloadFailed(Throwable error) {
+                    promise.reject(ErrorCodes.DOWNLOAD_FAILED, error);
+                }
+            });
+        } catch (Throwable error) {
+            promise.reject(ErrorCodes.APK_INSTALL_FAILED, error);
+        }
     }
 
     public static void downloadPatchFromPackage(

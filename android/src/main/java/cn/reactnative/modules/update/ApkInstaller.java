@@ -29,7 +29,29 @@ final class ApkInstaller {
     private ApkInstaller() {
     }
 
+    /**
+     * Everything in here runs inside the module call, where a thrown exception
+     * would take the whole app down instead of rejecting the promise. A missing
+     * REQUEST_INSTALL_PACKAGES declaration must surface as a rejection the JS
+     * layer can report — never as a crash — so no failure is allowed to escape.
+     */
     static boolean ensureInstallPermission(
+        ReactApplicationContext reactContext,
+        Promise promise
+    ) {
+        try {
+            return checkInstallPermission(reactContext, promise);
+        } catch (Throwable error) {
+            promise.reject(
+                ErrorCodes.APK_INSTALL_PERMISSION_REQUIRED,
+                "Unable to verify the install-packages permission",
+                error
+            );
+            return false;
+        }
+    }
+
+    private static boolean checkInstallPermission(
         ReactApplicationContext reactContext,
         Promise promise
     ) {
@@ -46,6 +68,8 @@ final class ApkInstaller {
         }
 
         PackageManager packageManager = reactContext.getPackageManager();
+        // canRequestPackageInstalls() itself throws SecurityException when the
+        // permission is not declared, so the manifest check has to come first.
         if (!declaresInstallPermission(reactContext, packageManager)) {
             promise.reject(
                 ErrorCodes.APK_INSTALL_PERMISSION_REQUIRED,
@@ -97,7 +121,9 @@ final class ApkInstaller {
                     return true;
                 }
             }
-        } catch (PackageManager.NameNotFoundException error) {
+        } catch (Throwable error) {
+            // A package manager that cannot answer is treated as "not declared":
+            // the caller rejects with a code the app can act on.
             Log.e(UpdateContext.TAG, "Unable to inspect requested permissions", error);
         }
         return false;
@@ -109,37 +135,36 @@ final class ApkInstaller {
         String sourceUrl,
         Promise promise
     ) {
-        if (!apkFile.isFile() || apkFile.length() <= 0) {
-            promise.reject(ErrorCodes.APK_INSTALL_FAILED, "Downloaded APK is empty or missing");
-            return;
-        }
-
-        PackageInstaller packageInstaller = reactContext
-            .getPackageManager()
-            .getPackageInstaller();
-        PackageInstaller.SessionParams sessionParams = new PackageInstaller.SessionParams(
-            PackageInstaller.SessionParams.MODE_FULL_INSTALL
-        );
-        sessionParams.setAppPackageName(reactContext.getPackageName());
-        sessionParams.setSize(apkFile.length());
-        if (sourceUrl != null && !sourceUrl.isEmpty()) {
-            sessionParams.setOriginatingUri(Uri.parse(sourceUrl));
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            sessionParams.setOriginatingUid(Process.myUid());
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            sessionParams.setInstallReason(PackageManager.INSTALL_REASON_USER);
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            sessionParams.setRequireUserAction(
-                PackageInstaller.SessionParams.USER_ACTION_REQUIRED
-            );
-        }
-
+        PackageInstaller packageInstaller = null;
         int sessionId = -1;
         boolean committed = false;
         try {
+            if (!apkFile.isFile() || apkFile.length() <= 0) {
+                promise.reject(ErrorCodes.APK_INSTALL_FAILED, "Downloaded APK is empty or missing");
+                return;
+            }
+
+            packageInstaller = reactContext.getPackageManager().getPackageInstaller();
+            PackageInstaller.SessionParams sessionParams = new PackageInstaller.SessionParams(
+                PackageInstaller.SessionParams.MODE_FULL_INSTALL
+            );
+            sessionParams.setAppPackageName(reactContext.getPackageName());
+            sessionParams.setSize(apkFile.length());
+            if (sourceUrl != null && !sourceUrl.isEmpty()) {
+                sessionParams.setOriginatingUri(Uri.parse(sourceUrl));
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                sessionParams.setOriginatingUid(Process.myUid());
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                sessionParams.setInstallReason(PackageManager.INSTALL_REASON_USER);
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                sessionParams.setRequireUserAction(
+                    PackageInstaller.SessionParams.USER_ACTION_REQUIRED
+                );
+            }
+
             sessionId = packageInstaller.createSession(sessionParams);
             try (
                 PackageInstaller.Session session = packageInstaller.openSession(sessionId);
@@ -173,9 +198,16 @@ final class ApkInstaller {
                 committed = true;
             }
         } catch (Throwable error) {
+            if (committed) {
+                // The session is already in the system's hands (only session
+                // close failed): the status receiver owns the promise now, so
+                // settling here would be a second, contradictory outcome.
+                Log.w(UpdateContext.TAG, "Install session reported an error after commit", error);
+                return;
+            }
             if (sessionId != -1) {
                 pendingPromises.remove(sessionId);
-                if (!committed) {
+                if (packageInstaller != null) {
                     try {
                         packageInstaller.abandonSession(sessionId);
                     } catch (Throwable abandonError) {
