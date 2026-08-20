@@ -19,6 +19,8 @@ final class ErrorCodes {
     static final String RESET_FAILED = "RESET_FAILED";
     static final String INVALID_HASH_INFO = "INVALID_HASH_INFO";
     static final String UNSUPPORTED_PLATFORM = "UNSUPPORTED_PLATFORM";
+    static final String APK_INSTALL_PERMISSION_REQUIRED = "APK_INSTALL_PERMISSION_REQUIRED";
+    static final String APK_INSTALL_FAILED = "APK_INSTALL_FAILED";
 
     private ErrorCodes() {
     }

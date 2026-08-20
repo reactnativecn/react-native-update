@@ -26,7 +26,6 @@ import {
   type UpdateErrorCode,
 } from './error';
 import i18n from './i18n';
-import { PermissionsAndroid } from './permissions';
 import {
   resolveServerEventHash,
   resolveServerEventType,
@@ -1301,27 +1300,6 @@ export class Pushy {
       this.emitError(err, 'errorInstallApk');
       this.throwIfEnabled(err);
       return;
-    }
-    if (Platform.Version <= 23) {
-      try {
-        const granted = await PermissionsAndroid.request(
-          PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE
-        );
-        if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
-          const err = new UpdateError(
-            this.t('error_storage_permission_rejected'),
-            'STORAGE_PERMISSION_REJECTED'
-          );
-          this.emitError(err, 'rejectStoragePermission');
-          this.throwIfEnabled(err);
-          return;
-        }
-      } catch (e: any) {
-        const err = toUpdateError(e, 'STORAGE_PERMISSION_ERROR');
-        this.emitError(err, 'errorStoragePermission');
-        this.throwIfEnabled(err);
-        return;
-      }
     }
     sharedState.apkStatus = 'downloading';
     this.report({ type: 'downloadingApk' });

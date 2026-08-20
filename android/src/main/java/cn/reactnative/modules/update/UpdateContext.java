@@ -5,7 +5,6 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.os.Build;
-import android.os.Environment;
 import android.util.Log;
 import com.facebook.react.ReactInstanceManager;
 import java.io.File;
@@ -281,13 +280,7 @@ public class UpdateContext {
         params.hash = hash;
         params.listener = listener;
 
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N && fileName.equals("update.apk")) {
-            params.targetFile = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "pushy_update.apk");
-
-        } else {
-            params.targetFile = new File(rootDir, fileName);
-
-        }
+        params.targetFile = new File(rootDir, fileName);
 //        params.unzipDirectory = new File(rootDir, hash);
         enqueue(params);
     }

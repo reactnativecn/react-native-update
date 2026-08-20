@@ -104,18 +104,6 @@ const setupClientMocks = ({
     getBundleHash,
   }));
 
-  mock.module('../permissions', () => ({
-    PermissionsAndroid: {
-      request: mock(() => Promise.resolve('granted')),
-      PERMISSIONS: {
-        WRITE_EXTERNAL_STORAGE: 'WRITE_EXTERNAL_STORAGE',
-      },
-      RESULTS: {
-        GRANTED: 'granted',
-      },
-    },
-  }));
-
   mock.module('../i18n', () => ({
     default: {
       t: (key: string) => key,
@@ -168,14 +156,6 @@ const setupAndroidApkMocks = (
     setLocalHashInfo: mock(() => {}),
     supportedDiffVersion: 2,
     getBundleHash: mock(() => ''),
-  }));
-
-  mock.module('../permissions', () => ({
-    PermissionsAndroid: {
-      request: mock(() => Promise.resolve('granted')),
-      PERMISSIONS: { WRITE_EXTERNAL_STORAGE: 'WRITE_EXTERNAL_STORAGE' },
-      RESULTS: { GRANTED: 'granted' },
-    },
   }));
 
   mock.module('../i18n', () => ({

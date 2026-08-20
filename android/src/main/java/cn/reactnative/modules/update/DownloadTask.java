@@ -752,7 +752,7 @@ class DownloadTask implements Runnable {
 
         // The task itself succeeded. Run the completion callback outside the
         // try/catch above so an exception thrown by the callback (e.g. a
-        // FileProvider misconfiguration during installApk) is not mistaken for
+        // PackageInstaller failure during APK staging) is not mistaken for
         // a download failure that deletes the successfully downloaded file and
         // settles the promise a second time.
         if (params.listener != null) {

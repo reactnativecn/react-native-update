@@ -61,14 +61,16 @@ public class UpdateModuleImpl {
         final ReadableMap options,
         final Promise promise
     ) {
-        String url = options.getString("url");
+        final String url = options.getString("url");
         String hash = options.getString("hash");
         String target = options.getString("target");
+        if (!ApkInstaller.ensureInstallPermission(reactContext, promise)) {
+            return;
+        }
         updateContext.downloadFile(url, hash, target, new UpdateContext.DownloadFileListener() {
             @Override
             public void onDownloadCompleted(DownloadTaskParams params) {
-                UpdateModuleSupport.installApk(reactContext, params.targetFile);
-                promise.resolve(null);
+                ApkInstaller.install(reactContext, params.targetFile, url, promise);
             }
 
             @Override

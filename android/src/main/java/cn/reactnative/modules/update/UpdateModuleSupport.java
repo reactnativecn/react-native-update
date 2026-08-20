@@ -1,13 +1,6 @@
 package cn.reactnative.modules.update;
 
-import static androidx.core.content.FileProvider.getUriForFile;
-
-import android.content.Intent;
-import android.net.Uri;
-import android.os.Build;
 import android.util.Log;
-import com.facebook.react.bridge.ReactApplicationContext;
-import java.io.File;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -47,28 +40,5 @@ final class UpdateModuleSupport {
         }
         constants.put("supportedDiffVersion", supportedDiffVersion);
         return constants;
-    }
-
-    static void installApk(ReactApplicationContext reactContext, File toInstall) {
-        Uri apkUri;
-        Intent intent;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            apkUri = getUriForFile(
-                reactContext,
-                reactContext.getPackageName() + ".pushy.fileprovider",
-                toInstall
-            );
-            intent = new Intent(Intent.ACTION_INSTALL_PACKAGE);
-            intent.setData(apkUri);
-            intent.setFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        } else {
-            apkUri = Uri.fromFile(toInstall);
-            intent = new Intent(Intent.ACTION_VIEW);
-            intent.setDataAndType(apkUri, "application/vnd.android.package-archive");
-            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        }
-
-        reactContext.startActivity(intent);
     }
 }

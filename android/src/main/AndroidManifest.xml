@@ -2,14 +2,8 @@
     package="cn.reactnative.modules.update">
     <application>
         <meta-data android:name="pushy_build_time" android:value="@string/pushy_build_time" />
-        <provider
-            android:name=".PushyFileProvider"
-            android:authorities="${applicationId}.pushy.fileprovider"
-            android:exported="false"
-            android:grantUriPermissions="true">
-            <meta-data
-            android:name="android.support.FILE_PROVIDER_PATHS"
-            android:resource="@xml/pushy_file_paths" />
-        </provider>
+        <receiver
+            android:name="cn.reactnative.modules.update.PackageInstallerStatusReceiver"
+            android:exported="false" />
     </application>
 </manifest>

@@ -39,6 +39,12 @@ constexpr const char* kInvalidHashInfo = "INVALID_HASH_INFO";
 // The method is not supported on this platform (e.g. downloadAndInstallApk
 // outside Android).
 constexpr const char* kUnsupportedPlatform = "UNSUPPORTED_PLATFORM";
+// Android full-package installation requires the user to trust the app as an
+// install source before PackageInstaller can accept a session.
+constexpr const char* kApkInstallPermissionRequired =
+    "APK_INSTALL_PERMISSION_REQUIRED";
+// PackageInstaller could not create, write, commit, or continue an APK session.
+constexpr const char* kApkInstallFailed = "APK_INSTALL_FAILED";
 
 }  // namespace error_codes
 }  // namespace pushy
