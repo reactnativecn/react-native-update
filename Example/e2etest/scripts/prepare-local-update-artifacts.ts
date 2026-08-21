@@ -170,7 +170,12 @@ function runPushy(args: string[], cwd: string): string {
 const HERMES_BASE_ATTEMPTED = /-base-bytecode=/;
 const HERMES_BASE_VERIFIED =
   /(verified equivalent to a plain compile|字节码与普通编译等价)/;
-const HERMES_ENABLED_PLATFORMS = new Set(['android', 'ios', 'harmony']);
+const HERMES_COMPILED = /(Hermes enabled, now compiling|Hermes 已启用)/;
+// Android is detected from gradle.properties; iOS detection looks for
+// ios/Pods/hermes-engine, which the CI job does not have when the built app
+// comes from cache (pod install is skipped) — so ask for Hermes explicitly on
+// both. Harmony keeps the CLI's own detection.
+const FORCE_HERMES_PLATFORMS = new Set(['android', 'ios']);
 
 function installHdiffModule() {
   const bunResult = spawnSync(
@@ -262,12 +267,13 @@ function bundleTo(entryFile: string, outputFile: string, hermesBase?: string) {
       outputFile,
       '--hermesBase',
       hermesBase ?? 'none',
+      ...(FORCE_HERMES_PLATFORMS.has(platform) ? ['--hermes'] : []),
       '--no-interactive',
     ],
     bundleProjectRoot
   );
   verifyGeneratedFile(`bundle ${entryFile}`, outputFile);
-  if (hermesBase && HERMES_ENABLED_PLATFORMS.has(platform)) {
+  if (hermesBase && HERMES_COMPILED.test(output)) {
     // The base compile and its equivalence check must both have happened; a
     // silent fallback to the plain compile would leave the delta-mode bytecode
     // path untested while the job still goes green.
