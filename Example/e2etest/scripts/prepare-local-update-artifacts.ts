@@ -124,7 +124,7 @@ const { diffCommands } = require(path.join(cliRoot, 'lib/exports.js')) as {
 // the step and job timeouts already bound the happy path.
 const PUSHY_TIMEOUT_MS = 300_000;
 
-function runPushy(args: string[], cwd: string) {
+function runPushy(args: string[], cwd: string): string {
   const cliNodeModules = path.join(cliRoot, 'node_modules');
   const projectNodeModules = path.join(projectRoot, 'node_modules');
   const nodePath = [projectNodeModules, cliNodeModules];
@@ -133,7 +133,10 @@ function runPushy(args: string[], cwd: string) {
   }
   const result = spawnSync('node', [cliEntry, ...args], {
     cwd,
-    stdio: 'inherit',
+    // capture the CLI's own progress lines (hermes base / verification) so the
+    // artifact step can assert on them; still echo everything for the CI log
+    stdio: ['inherit', 'pipe', 'pipe'],
+    encoding: 'utf8',
     env: {
       ...process.env,
       NODE_PATH: nodePath.join(path.delimiter),
@@ -144,6 +147,10 @@ function runPushy(args: string[], cwd: string) {
     timeout: PUSHY_TIMEOUT_MS,
   });
 
+  const output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
+  if (output) {
+    process.stdout.write(output.endsWith('\n') ? output : `${output}\n`);
+  }
   if (result.error) {
     throw result.error;
   }
@@ -152,7 +159,18 @@ function runPushy(args: string[], cwd: string) {
       `pushy ${args.join(' ')} failed with exit code ${result.status}`
     );
   }
+  return output;
 }
+
+// `bundle` defaults to --hermesBase auto, which would ask the (unreachable)
+// update server for a base. The artifacts are explicit instead: the chain root
+// (v1) compiles without a base and every later version compiles against v1's
+// HBC, so the ppk/v2-track patches applied on device exercise hermesc's delta
+// mode end to end — exactly what production builds produce from v2.22 on.
+const HERMES_BASE_ATTEMPTED = /-base-bytecode=/;
+const HERMES_BASE_VERIFIED =
+  /(verified equivalent to a plain compile|字节码与普通编译等价)/;
+const HERMES_ENABLED_PLATFORMS = new Set(['android', 'ios', 'harmony']);
 
 function installHdiffModule() {
   const bunResult = spawnSync(
@@ -223,9 +241,13 @@ function prepareDir() {
   fs.mkdirSync(artifactsDir, { recursive: true });
 }
 
-function bundleTo(entryFile: string, outputFile: string) {
-  console.log(`Bundling ${entryFile} -> ${outputFile}`);
-  runPushy(
+function bundleTo(entryFile: string, outputFile: string, hermesBase?: string) {
+  console.log(
+    `Bundling ${entryFile} -> ${outputFile}${
+      hermesBase ? ` (hermes base: ${path.basename(hermesBase)})` : ''
+    }`
+  );
+  const output = runPushy(
     [
       'bundle',
       '--platform',
@@ -238,11 +260,30 @@ function bundleTo(entryFile: string, outputFile: string) {
       ...(platform === 'harmony' ? [] : ['--rncli']),
       '--output',
       outputFile,
+      '--hermesBase',
+      hermesBase ?? 'none',
       '--no-interactive',
     ],
     bundleProjectRoot
   );
   verifyGeneratedFile(`bundle ${entryFile}`, outputFile);
+  if (hermesBase && HERMES_ENABLED_PLATFORMS.has(platform)) {
+    // The base compile and its equivalence check must both have happened; a
+    // silent fallback to the plain compile would leave the delta-mode bytecode
+    // path untested while the job still goes green.
+    if (
+      !HERMES_BASE_ATTEMPTED.test(output) ||
+      !HERMES_BASE_VERIFIED.test(output)
+    ) {
+      const message = `bundle ${entryFile}: expected a verified hermes base compile against ${path.basename(
+        hermesBase
+      )}, but the CLI output shows none`;
+      if (process.env.CI) {
+        throw new Error(message);
+      }
+      console.warn(message);
+    }
+  }
 }
 
 function verifyGeneratedFile(label: string, filePath: string) {
@@ -394,12 +435,14 @@ async function main() {
   const ppkDiff = path.join(artifactsDir, LOCAL_UPDATE_FILES.ppkDiff);
   const v2TrackDiff = path.join(artifactsDir, LOCAL_UPDATE_FILES.v2TrackDiff);
 
+  // v1 is the epoch root (plain compile); v2/v3/v4 are siblings compiled with
+  // hermesc -base-bytecode=v1, so every patch below carries delta-mode bytecode.
   bundleTo('e2e/entry.v1.ts', v1);
-  bundleTo('e2e/entry.v2.ts', v2);
+  bundleTo('e2e/entry.v2.ts', v2, v1);
   if (platform === 'android') {
-    bundleTo('e2e/entry.v3.ts', v3);
+    bundleTo('e2e/entry.v3.ts', v3, v1);
   }
-  bundleTo('e2e/entry.v4.ts', v4);
+  bundleTo('e2e/entry.v4.ts', v4, v1);
 
   if (platform === 'android') {
     const apkPath = path.join(
