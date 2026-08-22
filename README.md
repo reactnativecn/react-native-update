@@ -17,7 +17,7 @@ See the docs:
 ## Advantages
 
 1. react-native-update provides a dedicated global service with fast and reliable worldwide delivery.
-2. **Tiny update packages** generated with bsdiff/hdiff are typically only tens to hundreds of KB, instead of the tens of MB usually required by full-bundle update systems. The whole pipeline is **specifically optimized for Hermes bytecode** — since CLI 2.22 a one-line change ships in **3.4 KB** (see the [comparison below](#diff-algorithm-comparison)), and because the new optimizations are build-side, **apps already in the store benefit from nothing more than a rebuild**.
+2. **Tiny update packages** generated with bsdiff/hdiff are typically only tens to hundreds of KB, instead of the tens of MB usually required by full-bundle update systems. The whole pipeline is **specifically optimized for Hermes bytecode** — a one-line change ships in **3.4 KB** (see the [comparison below](#diff-algorithm-comparison)), and because the newest optimizations happen at build time, **apps already in the store benefit from nothing more than a rebuild**.
 3. The library tracks new React Native stable releases closely, supports Hermes bytecode, and supports the new architecture. Note: Android RN 0.73.0 to 0.76.0 new architecture is unavailable because of upstream issues; versions below 0.73 or above 0.76.1 are supported.
 4. When updating across multiple versions, clients only need to download **one update package** instead of applying every intermediate version in sequence.
 5. Command-line tools and a web dashboard are both available, making release workflows simple and CI-friendly.
@@ -43,9 +43,9 @@ What to know:
 
 ## Diff Algorithm Comparison
 
-Three optimizations stack to shrink patches. The two newest are **build-side only**, so an app already in the store benefits the moment its next release is built with `react-native-update-cli` ≥ 2.22 — no SDK upgrade, no re-release.
+Three optimizations stack to shrink patches. The two compile-time ones are **build-side only**, so an app already in the store benefits the moment its next release is built — no re-release, nothing to change in the app.
 
-### Hermes delta mode — new in CLI 2.22
+### Hermes delta mode
 
 Hermes re-sorts its string table on **every** compile, so a one-line JS edit renumbers most string IDs and two nearly identical bytecode files end up differing almost everywhere. `bundle` now compiles against an earlier bytecode of the same app (`hermesc -base-bytecode=…`), which pins those IDs in place so only real changes land in the patch.
 
@@ -65,7 +65,7 @@ Flags, cache and toolchain requirements: [CLI docs](https://github.com/reactnati
 
 ### HBC delta-friendly transform
 
-Traditional diff algorithms operate on raw bytes. Hermes bytecode, however, is full of offset tables — a small JS change shifts every subsequent offset, which dramatically amplifies the binary difference. Before running hdiff, we apply a **delta-friendly reversible transform tailored to HBC (Hermes bytecode)**: offset bitfields are delta-encoded so the offset-shift amplification disappears at the source. The layout description table is shipped with each patch, so when Hermes evolves, **clients need zero upgrades** — compatibility is automatic. (Applying the patch does need SDK ≥ 10.48, unlike the two compile-time optimizations above.)
+Traditional diff algorithms operate on raw bytes. Hermes bytecode, however, is full of offset tables — a small JS change shifts every subsequent offset, which dramatically amplifies the binary difference. Before running hdiff, we apply a **delta-friendly reversible transform tailored to HBC (Hermes bytecode)**: offset bitfields are delta-encoded so the offset-shift amplification disappears at the source. The layout description table is shipped with each patch, so when Hermes evolves, **clients need zero upgrades** — compatibility is automatic.
 
 The numbers below are measured on real release bundles of a React Native 0.86 app (Hermes HBC v98, ~4.4 MB bytecode); every patch is verified by an actual round-trip before its size is recorded. They isolate this layer — one fixed pair of bundles through five diff pipelines — so the delta-mode gain multiplies with them rather than being included. Full methodology, fixtures, and runnable code: **[hbc-diff-benchmark](https://github.com/sunnylqm/hbc-diff-benchmark)**.
 
