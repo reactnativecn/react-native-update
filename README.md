@@ -30,55 +30,38 @@ See the docs:
 
 ## Diff Algorithm Comparison
 
-Three optimizations stack to shrink patches. The two compile-time ones are **build-side only**, so an app already in the store benefits the moment its next release is built — no re-release, nothing to change in the app.
+Hermes bytecode is hostile to generic binary diffing, and we attack that at two points that stack:
 
-### Hermes delta mode
+- **Delta-mode compilation.** Hermes re-sorts its string table on **every** compile, so a one-line JS edit renumbers most string IDs and two nearly identical bytecode files end up differing almost everywhere. `bundle` compiles against an earlier bytecode of the same app (`hermesc -base-bytecode=…`), pinning those IDs so that only real changes ever reach the diff.
+- **An HBC-aware transform.** Hermes bytecode is also full of offset tables, where inserting a few bytes shifts every subsequent offset. Before running hdiff we apply a **delta-friendly reversible transform** that delta-encodes those offset bitfields, so a global shift collapses into a single-point change. The layout description ships with each patch, so **clients need zero upgrades** as Hermes evolves.
 
-Hermes re-sorts its string table on **every** compile, so a one-line JS edit renumbers most string IDs and two nearly identical bytecode files end up differing almost everywhere. `bundle` now compiles against an earlier bytecode of the same app (`hermesc -base-bytecode=…`), which pins those IDs in place so only real changes land in the patch.
+The bytecode is also emitted without its debug-info section — a flat **21%** smaller, the same thing React Native's own release builds do — which shrinks the full package and every patch derived from it.
 
-Measured on the same app and scenarios as the table below; every patch is round-trip verified, and every delta build is verified equivalent to a plain build:
-
-| Scenario | hdiff | hdiff + HBC transform | **delta mode** + both |
-|---|---|---|---|
-| One-line text change | 84.6 KB | 62.8 KB | **3.4 KB** (18.5×) |
-| Small feature (~60 LOC) | 319.5 KB | 276.2 KB | **50.2 KB** (5.5×) |
-| Medium feature (~300 LOC) | 414.6 KB | 381.0 KB | **97.8 KB** (3.9×) |
-
-A one-line fix ships in **3.4 KB**, 455× less than the full bundle. The transform below still removes another 9–36% on top of delta mode — the two are complementary, not redundant.
-
-It is on by default and fails safe: on any problem the CLI silently falls back to a plain build, so it can never block or corrupt a release. Alongside it, hermesc is now always run with `-output-source-map`, which strips the bytecode's debug-info section — a flat **21%** off what ships, the same thing React Native's own release builds do. The sourcemap is kept aside so `address at …` crash stacks can still be symbolicated.
-
-Flags, cache and toolchain requirements: [CLI docs](https://github.com/reactnativecn/react-native-update-cli#bundle).
-
-### HBC delta-friendly transform
-
-Traditional diff algorithms operate on raw bytes. Hermes bytecode, however, is full of offset tables — a small JS change shifts every subsequent offset, which dramatically amplifies the binary difference. Before running hdiff, we apply a **delta-friendly reversible transform tailored to HBC (Hermes bytecode)**: offset bitfields are delta-encoded so the offset-shift amplification disappears at the source. The layout description table is shipped with each patch, so when Hermes evolves, **clients need zero upgrades** — compatibility is automatic.
-
-The numbers below are measured on real release bundles of a React Native 0.86 app (Hermes HBC v98, ~4.4 MB bytecode); every patch is verified by an actual round-trip before its size is recorded. They isolate this layer — one fixed pair of bundles through five diff pipelines — so the delta-mode gain multiplies with them rather than being included. Full methodology, fixtures, and runnable code: **[hbc-diff-benchmark](https://github.com/sunnylqm/hbc-diff-benchmark)**.
+The numbers below are measured on real release bundles of a React Native 0.86 app (Hermes HBC v98, ~4.4 MB bytecode). Every patch is verified by an actual round-trip before its size is recorded, and every delta-mode build is verified equivalent to a plain compile. Full methodology, fixtures, and runnable code: **[hbc-diff-benchmark](https://github.com/sunnylqm/hbc-diff-benchmark)**.
 
 **Hermes bytecode (.hbc) — what ships in production Hermes apps:**
 
-| Scenario | Full OTA (gzip) | bsdiff | bsdiff+lzma | hdiff | hdiff + HBC transform |
-|---|---|---|---|---|---|
-| One-line text change | 1901.5 KB | 93.7 KB | 87.7 KB | 89.0 KB | **63.5 KB** (−28% / −29%) |
-| Small feature (~60 LOC) | 1913.9 KB | 411.6 KB | 330.9 KB | 328.0 KB | **285.5 KB** (−14% / −13%) |
-| Medium feature (~300 LOC) | 1973.7 KB | 551.6 KB | 430.6 KB | 431.6 KB | **398.4 KB** (−7% / −8%) |
+| Scenario | Full OTA (gzip) | bsdiff | **react-native-update** | vs bsdiff |
+|---|---|---|---|---|
+| One-line text change | 1901.5 KB | 93.7 KB | **3.4 KB** | **28× smaller** |
+| Small feature (~60 LOC) | 1913.9 KB | 411.6 KB | **50.2 KB** | **8.2× smaller** |
+| Medium feature (~300 LOC) | 1973.7 KB | 551.6 KB | **97.8 KB** | **5.6× smaller** |
 
 **Plain-text JS bundle — non-Hermes apps (same scenarios, same app):**
 
-| Scenario | Full OTA (gzip) | bsdiff | bsdiff+lzma | hdiff |
-|---|---|---|---|---|
-| One-line text change | 807.2 KB | 0.3 KB | 0.7 KB | **0.1 KB** |
-| Small feature (~60 LOC) | 813.1 KB | 7.4 KB | 7.4 KB | **5.8 KB** |
-| Medium feature (~300 LOC) | 837.7 KB | 38.4 KB | 37.4 KB | **28.7 KB** |
+| Scenario | Full OTA (gzip) | bsdiff | **react-native-update** |
+|---|---|---|---|
+| One-line text change | 807.2 KB | 0.3 KB | **0.1 KB** |
+| Small feature (~60 LOC) | 813.1 KB | 7.4 KB | **5.8 KB** |
+| Medium feature (~300 LOC) | 837.7 KB | 38.4 KB | **28.7 KB** |
 
-Text bundles have no offset tables, so they diff cleanly without any transform — patches are hundreds of bytes to tens of KB, and hdiff still beats bsdiff by ~20–25% on the larger changes. The offset-shift amplification is a Hermes-bytecode-specific problem, which is exactly why the HBC transform exists.
+Text bundles have no offset tables and no string-table churn, so they diff cleanly on their own — patches are hundreds of bytes to tens of KB. The amplification the two optimizations above remove is a Hermes-bytecode-specific problem, which is exactly why they exist.
 
 Highlights:
 
-- The bsdiff+lzma control group (same bsdiff delta, lzma compression) shows the compressor accounts for most of the bsdiff-vs-hdiff gap — the further **7–29%** cut from the HBC-aware transform is **pure algorithmic gain**, largest on the small, frequent updates that dominate real OTA traffic.
-- Patch generation with hdiff is **2–4× faster** than bsdiff; the transform itself costs single-digit milliseconds.
-- Every layer fails safe: bounds are validated before any byte is touched, delta-mode output is checked against a plain compile, and any mismatch falls back to the previous behaviour.
+- A one-line fix — by far the most common hot update — ships in **3.4 KB**, 559× less than a full-bundle OTA.
+- Patch generation is **2–4× faster** than bsdiff; the transform itself costs single-digit milliseconds.
+- Every stage fails safe: bounds are validated before any byte is touched, delta-mode output is checked against a plain compile, and any mismatch falls back to the previous behaviour.
 
 ## Native cold-start check
 
