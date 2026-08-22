@@ -28,19 +28,6 @@ See the docs:
 10. **Native cold-start recovery**: even when an update is broken badly enough that JS never runs (white screen, crash on launch), the device pulls the fixed version on its next launch from the native side — no reinstall, no app-store release (see [Native cold-start check](#native-cold-start-check)).
 11. Paid technical support is available.
 
-## Native cold-start check
-
-Since 10.52.1 every cold start runs one background update check a few seconds after launch that **does not depend on the app bundle** — the request, the download, the patch and the version switch all happen natively. It exists for exactly one reason: **when the running update is broken enough that JS never starts, something still has to be able to fetch the fix.** Normal updates remain the JS flow's job; the JS check reuses this result instead of issuing its own request.
-
-What to know:
-
-- **It never blocks startup**: it is delayed by a few seconds, runs off the main thread, and its result takes effect on the *next* launch.
-- **Whether it activates depends on your configuration**: only with `updateStrategy` set to `silentAndNow` / `silentAndLater` *and* automatic checks left on (`checkStrategy` not `null`) will the native side mark a downloaded version for the next launch. Otherwise it downloads and leaves activation to JS.
-- **Rescue directive**: the dashboard can mark a version "force boot", which activates on the next launch regardless of the strategies above — this is how a fleet stuck on a broken version is recovered. The device-local crash-rollback guard still wins: a version this device already rolled back from is never reinstalled.
-- **Crash-moment rescue** (Android & iOS): when the app dies of an uncaught JS error during startup, the SDK briefly holds the dying process (a few seconds, bounded) to finish the check and download — so even a version that crashes a fraction of a second into every launch gets replaced. In that window the downloaded fix is always activated for the next launch, since JS is no longer around to decide. Crash reporters keep working: the SDK chains the previous crash handler and always hands the crash over afterwards. Not covered: native (non-JS) crashes, ANRs, OOM kills, and — on iOS — apps that install a custom `RCTSetFatalHandler` (React Native then no longer raises the exception this rescue intercepts).
-- **Resumable downloads**: update downloads survive process death and resume from where they stopped (HTTP Range), so repeated short-lived launches still make monotonic progress; a launch that follows an interrupted round skips the startup delay and resumes immediately. HarmonyOS does not need the crash-moment hold: an uncaught JS error does not kill the process there, so the native check completes normally even when JS dies on launch.
-- **It can be turned off**: `disableNativeCheck: true` removes one background request per cold start, at the cost of **giving up the recovery above** — a device bricked by a bad update can no longer heal itself. Choose it only when that request is itself the problem (traffic/battery budgets, privacy manifests, consent-gated networking).
-
 ## Diff Algorithm Comparison
 
 Three optimizations stack to shrink patches. The two compile-time ones are **build-side only**, so an app already in the store benefits the moment its next release is built — no re-release, nothing to change in the app.
@@ -92,6 +79,15 @@ Highlights:
 - The bsdiff+lzma control group (same bsdiff delta, lzma compression) shows the compressor accounts for most of the bsdiff-vs-hdiff gap — the further **7–29%** cut from the HBC-aware transform is **pure algorithmic gain**, largest on the small, frequent updates that dominate real OTA traffic.
 - Patch generation with hdiff is **2–4× faster** than bsdiff; the transform itself costs single-digit milliseconds.
 - Every layer fails safe: bounds are validated before any byte is touched, delta-mode output is checked against a plain compile, and any mismatch falls back to the previous behaviour.
+
+## Native cold-start check
+
+Since 10.52.1 every cold start runs one background update check that **does not depend on the app bundle** — the request, the download, the patch and the version switch all happen natively. It exists for exactly one reason: **when the running update is broken enough that JS never starts, something still has to be able to fetch the fix.** Normal updates remain the JS flow's job, and the JS check reuses this result instead of issuing its own request.
+
+- **It never blocks startup**: delayed by a few seconds, off the main thread, effective on the *next* launch. Whether the downloaded version is activated automatically depends on your `updateStrategy` / `checkStrategy`; otherwise it is downloaded and JS decides.
+- **Crash-moment rescue** (Android & iOS): if the app dies of an uncaught JS error during startup, the SDK briefly holds the dying process to finish the check and download — so even a version that crashes a fraction of a second into every launch gets replaced. Crash reporters keep working: the previous handler is chained and always called afterwards. Not covered: native crashes, ANRs, OOM kills, and iOS apps that install a custom `RCTSetFatalHandler`.
+- **Rescue directive**: marking a version "force boot" in the dashboard activates it on the next launch regardless of the strategies above — this is how a fleet stuck on a broken version is recovered. The device-local crash-rollback guard still wins: a version this device already rolled back from is never reinstalled.
+- **It can be turned off**: `disableNativeCheck: true` removes one background request per cold start, at the cost of **giving up the recovery above** — a device bricked by a bad update can no longer heal itself.
 
 ## Comparison With Other OTA Libraries
 
