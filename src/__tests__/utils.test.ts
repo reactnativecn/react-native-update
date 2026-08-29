@@ -22,6 +22,7 @@ import {
   fetchWithTimeout,
   joinUrls,
   promiseAny,
+  testUrls,
 } from '../utils';
 
 const originalFetch = globalThis.fetch;
@@ -183,27 +184,45 @@ describe('fetchWithTimeout', () => {
   });
 });
 
-describe('enhancedFetch http fallback', () => {
-  test('retries idempotent requests over http with the scheme anchored', async () => {
+describe('enhancedFetch transport security', () => {
+  test('does not downgrade a failed HTTPS GET request to HTTP', async () => {
+    const calls: string[] = [];
+    (globalThis as any).fetch = mock(async (url: string) => {
+      calls.push(url);
+      throw new Error('tls blocked');
+    });
+
+    await expect(
+      enhancedFetch('https://example.com/dl/https-bundle.ppk', {})
+    ).rejects.toThrow('tls blocked');
+    expect(calls).toEqual(['https://example.com/dl/https-bundle.ppk']);
+  });
+
+  test('does not downgrade a failed HTTPS HEAD request to HTTP', async () => {
+    const calls: string[] = [];
+    (globalThis as any).fetch = mock(async (url: string) => {
+      calls.push(url);
+      throw new Error('tls blocked');
+    });
+
+    await expect(
+      enhancedFetch('https://example.com/update.ppk', { method: 'HEAD' })
+    ).rejects.toThrow('tls blocked');
+    expect(calls).toEqual(['https://example.com/update.ppk']);
+  });
+
+  test('keeps an explicitly configured HTTP URL unchanged', async () => {
     const calls: string[] = [];
     const response = { ok: true } as Response;
     (globalThis as any).fetch = mock(async (url: string) => {
       calls.push(url);
-      if (calls.length === 1) {
-        throw new Error('tls blocked');
-      }
       return response;
     });
 
-    // Path contains the substring "https" on purpose: a non-anchored replace
-    // would corrupt the path instead of the scheme.
-    expect(
-      await enhancedFetch('https://example.com/dl/https-bundle.ppk', {})
-    ).toBe(response);
-    expect(calls).toEqual([
-      'https://example.com/dl/https-bundle.ppk',
-      'http://example.com/dl/https-bundle.ppk',
-    ]);
+    expect(await enhancedFetch('http://127.0.0.1:31337/update.ppk', {})).toBe(
+      response
+    );
+    expect(calls).toEqual(['http://127.0.0.1:31337/update.ppk']);
   });
 
   test('does not replay POST requests over http (JS-11 regression)', async () => {
@@ -218,7 +237,7 @@ describe('enhancedFetch http fallback', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  test('does not downgrade urls that are not https', async () => {
+  test('does not rewrite urls that are already HTTP', async () => {
     const fetchMock = mock(async () => {
       throw new Error('offline');
     });
@@ -226,6 +245,25 @@ describe('enhancedFetch http fallback', () => {
 
     await expect(enhancedFetch('http://example.com/api', {})).rejects.toThrow(
       'offline'
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('testUrls transport security', () => {
+  test('does not propagate an HTTPS probe redirected to HTTP', async () => {
+    const fetchMock = mock(
+      async () =>
+        ({
+          status: 200,
+          statusText: 'OK',
+          url: 'http://cdn.example.com/update.ppk',
+        }) as Response
+    );
+    (globalThis as any).fetch = fetchMock;
+
+    expect(await testUrls(['https://cdn.example.com/update.ppk'])).toBe(
+      'https://cdn.example.com/update.ppk'
     );
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });

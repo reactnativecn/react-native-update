@@ -144,6 +144,10 @@ export class DownloadTask {
   // 一经 downloadFile 正常返回即置位:之后的失败是 patch 应用失败,归档
   // 已被判定有毒,清理时必须连 sidecar 一起删,绝不能续传进同一个失败。
   private downloadPhaseCompleted = false;
+  // Set when archive content, rather than the SDK, creates the completion
+  // marker. The error cleanup must then remove the directory even though the
+  // marker + bundle pair would normally protect a completed concurrent task.
+  private archiveContainedCompletionMarker = false;
 
   constructor(context: common.Context) {
     this.context = context;
@@ -270,6 +274,19 @@ export class DownloadTask {
   private async recreateDirectory(path: string): Promise<void> {
     await this.removeDirectory(path);
     await this.ensureDirectory(path);
+  }
+
+  private assertArchiveDoesNotOwnCompletionMarker(directory: string): void {
+    const markerPath = `${directory}/${VERSION_COMPLETE_FILE_NAME}`;
+    if (!fileIo.accessSync(markerPath)) {
+      return;
+    }
+    this.archiveContainedCompletionMarker = true;
+    const error: any = Error(
+      `Archive contains reserved control file: ${VERSION_COMPLETE_FILE_NAME}`,
+    );
+    error.code = 'PATCH_FAILED';
+    throw error;
   }
 
   private async readFileContent(filePath: string): Promise<ArrayBuffer> {
@@ -876,6 +893,7 @@ export class DownloadTask {
     await this.downloadFile(params);
     await this.recreateDirectory(params.unzipDirectory);
     await zlib.decompressFile(params.targetFile, params.unzipDirectory);
+    this.assertArchiveDoesNotOwnCompletionMarker(params.unzipDirectory);
     await this.deleteArchiveAndSidecar(params.targetFile);
   }
 
@@ -898,6 +916,7 @@ export class DownloadTask {
     await this.recreateDirectory(params.unzipDirectory);
 
     await zlib.decompressFile(params.targetFile, params.unzipDirectory);
+    this.assertArchiveDoesNotOwnCompletionMarker(params.unzipDirectory);
     const [entryNames, manifestArrays] = await Promise.all([
       this.listEntryNames(params.unzipDirectory),
       this.readManifestArrays(params.unzipDirectory, true),
@@ -964,6 +983,7 @@ export class DownloadTask {
     await this.recreateDirectory(params.unzipDirectory);
 
     await zlib.decompressFile(params.targetFile, params.unzipDirectory);
+    this.assertArchiveDoesNotOwnCompletionMarker(params.unzipDirectory);
     const [entryNames, manifestArrays] = await Promise.all([
       this.listEntryNames(params.unzipDirectory),
       this.readManifestArrays(params.unzipDirectory, false),
@@ -1119,6 +1139,7 @@ export class DownloadTask {
   }
 
   public async execute(params: DownloadTaskParams): Promise<void> {
+    this.archiveContainedCompletionMarker = false;
     const isPatchTask =
       params.type === DownloadTaskParams.TASK_TYPE_PATCH_FULL ||
       params.type === DownloadTaskParams.TASK_TYPE_PATCH_FROM_APP ||
@@ -1160,6 +1181,7 @@ export class DownloadTask {
             await fileIo.unlink(params.targetFile);
             await this.deleteResumeSidecar(params.targetFile);
           } else if (
+            this.archiveContainedCompletionMarker ||
             !fileIo.accessSync(
               `${params.unzipDirectory}/${VERSION_COMPLETE_FILE_NAME}`,
             ) ||

@@ -66,7 +66,12 @@ const ping = isWeb
           DEFAULT_FETCH_TIMEOUT_MS
         );
         if (status === 200) {
-          return finalUrl;
+          const resolvedUrl = finalUrl || url;
+          if (/^https:/i.test(url) && /^http:/i.test(resolvedUrl)) {
+            log('ping rejected insecure redirect', url, resolvedUrl);
+            throw Error(i18n.t('error_ping_failed'));
+          }
+          return resolvedUrl;
         }
         log('ping failed', url, status, statusText);
         throw Error(i18n.t('error_ping_failed'));
@@ -166,29 +171,12 @@ export const fetchWithTimeout = (
     });
 };
 
-const isIdempotentRequest = (params: Parameters<typeof fetch>[1]) => {
-  const method = params?.method?.toUpperCase() ?? 'GET';
-  return method === 'GET' || method === 'HEAD';
-};
-
 export const enhancedFetch = async (
   url: string,
-  params: Parameters<typeof fetch>[1],
-  isRetry = false
+  params: Parameters<typeof fetch>[1]
 ): Promise<Response> => {
   return fetch(url, params).catch((e) => {
     log('fetch error', url, e);
-    if (
-      isRetry ||
-      (params as any)?.signal?.aborted ||
-      !url.startsWith('https:') ||
-      // Never replay non-idempotent requests (e.g. the checkUpdate POST)
-      // over plaintext http: the server may have processed the original.
-      !isIdempotentRequest(params)
-    ) {
-      throw e;
-    }
-    log('trying fallback to http');
-    return enhancedFetch(url.replace(/^https:/, 'http:'), params, true);
+    throw e;
   });
 };

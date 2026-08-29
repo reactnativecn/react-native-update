@@ -18,6 +18,7 @@ public class SafeZipFile extends ZipFile {
     }
 
     private static final int BUFFER_SIZE = 8192;
+    private static final String RESERVED_COMPLETION_FILE = ".pushy-complete";
 
     @Override
     public Enumeration<? extends ZipEntry> entries() {
@@ -60,8 +61,23 @@ public class SafeZipFile extends ZipFile {
         // Fixing a Zip Path Traversal Vulnerability
         // https://support.google.com/faqs/answer/9294009
         String canonicalPath = target.getCanonicalPath();
-        if (!canonicalPath.startsWith(targetPath.getCanonicalPath() + File.separator)) {
+        String canonicalTargetPath = targetPath.getCanonicalPath();
+        if (!canonicalPath.startsWith(canonicalTargetPath + File.separator)) {
             throw new SecurityException("Illegal name: " + name);
+        }
+
+        // The completion marker is SDK-owned state, not package content. If an
+        // archive can create it, a failed or interrupted extraction may look
+        // complete and bypass the cleanup/retry path on the next launch.
+        String reservedCompletionPath = new File(
+            targetPath,
+            RESERVED_COMPLETION_FILE
+        ).getCanonicalPath();
+        if (
+            canonicalPath.equals(reservedCompletionPath)
+                || canonicalPath.startsWith(reservedCompletionPath + File.separator)
+        ) {
+            throw new SecurityException("Archive targets reserved control path: " + name);
         }
 
         if (ze.isDirectory()) {

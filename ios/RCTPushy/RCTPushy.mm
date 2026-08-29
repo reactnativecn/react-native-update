@@ -1407,11 +1407,27 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
             // survive to vouch for bytes that are gone.
             [fileManager removeItemAtPath:[archivePath stringByAppendingString:@".resume"]
                                     error:nil];
+            NSError *unzipError = error;
+            NSString *reservedMarker =
+                [destination stringByAppendingPathComponent:VERSION_COMPLETE_FILE_NAME];
+            if ([fileManager fileExistsAtPath:reservedMarker]) {
+                // The marker is SDK-owned state and is written only after the
+                // full unzip/patch pipeline succeeds. Remove it first so even
+                // a failed directory cleanup cannot leave a forged completed
+                // version behind.
+                [fileManager removeItemAtPath:reservedMarker error:nil];
+                [fileManager removeItemAtPath:destination error:nil];
+                succeeded = NO;
+                unzipError = PushyErrorWithCode(
+                    pushy::error_codes::kPatchFailed,
+                    @"archive contains reserved control file: .pushy-complete"
+                );
+            }
+
             if (completionHandler == nil) {
                 return;
             }
 
-            NSError *unzipError = error;
             if (!succeeded && unzipError == nil) {
                 unzipError = PushyErrorWithCode(pushy::error_codes::kPatchFailed, @"unzip failed");
             } else if (unzipError != nil && unzipError.userInfo[PushyErrorCodeKey] == nil) {

@@ -63,3 +63,17 @@ jobs:
       # sync with the TS side by src/__tests__/flowVectors.test.ts (js-test).
       - name: Replay flow golden vectors against the C++ port
         run: SANITIZE=1 ./scripts/test-update-flow-core.sh
+
+  safe-zip-test:
+    name: Android archive safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Reject archive-owned completion markers
+        run: bash scripts/test-safe-zip-file.sh

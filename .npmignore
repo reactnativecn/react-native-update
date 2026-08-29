@@ -39,6 +39,7 @@ project.xcworkspace
 local.properties
 android/build
 android/obj
+android/src/test/
 .project
 
 # node.js
