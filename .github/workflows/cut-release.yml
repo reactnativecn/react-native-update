@@ -1,0 +1,55 @@
+name: cut-release
+
+# One-input release: bump package.json to the requested version on master,
+# tag it and publish the GitHub release that triggers "Publish Package to
+# npmjs". The publish workflow re-verifies tag == package.json version, the
+# pack list and the native artifacts before anything reaches npm.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (e.g. 10.55.0 or 10.55.0-beta.1)"
+        required: true
+      notes:
+        description: "Release notes (optional; defaults to the commit log since the last tag)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  cut:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: master
+          fetch-depth: 0
+      - name: Validate version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$' || { echo "not a semver: $VERSION"; exit 1; }
+          git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null && { echo "tag v$VERSION already exists"; exit 1; } || true
+      - name: Bump, tag and release
+        env:
+          VERSION: ${{ inputs.version }}
+          NOTES: ${{ inputs.notes }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.version=process.env.VERSION;fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
+          git add package.json
+          git commit -m "chore(release): $VERSION"
+          git push origin HEAD:master
+          if [ -z "$NOTES" ]; then
+            last="$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || true)"
+            NOTES="$(git log --pretty='- %s' ${last:+$last..}HEAD~0 | head -100)"
+          fi
+          if echo "$VERSION" | grep -q -- '-'; then pre=--prerelease; else pre=""; fi
+          gh release create "v$VERSION" --target "$(git rev-parse HEAD)" --title "v$VERSION" --notes "$NOTES" $pre
