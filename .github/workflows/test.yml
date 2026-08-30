@@ -23,6 +23,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
+        id: setup-bun
+
+      - name: Restore installed dependencies
+        uses: actions/cache@v6
+        with:
+          path: node_modules
+          key: bun-node-modules-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup-bun.outputs.bun-version }}-${{ hashFiles('bun.lock', 'package.json', 'bunfig.toml', 'scripts/check-expo-version.js') }}
 
       - name: Install Dependencies
         run: bun install --frozen-lockfile
@@ -40,8 +47,22 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install build dependencies
-        run: sudo apt-get update && sudo apt-get install -y zlib1g-dev libbz2-dev
+      - name: Install missing build dependencies
+        shell: bash
+        run: |
+          missing=()
+          for package in zlib1g-dev libbz2-dev; do
+            if ! dpkg-query -W -f='${Status}' "$package" 2>/dev/null | grep -q 'install ok installed'; then
+              missing+=("$package")
+            fi
+          done
+
+          if ((${#missing[@]})); then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends "${missing[@]}"
+          else
+            echo "Build dependencies are already installed."
+          fi
 
       - name: Build HDiffPatch library
         working-directory: android/jni/HDiffPatch
