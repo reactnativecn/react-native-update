@@ -10,4 +10,12 @@ export {
 export { PushyModule, UpdateModule } from './core';
 export type { UpdateErrorCode } from './error';
 export { UpdateError } from './error';
+export type { CrashReporterLike, UpdateMetadata } from './metadata';
+export {
+  attachToCrashlytics,
+  attachToSentry,
+  attachUpdateMetadata,
+  getUpdateMetadata,
+  updateMetadataTags,
+} from './metadata';
 export { PushyProvider, UpdateProvider } from './provider';

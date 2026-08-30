@@ -16,6 +16,7 @@ final class UpdateModuleSupport {
         String currentVersion = updateContext.getCurrentVersion();
         constants.put("currentVersion", currentVersion);
         constants.put("currentVersionInfo", updateContext.getKv("hash_" + currentVersion));
+        constants.put("currentBundleSha256", updateContext.currentBundleSha256(currentVersion));
         constants.put("buildTime", updateContext.getBuildTime());
         constants.put("isUsingBundleUrl", updateContext.getIsUsingBundleUrl());
 

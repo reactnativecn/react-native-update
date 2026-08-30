@@ -18,6 +18,7 @@ import {
   buildCheckRequestBody,
   decideDownload,
   isInRollout,
+  isValidCheckResult,
   joinUrls,
   murmurhash3_32_gc,
   orderEndpointCandidates,
@@ -34,6 +35,14 @@ const impls: Record<string, (...args: any[]) => any> = {
   resolveCheckResult,
   decideDownload,
   shouldActivateAfterDownload,
+  // Text in, verdict out: the C++ side parses with its own JSON parser.
+  isValidCheckResponse: (text: string) => {
+    try {
+      return isValidCheckResult(JSON.parse(text));
+    } catch {
+      return false;
+    }
+  },
 };
 
 export interface FlowVector {
@@ -124,7 +133,16 @@ export const buildVectors = (): FlowVector[] => {
     supportedDiffVersion: 0,
     bundleHash: '',
   });
-  // extra overrides keep the original key position (JS spread semantics)
+  // an empty extra adds no nested copy
+  add('buildCheckRequestBody', {
+    packageVersion: '2.3.4',
+    currentVersion: 'abcdef1234',
+    buildTime: '1719999999',
+    cInfo,
+    extra: {},
+  });
+  // extra is spread first: it may add keys but the SDK identity fields win
+  // (an overridden key keeps extra's key position — JS spread semantics)
   add('buildCheckRequestBody', {
     packageVersion: '2.3.4',
     currentVersion: 'abcdef1234',
@@ -147,6 +165,27 @@ export const buildVectors = (): FlowVector[] => {
     buildTime: '1719999999',
     cInfo,
   });
+
+  // isValidCheckResponse — schema gate
+  for (const text of [
+    '{"upToDate":true}',
+    '{"update":true,"hash":"h"}',
+    '{"update":false}',
+    '{"expired":true,"downloadUrl":"https://x"}',
+    '{"paused":"app"}',
+    '{"error":"internal"}',
+    '{}',
+    '[]',
+    '"upToDate"',
+    'null',
+    '{"upToDate":"yes"}',
+    '{"update":1}',
+    '{"paused":true}',
+    'not json',
+    '',
+  ]) {
+    add('isValidCheckResponse', text);
+  }
 
   // resolveCheckResult
   const identity = {

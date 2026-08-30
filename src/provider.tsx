@@ -343,13 +343,36 @@ export const UpdateProvider = ({
     if (!assertWeb()) {
       return;
     }
-    const { checkStrategy, autoMarkSuccess } = options;
+    const { checkStrategy, autoMarkSuccess, autoMarkSuccessDelayMs } = options;
     let markSuccessTimer: ReturnType<typeof setTimeout> | undefined;
     if (autoMarkSuccess) {
+      const delay =
+        typeof autoMarkSuccessDelayMs === 'number' &&
+        autoMarkSuccessDelayMs >= 0
+          ? autoMarkSuccessDelayMs
+          : 1000;
       markSuccessTimer = setTimeout(() => {
-        // Failures are reported and surfaced via the onError subscription.
-        Promise.resolve(markSuccess()).catch(noop);
-      }, 1000);
+        // The health check is read when the timer fires, not when it was
+        // armed, so a late setOptions still applies.
+        const { healthCheck } = options;
+        (async () => {
+          if (healthCheck) {
+            let healthy = false;
+            try {
+              healthy = (await healthCheck()) !== false;
+            } catch (e: any) {
+              log('healthCheck threw, not marking success:', e?.message || e);
+              return;
+            }
+            if (!healthy) {
+              log('healthCheck returned false, not marking success');
+              return;
+            }
+          }
+          // Failures are reported and surfaced via the onError subscription.
+          await markSuccess();
+        })().catch(noop);
+      }, delay);
     }
     if (checkStrategy === 'both' || checkStrategy === 'onAppResume') {
       stateListener.current = AppState.addEventListener(
@@ -396,30 +419,42 @@ export const UpdateProvider = ({
   const parseTestPayload = useCallback(
     (payload: UpdateTestPayload) => {
       if (payload?.type?.startsWith('__rnPushy')) {
+        if (options.testChannel === false) {
+          // Production builds may refuse scanned codes that would pull an
+          // arbitrary published version.
+          log('test channel disabled, ignoring payload', payload.type);
+          return false;
+        }
         if (payload.type === '__rnPushyVersionHash') {
-          // Wrap the logger only for the duration of this test check; wrapping
-          // on any other __rnPushy* payload would never be undone (the finally
-          // below is the only restore point).
-          const logger = options.logger || (() => {});
-          options.logger = ({ type, data }) => {
-            logger({ type, data });
-            Alert.alert(type, JSON.stringify(data));
-          };
           const toHash = payload.data;
+          if (typeof toHash !== 'string' || !toHash) {
+            log('test payload without a target hash ignored');
+            return false;
+          }
           sharedState.toHash = toHash;
+          // No global logger swap for the duration of the check (it leaked
+          // into concurrent checks): the tester gets one alert with the
+          // outcome instead of one per logged event.
           checkUpdate({ extra: { toHash } })
             .then(() => {
-              if (updateInfoRef.current?.upToDate) {
+              const info = updateInfoRef.current;
+              if (info?.upToDate) {
                 Alert.alert(
                   client.t('alert_info'),
                   client.t('alert_no_update_wait')
                 );
+              } else if (info?.update) {
+                Alert.alert(
+                  client.t('alert_info'),
+                  JSON.stringify({
+                    hash: info.hash,
+                    name: info.name,
+                    description: info.description,
+                  })
+                );
               }
             })
-            .catch(noop)
-            .finally(() => {
-              options.logger = logger;
-            });
+            .catch(noop);
         }
         return true;
       }

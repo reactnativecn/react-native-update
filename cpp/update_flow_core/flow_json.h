@@ -53,6 +53,7 @@ class Value {
   bool IsUndefined() const { return kind_ == Kind::Undefined; }
   bool IsArray() const { return kind_ == Kind::Array; }
   bool IsObject() const { return kind_ == Kind::Object; }
+  bool IsBool() const { return kind_ == Kind::Bool; }
   bool IsNumber() const { return kind_ == Kind::Number; }
   bool IsString() const { return kind_ == Kind::String; }
 

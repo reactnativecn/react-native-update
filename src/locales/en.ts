@@ -61,6 +61,9 @@ export default {
   error_all_promises_rejected: 'All promises were rejected',
   error_ping_failed: 'Ping failed',
   error_ping_timeout: 'Ping timeout',
+  error_insecure_redirect:
+    'Request was redirected from https to plaintext http',
+  error_invalid_check_response: 'Update check response is not a valid verdict',
   error_http_status: '{{status}} {{statusText}}',
   error_apk_pending_install:
     'The APK has been downloaded, please complete the installation in the system installer',

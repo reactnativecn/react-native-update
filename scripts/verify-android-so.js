@@ -95,7 +95,7 @@ function readDynamicSymbols(buffer, expectedMachine) {
   const machine = buffer.readUInt16LE(0x12);
   if (expectedMachine !== undefined && machine !== expectedMachine) {
     throw new Error(
-      `wrong architecture: e_machine 0x${machine.toString(16)} (expected 0x${expectedMachine.toString(16)})`,
+      `wrong architecture: e_machine 0x${machine.toString(16)} (expected 0x${expectedMachine.toString(16)})`
     );
   }
 
@@ -123,11 +123,11 @@ function readDynamicSymbols(buffer, expectedMachine) {
             size: buffer.readUInt32LE(base + 20),
             link: buffer.readUInt32LE(base + 24),
             entsize: buffer.readUInt32LE(base + 36),
-          },
+          }
     );
   }
 
-  const dynsym = sections.find(section => section.type === SHT_DYNSYM);
+  const dynsym = sections.find((section) => section.type === SHT_DYNSYM);
   if (!dynsym) {
     throw new Error('no .dynsym section (fully stripped?)');
   }
@@ -136,7 +136,7 @@ function readDynamicSymbols(buffer, expectedMachine) {
     throw new Error('missing .dynstr section');
   }
 
-  const readName = nameOffset => {
+  const readName = (nameOffset) => {
     const start = dynstr.offset + nameOffset;
     const end = buffer.indexOf(0, start);
     return buffer.toString('utf8', start, end);
@@ -177,7 +177,9 @@ for (const abi of ABIS) {
   try {
     symbols = readDynamicSymbols(buffer, ABI_MACHINE[abi]);
   } catch (error) {
-    console.error(`error: cannot read symbols from ${soPath}: ${error.message}`);
+    console.error(
+      `error: cannot read symbols from ${soPath}: ${error.message}`
+    );
     failed = true;
     continue;
   }
@@ -190,23 +192,23 @@ for (const abi of ABIS) {
         console.error(
           `error: ${soPath} LOAD segments aligned to ${align} bytes; Google Play ` +
             `requires ${requiredAlign} (16 KB page size) for ${abi}. Rebuild with ` +
-            `NDK r28+ ('npm run build:so').`,
+            `NDK r28+ ('npm run build:so').`
         );
         failed = true;
       }
     } catch (error) {
       console.error(
-        `error: cannot read LOAD alignment from ${soPath}: ${error.message}`,
+        `error: cannot read LOAD alignment from ${soPath}: ${error.message}`
       );
       failed = true;
     }
   }
 
-  const missing = REQUIRED_SYMBOLS.filter(symbol => !symbols.has(symbol));
+  const missing = REQUIRED_SYMBOLS.filter((symbol) => !symbols.has(symbol));
   if (missing.length) {
     for (const symbol of missing) {
       console.error(
-        `error: ${soPath} does not export ${symbol} (stale .so? rebuild with 'npm run build:so')`,
+        `error: ${soPath} does not export ${symbol} (stale .so? rebuild with 'npm run build:so')`
       );
     }
     failed = true;

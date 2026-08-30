@@ -258,6 +258,19 @@ public class UpdateModuleImpl {
      * Validated at write time — a corrupt config would otherwise silently
      * disable the native check forever with no signal.
      */
+    public static void markJsCheckCompleted(
+        final UpdateContext updateContext,
+        final String config,
+        final Promise promise
+    ) {
+        if (config == null || config.isEmpty()) {
+            promise.reject(ErrorCodes.INVALID_OPTIONS, "config must be a non-empty string");
+            return;
+        }
+        NativeCheckOrchestrator.markJsCheckCompleted(config);
+        promise.resolve(true);
+    }
+
     public static void syncNativeConfig(
         final UpdateContext updateContext,
         final String config,
@@ -313,7 +326,20 @@ public class UpdateModuleImpl {
         if (!isValidHashInfo(info)) {
             throw new IllegalArgumentException("invalid json string");
         }
-        updateContext.setKv("hash_" + hash, info);
+        try {
+            updateContext.setKv("hash_" + hash, info);
+        } catch (IllegalStateException e) {
+            // Distinguish "could not persist" from "malformed input": JS
+            // classifies the former as FILE_OPERATION_FAILED.
+            throw new PersistenceException(e);
+        }
+    }
+
+    /** A state write that did not reach disk (SharedPreferences commit false). */
+    static final class PersistenceException extends RuntimeException {
+        PersistenceException(Throwable cause) {
+            super(String.valueOf(cause.getMessage()), cause);
+        }
     }
 
     public static void setLocalHashInfo(
@@ -325,7 +351,12 @@ public class UpdateModuleImpl {
         StateSerialRunner.run(promise, ErrorCodes.INVALID_HASH_INFO, "setLocalHashInfo", new StateSerialRunner.Operation() {
             @Override
             public void run() {
-                setLocalHashInfoInternal(updateContext, hash, info);
+                try {
+                    setLocalHashInfoInternal(updateContext, hash, info);
+                } catch (PersistenceException e) {
+                    promise.reject(ErrorCodes.FILE_OPERATION_FAILED, "setLocalHashInfo failed", e);
+                    return;
+                }
                 promise.resolve(true);
             }
         });

@@ -67,6 +67,7 @@ PUSHY_ASYNC_METHOD(downloadAndInstallApk)
 // on Harmony. Every new spec method MUST be registered here.
 PUSHY_ASYNC_METHOD(syncNativeConfig)
 PUSHY_ASYNC_METHOD(getNativeCheckCache)
+PUSHY_ASYNC_METHOD(markJsCheckCompleted)
 PUSHY_ASYNC_METHOD(getBundleHash)
 PUSHY_ASYNC_METHOD(resetToPackagedBundle)
 
@@ -104,6 +105,7 @@ PushyTurboModule::PushyTurboModule(
   registerMethod("removeListeners", 1, HostFunction_removeListeners);
   registerMethod("syncNativeConfig", 1, HostFunction_syncNativeConfig);
   registerMethod("getNativeCheckCache", 0, HostFunction_getNativeCheckCache);
+  registerMethod("markJsCheckCompleted", 1, HostFunction_markJsCheckCompleted);
   registerMethod("getBundleHash", 0, HostFunction_getBundleHash);
   registerMethod(
       "resetToPackagedBundle", 0, HostFunction_resetToPackagedBundle);

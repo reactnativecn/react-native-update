@@ -66,6 +66,13 @@ const ping = isWeb
           DEFAULT_FETCH_TIMEOUT_MS
         );
         if (status === 200) {
+          if (isProtocolDowngrade(url, finalUrl)) {
+            // The probe was redirected from https to plaintext http. Never
+            // let a downgraded final URL win the race: the winner is what
+            // the real artifact download uses.
+            log('ping rejected: https redirected to http', url, finalUrl);
+            throw Error(i18n.t('error_ping_failed'));
+          }
           return finalUrl;
         }
         log('ping failed', url, status, statusText);
@@ -166,29 +173,34 @@ export const fetchWithTimeout = (
     });
 };
 
-const isIdempotentRequest = (params: Parameters<typeof fetch>[1]) => {
-  const method = params?.method?.toUpperCase() ?? 'GET';
-  return method === 'GET' || method === 'HEAD';
-};
+/**
+ * True when `finalUrl` (after redirects) is plaintext http while the request
+ * started on https. An https endpoint or artifact URL must never be served
+ * over http, redirected or otherwise: the update package is the supply chain
+ * boundary, and TLS is the only thing authenticating it.
+ */
+export const isProtocolDowngrade = (
+  requestedUrl: string,
+  finalUrl?: string | null
+): boolean =>
+  !!finalUrl && /^https:/i.test(requestedUrl) && /^http:/i.test(finalUrl);
 
 export const enhancedFetch = async (
   url: string,
-  params: Parameters<typeof fetch>[1],
-  isRetry = false
+  params: Parameters<typeof fetch>[1]
 ): Promise<Response> => {
-  return fetch(url, params).catch((e) => {
+  // No https -> http retry here, ever. Earlier versions replayed failed
+  // idempotent https requests over plaintext http as a "network
+  // compatibility" fallback; that silently moved endpoint discovery and
+  // package downloads outside TLS. Self-hosted plaintext deployments must
+  // configure explicit http:// URLs instead.
+  const response = await fetch(url, params).catch((e) => {
     log('fetch error', url, e);
-    if (
-      isRetry ||
-      (params as any)?.signal?.aborted ||
-      !url.startsWith('https:') ||
-      // Never replay non-idempotent requests (e.g. the checkUpdate POST)
-      // over plaintext http: the server may have processed the original.
-      !isIdempotentRequest(params)
-    ) {
-      throw e;
-    }
-    log('trying fallback to http');
-    return enhancedFetch(url.replace(/^https:/, 'http:'), params, true);
+    throw e;
   });
+  if (isProtocolDowngrade(url, response?.url)) {
+    log('fetch rejected: https redirected to http', url, response.url);
+    throw Error(i18n.t('error_insecure_redirect'));
+  }
+  return response;
 };

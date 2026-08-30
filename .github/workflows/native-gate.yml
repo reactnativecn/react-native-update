@@ -1,0 +1,59 @@
+name: native-gate
+
+# One status check to make required in branch protection: "native-required".
+# It turns green only when lint, test and every native E2E workflow that ran
+# for the commit succeeded. The E2E workflows are path-filtered, so "no run
+# exists for this commit" means the filter skipped it (runs are created at
+# event time, before any of them completes) and does not block; a run that
+# exists must succeed. e2e-harmony is workflow_dispatch-only (no hosted
+# HarmonyOS runner) and is therefore not part of the gate.
+on:
+  workflow_run:
+    workflows: [lint, test, e2e-android, e2e-ios]
+    types: [completed]
+
+permissions:
+  actions: read
+  statuses: write
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          script: |
+            const sha = context.payload.workflow_run.head_sha;
+            const { owner, repo } = context.repo;
+            const alwaysRequired = ['lint', 'test'];
+            const requiredWhenPresent = ['e2e-android', 'e2e-ios'];
+            const runs = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, {
+              owner, repo, head_sha: sha, per_page: 100,
+            });
+            const latestOf = (name) => runs
+              .filter((r) => r.name === name)
+              .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+            let state = 'success';
+            let description = 'lint, test and native E2E passed';
+            for (const name of [...alwaysRequired, ...requiredWhenPresent]) {
+              const run = latestOf(name);
+              if (!run) {
+                if (alwaysRequired.includes(name)) {
+                  state = 'pending'; description = `waiting for ${name}`; break;
+                }
+                continue; // path-filtered E2E: nothing to wait for
+              }
+              if (run.status !== 'completed') {
+                state = 'pending'; description = `waiting for ${name}`; break;
+              }
+              if (run.conclusion !== 'success') {
+                state = 'failure'; description = `${name}: ${run.conclusion}`; break;
+              }
+            }
+            core.info(`${sha}: ${state} — ${description}`);
+            await github.rest.repos.createCommitStatus({
+              owner, repo, sha, state, description,
+              context: 'native-required',
+              target_url: context.payload.workflow_run.html_url,
+            });

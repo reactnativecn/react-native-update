@@ -348,12 +348,25 @@ appKey、server endpoints、更新策略今天只活在 JS 的 `ClientOptions` �
   （§10.3；下载耗时不得让旧响应获得新的时间戳）
 ```
 
+> 2026-08-30 起 `.pushy-complete` 不再是空文件而是完成记录（`cpp/patch_core/install_record.h`）：
+> `{"schema":1,"versionHash","bundleSha256","artifactSha256"}`，由 SDK 在
+> `<hash>.staging` 里完成解压/打补丁后写入，再原子 rename 为 `<hash>`；压缩包不得携带
+> `.pushy-*` 条目；`switchVersion` 前重算 bundle 摘要比对。旧 SDK 写的空文件仍视为完整安装。
+
 ### 10.3 与 JS 的去重（§6 的落地形态）
 
 首版**原生只写缓存**：响应原文 + 响应到达时间戳 + 请求/配置指纹落到固定文件。紧
 随其后的 JS 小改动：`checkUpdate` 先读该缓存，时间戳新鲜（暂定 2 分钟）
 则直接复用不发请求。改造前的过渡期是双检查——多一次网络请求，服务端有
 缓存，无害。
+
+**JS→原生的完成信号（2026-08-30 补齐）**：上面的缓存只解决"原生先检查、JS 复用"；
+健康启动时 JS 往往在 5s 延迟内先检查完，随后原生仍会再发一次。现在 JS 每次
+成功检查后调用 `markJsCheckCompleted(configJson)`（与 `syncNativeConfig` 同一
+份 JSON）；延迟轮次在真正发请求前比对"本进程 + 同一份已落盘配置 + JS 已有有效
+响应"，满足即跳过，**且不消耗本进程的轮次**——crash rescue 仍可照常启动轮次。
+JS 未启动、启动即崩、检查失败或未主动检查时没有信号，原生救援不受影响。老原生
+无此方法时 JS 静默跳过。
 
 ### 10.4 失败策略
 

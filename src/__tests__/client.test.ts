@@ -37,6 +37,8 @@ const setupClientMocks = ({
   // undefined 模拟旧原生(无该方法,feature-detect 静默跳过)
   syncNativeConfig = undefined,
   getNativeCheckCache = undefined,
+  markJsCheckCompleted = undefined,
+  setLocalHashInfo = mock(() => {}),
 }: {
   isFirstTime?: boolean;
   markSuccess?: ReturnType<typeof mock>;
@@ -52,6 +54,8 @@ const setupClientMocks = ({
   getBundleHash?: ReturnType<typeof mock>;
   syncNativeConfig?: ReturnType<typeof mock>;
   getNativeCheckCache?: ReturnType<typeof mock>;
+  markJsCheckCompleted?: ReturnType<typeof mock>;
+  setLocalHashInfo?: ReturnType<typeof mock>;
 } = {}) => {
   (globalThis as any).__DEV__ = false;
 
@@ -82,6 +86,7 @@ const setupClientMocks = ({
       resetToPackagedBundle,
       ...(syncNativeConfig ? { syncNativeConfig } : {}),
       ...(getNativeCheckCache ? { getNativeCheckCache } : {}),
+      ...(markJsCheckCompleted ? { markJsCheckCompleted } : {}),
     },
     buildTime: '2023-01-01',
     cInfo: {
@@ -99,7 +104,7 @@ const setupClientMocks = ({
       addListener: addProgressListener,
     },
     rolledBackVersion: '',
-    setLocalHashInfo: mock(() => {}),
+    setLocalHashInfo,
     supportedDiffVersion,
     getBundleHash,
   }));
@@ -760,17 +765,20 @@ describe('downloadUpdate fallback chain', () => {
     downloadPatchFromPackage = mock(() => Promise.resolve()),
     downloadFullUpdate = mock(() => Promise.resolve()),
     addProgressListener = mock(() => ({ remove: mock(() => {}) })),
+    setLocalHashInfo = mock(() => {}),
   }: {
     downloadPatchFromPpk?: ReturnType<typeof mock>;
     downloadPatchFromPackage?: ReturnType<typeof mock>;
     downloadFullUpdate?: ReturnType<typeof mock>;
     addProgressListener?: ReturnType<typeof mock>;
+    setLocalHashInfo?: ReturnType<typeof mock>;
   } = {}) => {
     setupClientMocks({
       downloadPatchFromPpk,
       downloadPatchFromPackage,
       downloadFullUpdate,
       addProgressListener,
+      setLocalHashInfo,
     });
 
     // Override setTimeout to skip real backoff delays in retry tests
@@ -825,6 +833,112 @@ describe('downloadUpdate fallback chain', () => {
 
     expect(hash).toBe('new-hash');
     expect(downloadPatchFromPpk).toHaveBeenCalledTimes(1);
+  });
+
+  const twoMirrors = {
+    ...updateInfo,
+    paths: ['https://cdn-a.example.com', 'https://cdn-b.example.com'],
+  };
+
+  test('a mirror that fails mid-download is followed by the next mirror of the same artifact', async () => {
+    let attempts = 0;
+    const downloadPatchFromPpk = mock(
+      ({ updateUrl }: { updateUrl: string }) => {
+        attempts++;
+        if (attempts === 1) {
+          // HEAD "won" for cdn-a, but the real GET died mid-stream.
+          const err: any = new Error('stream reset');
+          err.code = 'DOWNLOAD_FAILED';
+          return Promise.reject(err);
+        }
+        expect(updateUrl).toBe('https://cdn-b.example.com/diff.ppk');
+        return Promise.resolve();
+      }
+    );
+    const { downloadPatchFromPackage, downloadFullUpdate } = setupDownloadMocks(
+      { downloadPatchFromPpk }
+    );
+    const { Pushy, sharedState } = await importFreshClient('dl-mirror-next');
+    sharedState.downloadedHash = undefined;
+    const client = new Pushy({ appKey: 'demo-app', maxRetries: 0 });
+
+    expect(await client.downloadUpdate(twoMirrors)).toBe('new-hash');
+    expect(downloadPatchFromPpk).toHaveBeenCalledTimes(2);
+    expect(downloadPatchFromPpk.mock.calls[0][0].updateUrl).toBe(
+      'https://cdn-a.example.com/diff.ppk'
+    );
+    // The strategy was rescued by its second mirror: no fallback to pdiff/full.
+    expect(downloadPatchFromPackage).not.toHaveBeenCalled();
+    expect(downloadFullUpdate).not.toHaveBeenCalled();
+  });
+
+  test('an unapplicable patch is not re-downloaded from other mirrors', async () => {
+    const downloadPatchFromPpk = mock(() => {
+      const err: any = new Error('hpatch failed');
+      err.code = 'PATCH_FAILED';
+      return Promise.reject(err);
+    });
+    const { downloadPatchFromPackage } = setupDownloadMocks({
+      downloadPatchFromPpk,
+    });
+    const { Pushy, sharedState } = await importFreshClient('dl-mirror-patch');
+    sharedState.downloadedHash = undefined;
+    const client = new Pushy({ appKey: 'demo-app', maxRetries: 0 });
+
+    expect(await client.downloadUpdate(twoMirrors)).toBe('new-hash');
+    // Same bytes on every mirror: one attempt, then straight to pdiff.
+    expect(downloadPatchFromPpk).toHaveBeenCalledTimes(1);
+    expect(downloadPatchFromPackage).toHaveBeenCalledTimes(1);
+  });
+
+  test('a throwing progress subscriber does not block other subscribers or the download', async () => {
+    let listener: ((event: any) => void) | undefined;
+    const addProgressListener = mock((_name: string, cb: any) => {
+      listener = cb;
+      return { remove: mock(() => {}) };
+    });
+    const downloadPatchFromPpk = mock(async () => {
+      listener?.({ hash: 'new-hash', received: 50, total: 100 });
+    });
+    setupDownloadMocks({ downloadPatchFromPpk, addProgressListener });
+    const { Pushy, sharedState } = await importFreshClient(
+      'dl-progress-isolated'
+    );
+    sharedState.downloadedHash = undefined;
+    const client = new Pushy({ appKey: 'demo-app', maxRetries: 0 });
+
+    const seen: number[] = [];
+    const first = client.downloadUpdate(updateInfo, () => {
+      throw new Error('subscriber bug');
+    });
+    // Joins the in-flight download and registers a second subscriber.
+    const second = client.downloadUpdate(updateInfo, (data: any) => {
+      seen.push(data.progress);
+    });
+
+    expect(await first).toBe('new-hash');
+    expect(await second).toBe('new-hash');
+    expect(seen).toEqual([50]);
+  });
+
+  test('a version is not "downloaded" until its hash info is persisted', async () => {
+    const setLocalHashInfo = mock(() => Promise.reject(Error('commit failed')));
+    setupDownloadMocks({ setLocalHashInfo });
+    const { Pushy, sharedState } = await importFreshClient('dl-hashinfo-fail');
+    sharedState.downloadedHash = undefined;
+    const client = new Pushy({ appKey: 'demo-app', maxRetries: 0 });
+    const seen: any[] = [];
+    client.onError((e: any, eventType: string) => {
+      seen.push({ e, eventType });
+    });
+
+    await expect(client.downloadUpdate(updateInfo)).rejects.toThrow(
+      'commit failed'
+    );
+    expect(sharedState.downloadedHash).toBeUndefined();
+    expect(seen).toHaveLength(1);
+    expect(seen[0].eventType).toBe('errorUpdate');
+    expect(seen[0].e.code).toBe('FILE_OPERATION_FAILED');
   });
 
   test('reports a release response with no downloadable artifact', async () => {
@@ -1849,5 +1963,182 @@ describe('native check cache reuse', () => {
     const client = new Pushy({ appKey: 'demo-app' });
 
     expect(await client.checkUpdate()).toEqual(networkResult);
+  });
+});
+
+describe('checkUpdate request identity', () => {
+  const countChecks = (fetchMock: ReturnType<typeof mock>) =>
+    fetchMock.mock.calls.filter((call: any[]) =>
+      String(call[0]).includes('/checkUpdate/')
+    ).length;
+
+  test('identical checks inside the 5s window share one request', async () => {
+    setupClientMocks();
+    const fetchMock = mock(async () => createJsonResponse({ upToDate: true }));
+    (globalThis as any).fetch = fetchMock;
+    const { Pushy } = await importFreshClient('check-identity-same');
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    await client.checkUpdate({ channel: 'beta' });
+    await client.checkUpdate({ channel: 'beta' });
+
+    expect(countChecks(fetchMock)).toBe(1);
+  });
+
+  test('checks with different extra inside the 5s window never share a response', async () => {
+    setupClientMocks();
+    const fetchMock = mock(async (_url: string, params: any) => {
+      const body = JSON.parse(params.body);
+      return createJsonResponse({ update: true, hash: `hash-${body.channel}` });
+    });
+    (globalThis as any).fetch = fetchMock;
+    const { Pushy } = await importFreshClient('check-identity-extra');
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    const a = await client.checkUpdate({ channel: 'a' });
+    const b = await client.checkUpdate({ channel: 'b' });
+
+    expect(countChecks(fetchMock)).toBe(2);
+    expect((a as any).hash).toBe('hash-a');
+    expect((b as any).hash).toBe('hash-b');
+  });
+
+  test('extra cannot override the identity fields of the request', async () => {
+    setupClientMocks();
+    const bodies: any[] = [];
+    const fetchMock = mock(async (_url: string, params: any) => {
+      bodies.push(JSON.parse(params.body));
+      return createJsonResponse({ upToDate: true });
+    });
+    (globalThis as any).fetch = fetchMock;
+    const { Pushy } = await importFreshClient('check-identity-forge');
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    await client.checkUpdate({ packageVersion: '9.9.9', hash: 'forged' });
+
+    expect(bodies[0].packageVersion).toBe('1.0.0');
+    // The mocked native currentVersion, not the forged one.
+    expect(bodies[0].hash).toBe('hash');
+  });
+
+  test('a failed check never returns a previous successful response', async () => {
+    setupClientMocks();
+    let fail = false;
+    const fetchMock = mock(async () => {
+      if (fail) {
+        throw new Error('offline');
+      }
+      return createJsonResponse({ update: true, hash: 'old-good' });
+    });
+    (globalThis as any).fetch = fetchMock;
+    const { Pushy } = await importFreshClient('check-identity-stale');
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    expect(((await client.checkUpdate()) as any).hash).toBe('old-good');
+
+    fail = true;
+    // Outside the dedup window: this is a fresh check that fails.
+    (client as any).lastChecking = Date.now() - 10_000;
+    expect(await client.checkUpdate()).toBeUndefined();
+
+    // And the failure cleared the slot: the next call re-asks the server
+    // instead of resurrecting the old response through the dedup path.
+    const checksAfterFailure = countChecks(fetchMock);
+    fail = false;
+    expect(((await client.checkUpdate()) as any).hash).toBe('old-good');
+    expect(countChecks(fetchMock)).toBeGreaterThan(checksAfterFailure);
+  });
+});
+
+describe('JS -> native check completion signal', () => {
+  test('a successful check marks completion with the synced native config', async () => {
+    const markJsCheckCompleted = mock((_config: string) => Promise.resolve());
+    const syncNativeConfig = mock((_config: string) => Promise.resolve());
+    setupClientMocks({ markJsCheckCompleted, syncNativeConfig });
+    (globalThis as any).fetch = mock(async () =>
+      createJsonResponse({ upToDate: true })
+    );
+    const { Pushy } = await importFreshClient('js-check-completed');
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    await client.checkUpdate();
+    await Promise.resolve();
+
+    expect(markJsCheckCompleted).toHaveBeenCalledTimes(1);
+    // The very same JSON syncNativeConfig persisted: the native side
+    // compares the two strings byte for byte.
+    expect(markJsCheckCompleted.mock.calls[0][0]).toBe(
+      syncNativeConfig.mock.calls[0][0]
+    );
+  });
+
+  test('a failed check never marks completion (native rescue must still run)', async () => {
+    const markJsCheckCompleted = mock(() => Promise.resolve());
+    setupClientMocks({ markJsCheckCompleted });
+    (globalThis as any).fetch = mock(async () => {
+      throw new Error('offline');
+    });
+    const { Pushy } = await importFreshClient('js-check-failed');
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    expect(await client.checkUpdate()).toBeUndefined();
+    expect(markJsCheckCompleted).not.toHaveBeenCalled();
+  });
+
+  test('a rejected signal is swallowed and an older native module is skipped', async () => {
+    const markJsCheckCompleted = mock(() => Promise.reject(Error('nope')));
+    setupClientMocks({ markJsCheckCompleted });
+    (globalThis as any).fetch = mock(async () =>
+      createJsonResponse({ upToDate: true })
+    );
+    const { Pushy } = await importFreshClient('js-check-reject');
+    const client = new Pushy({ appKey: 'demo-app' });
+    expect(await client.checkUpdate()).toEqual({ upToDate: true });
+
+    setupClientMocks();
+    const { Pushy: OldPushy } = await importFreshClient('js-check-old-native');
+    const old = new OldPushy({ appKey: 'demo-app' });
+    expect(await old.checkUpdate()).toEqual({ upToDate: true });
+  });
+});
+
+describe('check response schema gate', () => {
+  test('a 200 that is not a verdict fails the endpoint and the fallback continues', async () => {
+    setupClientMocks();
+    let checks = 0;
+    (globalThis as any).fetch = mock(async (url: string) => {
+      if (String(url).includes('/checkUpdate/')) {
+        checks++;
+        return createJsonResponse(
+          checks === 1 ? { error: 'internal' } : { upToDate: true }
+        );
+      }
+      return createJsonResponse([]);
+    });
+    const { Pushy } = await importFreshClient('schema-gate-fallback');
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    expect(await client.checkUpdate()).toEqual({ upToDate: true });
+    expect(checks).toBeGreaterThanOrEqual(2);
+  });
+
+  test('when every endpoint returns a non-verdict the check fails', async () => {
+    setupClientMocks();
+    (globalThis as any).fetch = mock(async (url: string) =>
+      createJsonResponse(
+        String(url).includes('/checkUpdate/') ? { error: 'internal' } : []
+      )
+    );
+    const { Pushy } = await importFreshClient('schema-gate-all');
+    const client = new Pushy({ appKey: 'demo-app' });
+    const seen: any[] = [];
+    client.onError((e: any) => {
+      seen.push(e);
+    });
+
+    expect(await client.checkUpdate()).toBeUndefined();
+    expect(seen).toHaveLength(1);
+    // The schema-gate code survives the endpoint fallback aggregation.
+    expect(seen[0].code).toBe('INVALID_RESPONSE');
   });
 });

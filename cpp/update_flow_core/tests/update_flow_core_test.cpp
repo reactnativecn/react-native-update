@@ -42,6 +42,10 @@ Value Dispatch(const std::string& fn, const Value& args, bool* known) {
     return updateflow::DecideDownload(args.At(0), args.At(1),
                                       args.At(2).Truthy());
   }
+  if (fn == "isValidCheckResponse") {
+    return Value::Bool(
+        updateflow::IsValidCheckResponse(args.At(0).AsString()));
+  }
   if (fn == "shouldActivateAfterDownload") {
     return Value::Bool(updateflow::ShouldActivateAfterDownload(
         args.At(0), args.At(1).AsString()));

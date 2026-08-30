@@ -13,6 +13,8 @@ export type UpdateErrorCode =
   | 'APPKEY_REQUIRED'
   | 'NO_ENDPOINTS'
   | 'HTTP_STATUS'
+  // A 2xx check response that is not a check verdict (schema gate).
+  | 'INVALID_RESPONSE'
   | 'CHECK_FAILED'
   | 'DOWNLOAD_FAILED'
   | 'SWITCH_VERSION_FAILED'
@@ -43,6 +45,7 @@ const KNOWN_CODES = new Set<string>([
   'APPKEY_REQUIRED',
   'NO_ENDPOINTS',
   'HTTP_STATUS',
+  'INVALID_RESPONSE',
   'CHECK_FAILED',
   'DOWNLOAD_FAILED',
   'SWITCH_VERSION_FAILED',

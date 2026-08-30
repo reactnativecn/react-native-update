@@ -82,6 +82,8 @@ interface NativePatchCoreBindings {
   ): Promise<void>;
   /** sha256(小写 hex)。同步:输入是已在内存的 rawfile bundle,哈希毫秒级 */
   sha256Hex(data: Uint8Array): string;
+  // 文件流式 SHA-256(小写 hex;不可读时空串),供安装记录使用。
+  sha256HexFile(path: string): string;
   /** CRC32(zip/zlib 多项式)。pdiff 拷贝前与 copiesCrc 比对用 */
   crc32(data: Uint8Array | ArrayBuffer): number;
   /** 原生 patch 内核可消费的 diff 轨道版本(2 = hdiffv2 轨道) */
@@ -100,6 +102,9 @@ interface NativePatchCoreBindings {
     identityJson: string,
     afterDownload: string,
   ): string | undefined;
+  // 响应 schema 门槛(update_flow_core::IsValidCheckResponse):200 但只带
+  // `{"error":...}` 的节点算失败,不得阻止继续 fallback。
+  isValidCheckResponse(responseText: string): boolean;
 }
 
 export default NativeUpdateCore as unknown as NativePatchCoreBindings;

@@ -308,6 +308,112 @@ describe('UpdateProvider rendering', () => {
     expect(captured.current.lastError).toBeUndefined();
   });
 
+  test('autoMarkSuccessDelayMs delays the automatic markSuccess', async () => {
+    const client = createClient({
+      updateStrategy: 'silentAndLater',
+      autoMarkSuccess: true,
+      autoMarkSuccessDelayMs: 40,
+    });
+    await renderProvider(client);
+    expect(client.markSuccess).not.toHaveBeenCalled();
+
+    await TestRenderer.act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    });
+    expect(client.markSuccess).toHaveBeenCalledTimes(1);
+  });
+
+  test('healthCheck returning false or throwing skips the automatic markSuccess', async () => {
+    const unhealthy = createClient({
+      updateStrategy: 'silentAndLater',
+      autoMarkSuccess: true,
+      autoMarkSuccessDelayMs: 0,
+      healthCheck: async () => false,
+    });
+    await renderProvider(unhealthy);
+    await TestRenderer.act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(unhealthy.markSuccess).not.toHaveBeenCalled();
+
+    const throwing = createClient({
+      updateStrategy: 'silentAndLater',
+      autoMarkSuccess: true,
+      autoMarkSuccessDelayMs: 0,
+      healthCheck: () => {
+        throw new Error('not ready');
+      },
+    });
+    await renderProvider(throwing);
+    await TestRenderer.act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(throwing.markSuccess).not.toHaveBeenCalled();
+
+    const healthy = createClient({
+      updateStrategy: 'silentAndLater',
+      autoMarkSuccess: true,
+      autoMarkSuccessDelayMs: 0,
+      healthCheck: () => true,
+    });
+    await renderProvider(healthy);
+    await TestRenderer.act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(healthy.markSuccess).toHaveBeenCalledTimes(1);
+  });
+
+  test('test-channel payloads are refused when testChannel is false', async () => {
+    const client = createClient({
+      updateStrategy: 'silentAndLater',
+      checkStrategy: null,
+      testChannel: false,
+    });
+    const captured: { current?: any } = {};
+    const Probe = () => {
+      captured.current = useUpdate();
+      return null;
+    };
+    await renderProvider(client, <Probe />);
+
+    let handled = true;
+    await TestRenderer.act(async () => {
+      handled = captured.current.parseTestQrCode(
+        JSON.stringify({ type: '__rnPushyVersionHash', data: 'target-hash' })
+      );
+      await flush();
+    });
+    expect(handled).toBe(false);
+    expect(client.checkUpdate).not.toHaveBeenCalled();
+  });
+
+  test('a test-channel check passes toHash without swapping the logger', async () => {
+    const logger = mock(() => {});
+    const client = createClient({
+      updateStrategy: 'silentAndLater',
+      checkStrategy: null,
+      logger,
+    });
+    const captured: { current?: any } = {};
+    const Probe = () => {
+      captured.current = useUpdate();
+      return null;
+    };
+    await renderProvider(client, <Probe />);
+
+    await TestRenderer.act(async () => {
+      captured.current.parseTestQrCode({
+        type: '__rnPushyVersionHash',
+        data: 'target-hash',
+      });
+      await flush();
+    });
+    // The provider unwraps { extra } before handing it to the client.
+    expect(client.checkUpdate).toHaveBeenCalledWith({ toHash: 'target-hash' });
+    // The user's logger object is left alone for the whole check.
+    expect((client.options as any).logger).toBe(logger);
+  });
+
   test('onAppResume strategy checks when the app becomes active', async () => {
     const client = createClient({
       updateStrategy: 'silentAndLater',

@@ -20,8 +20,10 @@ import {
   computeProgress,
   enhancedFetch,
   fetchWithTimeout,
+  isProtocolDowngrade,
   joinUrls,
   promiseAny,
+  testUrls,
 } from '../utils';
 
 const originalFetch = globalThis.fetch;
@@ -183,27 +185,32 @@ describe('fetchWithTimeout', () => {
   });
 });
 
-describe('enhancedFetch http fallback', () => {
-  test('retries idempotent requests over http with the scheme anchored', async () => {
+describe('enhancedFetch never downgrades https to http', () => {
+  test('a failed https GET is not replayed over http', async () => {
     const calls: string[] = [];
-    const response = { ok: true } as Response;
     (globalThis as any).fetch = mock(async (url: string) => {
       calls.push(url);
-      if (calls.length === 1) {
-        throw new Error('tls blocked');
-      }
-      return response;
+      throw new Error('tls blocked');
     });
 
-    // Path contains the substring "https" on purpose: a non-anchored replace
-    // would corrupt the path instead of the scheme.
-    expect(
-      await enhancedFetch('https://example.com/dl/https-bundle.ppk', {})
-    ).toBe(response);
-    expect(calls).toEqual([
-      'https://example.com/dl/https-bundle.ppk',
-      'http://example.com/dl/https-bundle.ppk',
-    ]);
+    await expect(
+      enhancedFetch('https://example.com/dl/https-bundle.ppk', {})
+    ).rejects.toThrow('tls blocked');
+    // Exactly one request, and it stayed on https.
+    expect(calls).toEqual(['https://example.com/dl/https-bundle.ppk']);
+  });
+
+  test('a failed https HEAD is not replayed over http', async () => {
+    const calls: string[] = [];
+    (globalThis as any).fetch = mock(async (url: string) => {
+      calls.push(url);
+      throw new Error('tls blocked');
+    });
+
+    await expect(
+      enhancedFetch('https://example.com/dl/bundle.ppk', { method: 'HEAD' })
+    ).rejects.toThrow('tls blocked');
+    expect(calls).toEqual(['https://example.com/dl/bundle.ppk']);
   });
 
   test('does not replay POST requests over http (JS-11 regression)', async () => {
@@ -218,7 +225,7 @@ describe('enhancedFetch http fallback', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  test('does not downgrade urls that are not https', async () => {
+  test('plain http urls are passed through unchanged', async () => {
     const fetchMock = mock(async () => {
       throw new Error('offline');
     });
@@ -228,6 +235,77 @@ describe('enhancedFetch http fallback', () => {
       'offline'
     );
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test('rejects a response whose final url was redirected to http', async () => {
+    (globalThis as any).fetch = mock(async () => ({
+      ok: true,
+      status: 200,
+      url: 'http://mirror.example.com/bundle.ppk',
+    }));
+
+    await expect(
+      enhancedFetch('https://example.com/bundle.ppk', {})
+    ).rejects.toThrow('error_insecure_redirect');
+  });
+
+  test('keeps a response that stayed on https after redirects', async () => {
+    const response = {
+      ok: true,
+      status: 200,
+      url: 'https://mirror.example.com/bundle.ppk',
+    } as Response;
+    (globalThis as any).fetch = mock(async () => response);
+
+    expect(await enhancedFetch('https://example.com/bundle.ppk', {})).toBe(
+      response
+    );
+  });
+
+  test('isProtocolDowngrade only flags https -> http', () => {
+    expect(isProtocolDowngrade('https://a', 'http://b')).toBe(true);
+    expect(isProtocolDowngrade('HTTPS://a', 'HTTP://b')).toBe(true);
+    expect(isProtocolDowngrade('https://a', 'https://b')).toBe(false);
+    expect(isProtocolDowngrade('http://a', 'https://b')).toBe(false);
+    expect(isProtocolDowngrade('http://a', 'http://b')).toBe(false);
+    expect(isProtocolDowngrade('https://a', undefined)).toBe(false);
+    expect(isProtocolDowngrade('https://a', '')).toBe(false);
+  });
+});
+
+describe('testUrls', () => {
+  test('a HEAD probe redirected to http never becomes the download url', async () => {
+    (globalThis as any).fetch = mock(async (url: string) => {
+      if (url === 'https://bad.example.com/bundle.ppk') {
+        return {
+          status: 200,
+          statusText: 'OK',
+          url: 'http://bad.example.com/bundle.ppk',
+        };
+      }
+      return { status: 200, statusText: 'OK', url };
+    });
+
+    expect(
+      await testUrls([
+        'https://bad.example.com/bundle.ppk',
+        'https://good.example.com/bundle.ppk',
+      ])
+    ).toBe('https://good.example.com/bundle.ppk');
+  });
+
+  test('when every probe downgrades, the configured https url is kept', async () => {
+    (globalThis as any).fetch = mock(async (url: string) => ({
+      status: 200,
+      statusText: 'OK',
+      url: url.replace(/^https:/, 'http:'),
+    }));
+
+    // Falls back to the first configured url, still https — the real
+    // download then fails closed instead of silently going plaintext.
+    expect(await testUrls(['https://a.example.com/x'])).toBe(
+      'https://a.example.com/x'
+    );
   });
 });
 

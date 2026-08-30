@@ -26,12 +26,12 @@ jobs:
       HVD_NAME: api20
     steps:
       - name: Checkout react-native-update
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           submodules: recursive
 
       - name: Checkout react-native-update-cli
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: reactnativecn/react-native-update-cli
           path: react-native-update-cli
@@ -94,7 +94,7 @@ jobs:
       - name: Upload failure diagnostics
         # cancelled() 覆盖 job 超时被杀的场景,否则超时时拿不到现场
         if: failure() || cancelled()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: harmony-e2e-diagnostics
           path: harmony-diagnostics/

@@ -41,10 +41,13 @@ import type {
   UpdateServerConfig,
 } from './type';
 import {
+  buildCheckFingerprint,
   buildCheckRequestBody,
   type DownloadPlan,
   type DownloadStrategyType,
   decideDownload,
+  isMirrorRetryableCode,
+  isValidCheckResult,
 } from './updateFlowCore';
 import {
   assertWeb,
@@ -171,6 +174,7 @@ export class Pushy {
   clientType: 'Pushy' | 'Cresc' = 'Pushy';
   lastChecking?: number;
   lastRespJson?: Promise<CheckResult>;
+  lastCheckFingerprint?: string;
   // Endpoint that most recently served a successful checkUpdate; telemetry
   // reuses it instead of re-running the fallback race.
   private lastWorkingEndpoint?: string;
@@ -367,6 +371,35 @@ export class Pushy {
         this.nativeConfigSyncInFlight = false;
         this.flushNativeConfig();
       });
+  };
+
+  /**
+   * Tell the native cold-start orchestrator that this process already holds a
+   * valid check response for the current config, so its delayed round (5s
+   * after launch) does not repeat the request. Fire-and-forget: a failure
+   * costs one duplicate check. Never called on a failed check — the native
+   * rescue must keep running when JS could not reach the server.
+   */
+  private markJsCheckCompleted = () => {
+    if (
+      Platform.OS === 'web' ||
+      typeof PushyModule.markJsCheckCompleted !== 'function'
+    ) {
+      return;
+    }
+    const configJson = this.getNativeConfigJson();
+    if (!configJson) {
+      return;
+    }
+    try {
+      Promise.resolve(PushyModule.markJsCheckCompleted(configJson)).catch(
+        (e: any) => {
+          log('markJsCheckCompleted failed:', e?.message || e);
+        }
+      );
+    } catch (e: any) {
+      log('markJsCheckCompleted failed:', e?.message || e);
+    }
   };
 
   private syncNativeConfig = () => {
@@ -738,7 +771,17 @@ export class Pushy {
       );
     }
 
-    return (await resp.json()) as CheckResult;
+    const result: unknown = await resp.json();
+    if (!isValidCheckResult(result)) {
+      // A 2xx that is not a verdict (`{"error": ...}`, a captive-portal page
+      // that parsed, ...) is a failed endpoint: throwing keeps the fallback
+      // moving to the next one instead of treating it as "no update".
+      throw new UpdateError(
+        this.t('error_invalid_check_response'),
+        'INVALID_RESPONSE'
+      );
+    }
+    return result;
   };
   fetchCheckResult = async (fetchPayload: Parameters<typeof fetch>[1]) => {
     const { endpoint, value } = await executeEndpointFallback<CheckResult>({
@@ -927,10 +970,33 @@ export class Pushy {
     // buildTime 启发式),下一次检查自然带上——绝不为它 await、拖慢或复杂化
     // 检查流程。
     const bundleHash = __DEV__ ? '' : getBundleHash();
+    const fetchBody = buildCheckRequestBody({
+      packageVersion: this.getEffectivePackageVersion(),
+      currentVersion,
+      buildTime,
+      cInfo,
+      supportedDiffVersion,
+      bundleHash,
+      isDev: __DEV__,
+      extra,
+    });
+    const stringifyBody = JSON.stringify(fetchBody);
+    // Identity of this check: only a check with the exact same request (same
+    // extra / test hash / bundleHash / binary identity) against the same
+    // endpoint set may share an in-flight or just-settled response. Two
+    // checks 2s apart with different `extra` are different questions.
+    const fingerprint = buildCheckFingerprint({
+      appKey: this.options.appKey,
+      endpoints: this.options.server?.main,
+      queryUrls: this.options.server?.queryUrls,
+      // The client uuid travels inside cInfo, i.e. inside `body`.
+      body: stringifyBody,
+    });
     const now = Date.now();
     if (
       this.lastRespJson &&
       this.lastChecking &&
+      this.lastCheckFingerprint === fingerprint &&
       now - this.lastChecking < 1000 * 5
     ) {
       try {
@@ -949,17 +1015,7 @@ export class Pushy {
       }
     }
     this.lastChecking = now;
-    const fetchBody = buildCheckRequestBody({
-      packageVersion: this.getEffectivePackageVersion(),
-      currentVersion,
-      buildTime,
-      cInfo,
-      supportedDiffVersion,
-      bundleHash,
-      isDev: __DEV__,
-      extra,
-    });
-    const stringifyBody = JSON.stringify(fetchBody);
+    this.lastCheckFingerprint = fingerprint;
     // harmony fetch body is not string
     let body: any = fetchBody;
     if (Platform.OS === 'ios' || Platform.OS === 'android') {
@@ -973,7 +1029,6 @@ export class Pushy {
       },
       body,
     };
-    const previousRespJson = this.lastRespJson;
     try {
       this.report({
         type: 'checking',
@@ -1007,19 +1062,25 @@ export class Pushy {
       }
 
       this.notifyAfterCheckUpdate({ status: 'completed', result });
+      this.markJsCheckCompleted();
       return result;
     } catch (e: any) {
-      this.lastRespJson = previousRespJson;
+      // A failed check must not keep vouching for an older response: clear
+      // the dedup slot so the next call re-asks the server.
+      this.lastRespJson = undefined;
+      this.lastCheckFingerprint = undefined;
       const err = toUpdateError(e, 'CHECK_FAILED');
       this.emitError(err, 'errorChecking', {
         message: err.message || this.t('error_cannot_connect_server'),
       });
       this.notifyAfterCheckUpdate({ status: 'error', error: err });
       this.throwIfEnabled(err);
-      // Fall back to the previous successful response if we have one; otherwise
-      // return undefined so callers can distinguish "check failed" from a real
-      // empty result and avoid overwriting the last good updateInfo.
-      return previousRespJson ? await previousRespJson : undefined;
+      // No silent fallback to a previous successful response: a stale result
+      // would let a server outage look like "still updatable" and drive the
+      // provider's auto-download off it. Return undefined so callers can
+      // distinguish "check failed" from a real empty result and keep their
+      // last good updateInfo.
+      return undefined;
     }
   };
   downloadUpdate = async (
@@ -1077,6 +1138,28 @@ export class Pushy {
       delete sharedState.downloadingTasks[hash];
     }
   };
+  /**
+   * Orders candidate mirrors for one artifact: the HEAD-race winner first
+   * (its post-redirect URL), then the remaining mirrors in configured order.
+   * Empty when there is nothing to try.
+   */
+  private rankDownloadUrls = async (urls?: string[]): Promise<string[]> => {
+    if (!urls?.length) {
+      return [];
+    }
+    const winner = await testUrls(urls);
+    const ordered: string[] = [];
+    const push = (url?: string | null) => {
+      if (url && !ordered.includes(url)) {
+        ordered.push(url);
+      }
+    };
+    push(winner);
+    for (const url of urls) {
+      push(url);
+    }
+    return ordered;
+  };
   private performDownload = async (
     updateInfo: CheckResult,
     plan: DownloadPlan,
@@ -1103,7 +1186,13 @@ export class Pushy {
         progress: computeProgress(data.received, data.total),
       };
       callbacks.forEach((callback) => {
-        callback(payload);
+        // One subscriber throwing must not starve the others or abort the
+        // download: business callbacks are isolated, the error is logged.
+        try {
+          callback(payload);
+        } catch (e) {
+          warn('onDownloadProgress callback threw', e);
+        }
       });
     };
     // RN >= 0.87 types native event listeners as `(...args: readonly Object[])`,
@@ -1164,7 +1253,12 @@ export class Pushy {
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       if (attempt > 0) {
-        const backoffMs = Math.min(1000 * 2 ** (attempt - 1), 10000);
+        // Exponential backoff with jitter: a bad CDN edge otherwise gets
+        // every client back at the same 1/2/4s marks.
+        const backoffMs = Math.round(
+          Math.min(1000 * 2 ** (attempt - 1), 10000) *
+            (0.75 + Math.random() * 0.5)
+        );
         log(`retry attempt ${attempt}/${maxRetries}, waiting ${backoffMs}ms`);
         await new Promise((r) => setTimeout(r, backoffMs));
         errorMessages.length = 0;
@@ -1186,28 +1280,39 @@ export class Pushy {
         if (succeeded) {
           break;
         }
-        const url = await testUrls(urls);
-        if (!url) {
-          continue;
-        }
-        log(`downloading ${type}`);
-        try {
-          await runners[type](url);
-          succeeded = type;
-        } catch (e: any) {
-          const errorMessage = this.t(errorKeys[type], {
-            message: e.message,
-          });
-          errorMessages.push(errorMessage);
-          // Keep the i18n message for display, but preserve the native
-          // rejection's stable code (e.g. PATCH_FAILED vs DOWNLOAD_FAILED —
-          // telemetry classifies on it) and the original error as cause.
-          lastError = new UpdateError(
-            errorMessage,
-            asUpdateErrorCode(e?.code) ?? 'DOWNLOAD_FAILED',
-            { cause: e }
-          );
-          log(errorMessage);
+        // The HEAD race only ranks mirrors; it is not proof that a mirror can
+        // serve the whole artifact (CDNs answer HEAD and GET differently, and
+        // a transfer can die mid-stream). Every mirror of the same artifact
+        // gets a real download attempt before the strategy is abandoned —
+        // the native cold-start path already behaves this way.
+        const orderedUrls = await this.rankDownloadUrls(urls);
+        for (const url of orderedUrls) {
+          log(`downloading ${type} from ${url}`);
+          try {
+            await runners[type](url);
+            succeeded = type;
+            break;
+          } catch (e: any) {
+            const errorMessage = this.t(errorKeys[type], {
+              message: e.message,
+            });
+            errorMessages.push(errorMessage);
+            // Keep the i18n message for display, but preserve the native
+            // rejection's stable code (e.g. PATCH_FAILED vs DOWNLOAD_FAILED —
+            // telemetry classifies on it) and the original error as cause.
+            lastError = new UpdateError(
+              errorMessage,
+              asUpdateErrorCode(e?.code) ?? 'DOWNLOAD_FAILED',
+              { cause: e }
+            );
+            log(errorMessage);
+            if (!isMirrorRetryableCode(lastError.code)) {
+              // The bytes arrived but could not be applied (patch/manifest
+              // mismatch): every mirror serves the same artifact, so move
+              // on to the next strategy instead of re-downloading it.
+              break;
+            }
+          }
         }
       }
       if (succeeded) {
@@ -1278,7 +1383,19 @@ export class Pushy {
     if (sharedState.toHash === hash) {
       hashInfo.debugChannel = true;
     }
-    setLocalHashInfo(hash, hashInfo);
+    // The version is "downloaded" only once its metadata is persisted: a
+    // lost hash-info write would leave the next launch with a nameless
+    // version and a switchVersion that the native side may refuse.
+    try {
+      await setLocalHashInfo(hash, hashInfo);
+    } catch (e: any) {
+      const err = toUpdateError(e, 'FILE_OPERATION_FAILED');
+      this.emitError(err, 'errorUpdate', {
+        message: err.message,
+        data: { newVersion: hash },
+      });
+      throw err;
+    }
     sharedState.downloadedHash = hash;
     return hash;
   };

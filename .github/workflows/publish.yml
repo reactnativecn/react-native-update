@@ -17,7 +17,7 @@ jobs:
       harmony_changed: ${{ steps.check.outputs.changed }}
       prev_tag: ${{ steps.check.outputs.prev_tag }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
       - name: Check Harmony changes
@@ -63,7 +63,7 @@ jobs:
       # Keep in sync with PINNED_NDK_VERSION in scripts/build-android-so.sh.
       NDK_VERSION: 28.2.13676358
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           submodules: recursive
       - name: Install pinned NDK
@@ -74,7 +74,7 @@ jobs:
         # resolution order — force the pinned one so published .so files don't
         # drift with runner image upgrades.
         run: ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$NDK_VERSION" bash scripts/build-android-so.sh
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: android-so
           path: android/lib/
@@ -84,19 +84,22 @@ jobs:
     needs: [check_changes, build_android_so]
     if: needs.check_changes.outputs.harmony_changed == 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    container: ghcr.io/sanchuanhehe/harmony-next-pipeline-docker/harmonyos-ci-image:latest
+    # Pinned by digest (manifest list of :latest as of 2026-08-30); bump deliberately.
+    container: ghcr.io/sanchuanhehe/harmony-next-pipeline-docker/harmonyos-ci-image:latest@sha256:2836142b7b6ae8837ad0e36cacc650f00e8c88f55b4e9f34be66cc98a731c5da
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           submodules: recursive
       - name: Configure git safe.directory
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git submodule foreach --recursive 'git config --global --add safe.directory "$toplevel/$sm_path"'
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.0
       # Setup .npmrc file to publish to npm
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
           registry-url: 'https://registry.npmjs.org'
@@ -107,7 +110,7 @@ jobs:
       - name: Remove committed Android native libraries
         run: rm -rf android/lib
       - name: Use CI-built Android native libraries
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: android-so
           path: android/lib
@@ -117,6 +120,10 @@ jobs:
         run: npm run build:harmony-har -- --build-mode release
       - name: Verify Harmony HAR artifact
         run: test -f harmony/pushy.har
+      - name: Verify release tag matches package version
+        run: node scripts/check-release-version.js
+      - name: Verify publish file list
+        run: node scripts/check-packlist.js --release
       - name: Publish to npm
         shell: bash
         run: |
@@ -132,16 +139,18 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           submodules: recursive
       - name: Configure git safe.directory
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git submodule foreach --recursive 'git config --global --add safe.directory "$toplevel/$sm_path"'
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.0
       # Setup .npmrc file to publish to npm
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
           registry-url: 'https://registry.npmjs.org'
@@ -152,7 +161,7 @@ jobs:
       - name: Remove committed Android native libraries
         run: rm -rf android/lib
       - name: Use CI-built Android native libraries
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: android-so
           path: android/lib
@@ -175,6 +184,10 @@ jobs:
           rm -rf "react-native-update-${PREV_VERSION}.tgz" package
       - name: Verify Harmony HAR artifact
         run: test -f harmony/pushy.har
+      - name: Verify release tag matches package version
+        run: node scripts/check-release-version.js
+      - name: Verify publish file list
+        run: node scripts/check-packlist.js --release
       - name: Publish to npm
         shell: bash
         run: |

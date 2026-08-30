@@ -896,6 +896,25 @@ bool ExportFunction(
 
 // sha256(Uint8Array | ArrayBuffer) -> 小写 hex。同步：bundleHash 的输入是
 // rawfile 里的 bundle(已整体读入内存,与 pdiff 的读法一致),哈希本身毫秒级。
+static napi_value MakeUtf8String(napi_env env, const std::string& value);
+
+// Streaming file digest (bounded memory) for the install record.
+static napi_value Sha256HexFile(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value args[1] = {nullptr};
+  if (!GetArgCount(env, info, &argc, args) || argc < 1) {
+    ThrowError(env, "sha256HexFile: missing path argument");
+    return nullptr;
+  }
+  bool ok = false;
+  std::string path = GetString(env, args[0], &ok);
+  if (!ok) {
+    ThrowError(env, "sha256HexFile: path must be a string");
+    return nullptr;
+  }
+  return MakeUtf8String(env, pushy::digest::Sha256File(path));
+}
+
 static napi_value Sha256Hex(napi_env env, napi_callback_info info) {
   size_t argc = 1;
   napi_value args[1] = {nullptr};
@@ -1060,6 +1079,22 @@ static napi_value FlowOrderEndpointCandidates(napi_env env,
                             endpoints, sample)));
 }
 
+static napi_value FlowIsValidCheckResponse(napi_env env,
+                                           napi_callback_info info) {
+  size_t argc = 1;
+  napi_value args[1] = {nullptr};
+  if (!GetArgCount(env, info, &argc, args) || argc < 1) {
+    ThrowError(env, "isValidCheckResponse: missing arguments");
+    return nullptr;
+  }
+  bool ok = false;
+  std::string response_text = GetString(env, args[0], &ok);
+  napi_value result = nullptr;
+  napi_get_boolean(env, ok && updateflow::IsValidCheckResponse(response_text),
+                   &result);
+  return result;
+}
+
 static napi_value FlowHandleCheckResponse(napi_env env,
                                           napi_callback_info info) {
   size_t argc = 3;
@@ -1099,10 +1134,12 @@ napi_value Init(napi_env env, napi_value exports) {
       !ExportFunction(env, exports, "applyPatchFromFileSource", ApplyPatchFromFileSource) ||
       !ExportFunction(env, exports, "cleanupOldEntries", CleanupOldEntries) ||
       !ExportFunction(env, exports, "sha256Hex", Sha256Hex) ||
+      !ExportFunction(env, exports, "sha256HexFile", Sha256HexFile) ||
       !ExportFunction(env, exports, "crc32", Crc32) ||
       !ExportFunction(env, exports, "getSupportedDiffVersion", GetSupportedDiffVersion) ||
       !ExportFunction(env, exports, "buildCheckRequestBody", FlowBuildCheckRequestBody) ||
       !ExportFunction(env, exports, "orderEndpointCandidates", FlowOrderEndpointCandidates) ||
+      !ExportFunction(env, exports, "isValidCheckResponse", FlowIsValidCheckResponse) ||
       !ExportFunction(env, exports, "handleCheckResponse", FlowHandleCheckResponse)) {
     return nullptr;
   }

@@ -83,7 +83,6 @@ android/jni/lzma/DOC
 
 # Ignore unnecessary development files
 scripts/**
-!scripts/check-expo-version.js
 harmony/pushy/src/test/
 babel.config.js
 tsconfig.json

@@ -1,9 +1,11 @@
 #import "RCTPushy.h"
 #import "RCTPushyDownloader.h"
 #import "ZipArchive.h"
+#include "../../cpp/patch_core/archive_limits.h"
 #include "../../cpp/patch_core/archive_patch_core.h"
 #include "../../cpp/patch_core/digest.h"
 #include "../../cpp/patch_core/hbc_transform_wire.h"
+#include "../../cpp/patch_core/install_record.h"
 #include "../../cpp/patch_core/error_codes.h"
 #include "../../cpp/patch_core/patch_core.h"
 #include "../../cpp/patch_core/state_core.h"
@@ -57,7 +59,8 @@ static NSString *const PushyErrorDomain = @"cn.reactnative.pushy";
 static NSString * const BUNDLE_FILE_NAME = @"index.bundlejs";
 static NSString * const SOURCE_PATCH_NAME = @"__diff.json";
 static NSString * const BUNDLE_PATCH_NAME = @"index.bundlejs.patch";
-static NSString * const VERSION_COMPLETE_FILE_NAME = @".pushy-complete";
+#define VERSION_COMPLETE_FILE_NAME_LITERAL ".pushy-complete"
+static NSString * const VERSION_COMPLETE_FILE_NAME = @VERSION_COMPLETE_FILE_NAME_LITERAL;
 
 // error def — messages are human-readable; the stable cross-platform codes
 // live in cpp/patch_core/error_codes.h and travel in PushyErrorCodeKey.
@@ -79,12 +82,176 @@ static NSTimeInterval PushyMonotonicNow(void) {
     return [NSProcessInfo processInfo].systemUptime;
 }
 
-static BOOL PushyHasCompletedVersionAtPath(NSString *versionDir) {
-    NSString *bundlePath = [versionDir stringByAppendingPathComponent:BUNDLE_FILE_NAME];
-    NSString *markerPath = [versionDir stringByAppendingPathComponent:VERSION_COMPLETE_FILE_NAME];
-    return [[NSFileManager defaultManager] fileExistsAtPath:bundlePath]
-        && [[NSFileManager defaultManager] fileExistsAtPath:markerPath];
+static std::string PushyToStdString(NSString *value);
+
+static NSString *PushyStagingDirForVersionDir(NSString *versionDir) {
+    return [versionDir stringByAppendingString:@(pushy::install_record::kStagingSuffix)];
 }
+
+// Parsed completion record (cpp/patch_core/install_record.h): nil when the
+// file is absent or malformed; an empty dictionary for the legacy empty
+// marker written by SDK < 10.53.
+static NSDictionary *PushyReadInstallRecord(NSString *versionDir) {
+    NSString *path = [versionDir stringByAppendingPathComponent:VERSION_COMPLETE_FILE_NAME];
+    NSData *data = [NSData dataWithContentsOfFile:path];
+    if (data == nil) {
+        return nil;
+    }
+    if (data.length == 0) {
+        return @{};
+    }
+    if (data.length > 64 * 1024) {
+        return nil;
+    }
+    id object = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    return [object isKindOfClass:[NSDictionary class]] ? (NSDictionary *)object : nil;
+}
+
+// Presence check (launch / dedup paths, no digest work): bundle present and
+// the record exists and, unless legacy-empty, names this version.
+static BOOL PushyHasCompletedVersionAtPath(NSString *versionDir, NSString *hash) {
+    NSString *bundlePath = [versionDir stringByAppendingPathComponent:BUNDLE_FILE_NAME];
+    if (![[NSFileManager defaultManager] fileExistsAtPath:bundlePath]) {
+        return NO;
+    }
+    NSDictionary *record = PushyReadInstallRecord(versionDir);
+    if (record == nil) {
+        return NO;
+    }
+    if (record.count == 0) {
+        return YES;
+    }
+    return [record[@"schema"] isKindOfClass:[NSNumber class]]
+        && [record[@"schema"] intValue] == pushy::install_record::kSchema
+        && [record[@"versionHash"] isKindOfClass:[NSString class]]
+        && [record[@"versionHash"] isEqualToString:hash];
+}
+
+// Activation check: re-hashes the bundle when the record carries a digest.
+// Returns nil when the directory may be activated, the reason otherwise.
+static NSString *PushyVerifyInstallForActivation(NSString *versionDir, NSString *hash) {
+    NSDictionary *record = PushyReadInstallRecord(versionDir);
+    if (record == nil) {
+        return [NSString stringWithFormat:@"Bundle version %@ has no valid completion record.", hash];
+    }
+    if (record.count == 0) {
+        return nil;
+    }
+    if (![record[@"schema"] isKindOfClass:[NSNumber class]]
+        || [record[@"schema"] intValue] != pushy::install_record::kSchema
+        || ![record[@"versionHash"] isKindOfClass:[NSString class]]
+        || ![record[@"versionHash"] isEqualToString:hash]) {
+        return [NSString stringWithFormat:@"Bundle version %@ completion record mismatch.", hash];
+    }
+    NSString *expected = record[@"bundleSha256"];
+    if (![expected isKindOfClass:[NSString class]] || expected.length == 0) {
+        return nil;
+    }
+    std::string actual = pushy::digest::Sha256File(
+        PushyToStdString([versionDir stringByAppendingPathComponent:BUNDLE_FILE_NAME]));
+    if ([[expected lowercaseString] isEqualToString:[NSString stringWithUTF8String:actual.c_str()]]) {
+        return nil;
+    }
+    return [NSString stringWithFormat:@"Bundle version %@ bundle digest mismatch.", hash];
+}
+
+// SHA-256 of each in-flight download's archive, keyed by hash; consumed by
+// the completion record write. Guarded by @synchronized on the table.
+static NSMutableDictionary<NSString *, NSString *> *PushyArtifactDigests(void) {
+    static NSMutableDictionary *table;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        table = [NSMutableDictionary dictionary];
+    });
+    return table;
+}
+
+static NSError *PushyErrorWithCode(const char *code, NSString *message);
+
+static long long PushyFileSizeAtPath(NSString *path) {
+    NSDictionary *attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil];
+    NSNumber *size = attributes[NSFileSize];
+    return size == nil ? -1 : size.longLongValue;
+}
+
+// Free space on the volume holding `path` (walks up to an existing ancestor);
+// -1 when unknown.
+static long long PushyFreeDiskSpaceForPath(NSString *path) {
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    NSString *probe = path;
+    while (probe.length > 1 && ![fileManager fileExistsAtPath:probe]) {
+        probe = [probe stringByDeletingLastPathComponent];
+    }
+    NSDictionary *attributes = [fileManager attributesOfFileSystemForPath:probe error:nil];
+    NSNumber *free = attributes[NSFileSystemFreeSize];
+    return free == nil ? -1 : free.longLongValue;
+}
+
+// nil when the volume can take `bytesToWrite` plus the safety margin (or the
+// free space is unknown); an error otherwise.
+static NSError *PushyEnsureFreeSpace(NSString *path, long long bytesToWrite) {
+    long long free = PushyFreeDiskSpaceForPath(path);
+    if (free < 0) {
+        return nil;
+    }
+    long long needed = MAX(0LL, bytesToWrite) + pushy::archive_limits::kFreeDiskMarginBytes;
+    if (free < needed) {
+        return PushyErrorWithCode(
+            pushy::error_codes::kPatchFailed,
+            [NSString stringWithFormat:@"insufficient disk space: need %lld bytes, have %lld",
+                needed, free]);
+    }
+    return nil;
+}
+
+// SSZipArchive delegate enforcing cpp/patch_core/archive_limits.h while the
+// archive is walked: entry count, per-entry size, total size, compression
+// ratio. SSZipArchive silently skips an entry the delegate refuses, so the
+// first violation is recorded and turned into a hard failure afterwards.
+@interface PushyUnzipGuard : NSObject <SSZipArchiveDelegate>
+@property (nonatomic, copy) NSString *violation;
+@property (nonatomic, assign) long long totalUncompressed;
+@end
+
+@implementation PushyUnzipGuard
+
+- (void)zipArchiveWillUnzipArchiveAtPath:(NSString *)path zipInfo:(unz_global_info)zipInfo {
+    if ((long long)zipInfo.number_entry > pushy::archive_limits::kMaxEntries) {
+        self.violation = [NSString stringWithFormat:@"archive has too many entries (%lu)",
+                          (unsigned long)zipInfo.number_entry];
+    }
+}
+
+- (BOOL)zipArchiveShouldUnzipFileAtIndex:(NSInteger)fileIndex
+                              totalFiles:(NSInteger)totalFiles
+                             archivePath:(NSString *)archivePath
+                                fileInfo:(unz_file_info)fileInfo {
+    if (self.violation != nil) {
+        return NO;
+    }
+    long long size = (long long)fileInfo.uncompressed_size;
+    long long compressed = (long long)fileInfo.compressed_size;
+    if (size > pushy::archive_limits::kMaxEntryBytes) {
+        self.violation = [NSString stringWithFormat:@"archive entry #%ld too large (%lld bytes)",
+                          (long)fileIndex, size];
+        return NO;
+    }
+    self.totalUncompressed += size;
+    if (self.totalUncompressed > pushy::archive_limits::kMaxTotalUncompressedBytes) {
+        self.violation = [NSString stringWithFormat:@"archive expands beyond %lld bytes",
+                          pushy::archive_limits::kMaxTotalUncompressedBytes];
+        return NO;
+    }
+    if (compressed > 0 && size > pushy::archive_limits::kRatioCheckMinBytes
+        && size / compressed > pushy::archive_limits::kMaxCompressionRatio) {
+        self.violation = [NSString stringWithFormat:@"archive entry #%ld compression ratio too high",
+                          (long)fileIndex];
+        return NO;
+    }
+    return YES;
+}
+
+@end
 
 static NSError *PushyDownloadDeadlineExpiredError(void) {
     return [NSError errorWithDomain:PushyErrorDomain
@@ -475,6 +642,7 @@ static void PushySwitchVersionLocked(NSString *hash) {
 // launch. Decisions come from cpp/update_flow_core; this class is IO glue.
 @interface RCTPushyOrchestrator : NSObject
 + (void)scheduleFromColdStart:(NSString *)launchRolledBackVersion;
++ (void)markJsCheckCompleted:(NSString *)config;
 + (void)startRoundWithDeadline:(NSTimeInterval)deadlineUptime;
 + (void)runOnce:(NSString *)launchRolledBackVersion deadline:(NSTimeInterval)deadlineUptime;
 + (void)runRescueWithDeadline:(NSTimeInterval)deadlineUptime;
@@ -510,6 +678,10 @@ static uint64_t pushyUnactivatedGeneration = 0;
 static NSUncaughtExceptionHandler *pushyPreviousExceptionHandler = NULL;
 // ≈ process start: scheduleFromColdStart runs during the first bundleURL.
 static NSTimeInterval pushyProcessAnchorUptime = 0;
+// Config JSON for which JS reported a completed check in this process
+// (markJsCheckCompleted). Process-scoped by design. Guarded by
+// @synchronized (RCTPushyOrchestrator class).
+static NSString *pushyJsCompletedConfig = nil;
 
 static const NSTimeInterval kPushyRescueTriggerUptime = 60;
 static const NSTimeInterval kPushyRescueBudgetBackgroundThread = 10;
@@ -743,6 +915,16 @@ RCT_EXPORT_MODULE(RCTPushy);
         ret[@"currentVersion"] = currentVersion;
         if (currentVersion != nil) {
             ret[@"currentVersionInfo"] = [defaults objectForKey:PushyHashInfoKey(currentVersion)];
+            // bundleSha256 from the install record, for crash-report attribution.
+            NSString *bundleSha256 = @"";
+            if (PushyIsSafePathComponent(currentVersion)) {
+                NSDictionary *record = PushyReadInstallRecord(
+                    [[RCTPushy downloadDir] stringByAppendingPathComponent:currentVersion]);
+                if ([record[@"bundleSha256"] isKindOfClass:[NSString class]]) {
+                    bundleSha256 = record[@"bundleSha256"];
+                }
+            }
+            ret[@"currentBundleSha256"] = bundleSha256;
         }
 
         if (ret[@"isFirstTime"]) {
@@ -822,6 +1004,18 @@ RCT_EXPORT_METHOD(getNativeCheckCache:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 {
     resolve([PushyDefaults() stringForKey:keyNativeCheckCache] ?: @"");
+}
+
+RCT_EXPORT_METHOD(markJsCheckCompleted:(NSString *)config
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+{
+    if (PushyStringIsBlank(config)) {
+        PushyRejectError(reject, PushyErrorWithCode(pushy::error_codes::kInvalidOptions, ERROR_OPTIONS));
+        return;
+    }
+    [RCTPushyOrchestrator markJsCheckCompleted:config];
+    resolve(@true);
 }
 
 RCT_EXPORT_METHOD(setLocalHashInfo:(NSString *)hash
@@ -1094,7 +1288,7 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
     }
 
     NSString *unzipDir = [dir stringByAppendingPathComponent:hash];
-    if (PushyHasCompletedVersionAtPath(unzipDir)) {
+    if (PushyHasCompletedVersionAtPath(unzipDir, hash)) {
         callback(nil);
         return;
     }
@@ -1142,20 +1336,59 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
         // completion marker write has run on the process-wide file queue.
         dispatch_async(self->_fileQueue, ^{
             NSError *finalError = error;
+            NSFileManager *fileManager = [NSFileManager defaultManager];
+            NSString *staging = PushyStagingDirForVersionDir(unzipDir);
+            NSString *artifactSha256 = nil;
+            @synchronized (PushyArtifactDigests()) {
+                artifactSha256 = PushyArtifactDigests()[hash];
+                [PushyArtifactDigests() removeObjectForKey:hash];
+            }
             if (finalError == nil) {
-                NSString *marker = [unzipDir stringByAppendingPathComponent:VERSION_COMPLETE_FILE_NAME];
-                NSError *markerError = nil;
-                BOOL marked = [[NSData data] writeToFile:marker
-                                                 options:NSDataWritingAtomic
-                                                   error:&markerError];
-                if (!marked) {
-                    finalError = markerError ?: PushyErrorWithCode(
-                        pushy::error_codes::kFileOperationFailed,
-                        @"failed to mark completed update");
+                // Two-phase install (cpp/patch_core/install_record.h): the
+                // completion record with the final bundle's digest goes into
+                // the staging directory, which is then renamed over the
+                // version directory in one atomic step.
+                NSString *bundlePath = [staging stringByAppendingPathComponent:BUNDLE_FILE_NAME];
+                if (![fileManager fileExistsAtPath:bundlePath]) {
+                    finalError = PushyErrorWithCode(pushy::error_codes::kPatchFailed,
+                                                    @"bundle missing after install");
+                } else {
+                    std::string bundleSha256 = pushy::digest::Sha256File(PushyToStdString(bundlePath));
+                    NSMutableDictionary *record = [NSMutableDictionary dictionary];
+                    record[@"schema"] = @(pushy::install_record::kSchema);
+                    record[@"versionHash"] = hash;
+                    if (!bundleSha256.empty()) {
+                        record[@"bundleSha256"] = [NSString stringWithUTF8String:bundleSha256.c_str()];
+                    }
+                    if (artifactSha256.length > 0) {
+                        record[@"artifactSha256"] = artifactSha256;
+                    }
+                    NSError *recordError = nil;
+                    NSData *recordData = [NSJSONSerialization dataWithJSONObject:record options:0 error:&recordError];
+                    NSString *marker = [staging stringByAppendingPathComponent:VERSION_COMPLETE_FILE_NAME];
+                    if (recordData == nil || ![recordData writeToFile:marker
+                                                               options:NSDataWritingAtomic
+                                                                 error:&recordError]) {
+                        finalError = recordError ?: PushyErrorWithCode(
+                            pushy::error_codes::kFileOperationFailed,
+                            @"failed to write completion record");
+                    } else {
+                        if ([fileManager fileExistsAtPath:unzipDir]) {
+                            [fileManager removeItemAtPath:unzipDir error:nil];
+                        }
+                        NSError *moveError = nil;
+                        if (![fileManager moveItemAtPath:staging toPath:unzipDir error:&moveError]) {
+                            finalError = moveError ?: PushyErrorWithCode(
+                                pushy::error_codes::kFileOperationFailed,
+                                @"failed to promote staging directory");
+                        }
+                    }
                 }
             }
             if (finalError != nil) {
-                [[NSFileManager defaultManager] removeItemAtPath:unzipDir error:nil];
+                // Only the staging directory is ours to drop: the final
+                // version directory is never touched by a failed install.
+                [fileManager removeItemAtPath:staging error:nil];
             }
             PushyFinishDownload(hash, finalError);
         });
@@ -1192,7 +1425,17 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
                       callback:(void (^)(NSError *error))callback
 {
     RCTLogInfo(@"RCTPushy -- unzip file %@", zipFilePath);
-    NSString *unzipFilePath = [[RCTPushy downloadDir] stringByAppendingPathComponent:hash];
+    // Everything lands in <hash>.staging; the completion block promotes it.
+    NSString *unzipFilePath = PushyStagingDirForVersionDir(
+        [[RCTPushy downloadDir] stringByAppendingPathComponent:hash]);
+    dispatch_async(_fileQueue, ^{
+        // Archive digest for the completion record, taken before the unzip
+        // consumes the file (same serial queue, so it runs first).
+        std::string digest = pushy::digest::Sha256File(PushyToStdString(zipFilePath));
+        @synchronized (PushyArtifactDigests()) {
+            PushyArtifactDigests()[hash] = [NSString stringWithUTF8String:digest.c_str()];
+        }
+    });
     [self unzipFileAtPath:zipFilePath
             toDestination:unzipFilePath
         completionHandler:^(NSError *error) {
@@ -1240,11 +1483,19 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
                    source:(NSString *)sourceOrigin
                  callback:(void (^)(NSError *error))callback
 {
-    NSString *unzipDir = [[RCTPushy downloadDir] stringByAppendingPathComponent:hash];
+    // Patch work happens in the staging directory (two-phase install).
+    NSString *unzipDir = PushyStagingDirForVersionDir(
+        [[RCTPushy downloadDir] stringByAppendingPathComponent:hash]);
     NSString *sourcePatch = [unzipDir stringByAppendingPathComponent:SOURCE_PATCH_NAME];
     NSString *bundlePatch = [unzipDir stringByAppendingPathComponent:BUNDLE_PATCH_NAME];
     
     NSString *destination = [unzipDir stringByAppendingPathComponent:BUNDLE_FILE_NAME];
+    long long manifestBytes = PushyFileSizeAtPath(sourcePatch);
+    if (manifestBytes > pushy::archive_limits::kMaxManifestBytes) {
+        callback(PushyErrorWithCode(pushy::error_codes::kPatchFailed,
+            [NSString stringWithFormat:@"patch manifest too large: %lld bytes", manifestBytes]));
+        return;
+    }
     NSData *data = [NSData dataWithContentsOfFile:sourcePatch];
     if (data == nil) {
         callback(PushyErrorWithCode(pushy::error_codes::kPatchFailed, @"missing patch manifest"));
@@ -1336,9 +1587,43 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
         return NO;
     }
 
+    __block NSError *switchError = nil;
     PushyWithStateLock(^{
+        // Same rule as Android: only a version this SDK recorded as completely
+        // installed (bundle + marker) may be activated. Versions activated
+        // before markers existed are grandfathered through current/last
+        // state; any other markerless directory may be a crash-left partial
+        // install or a directory something else put there.
+        NSString *versionDir = [[RCTPushy downloadDir] stringByAppendingPathComponent:hash];
+        pushy::state::State state = PushyStateFromDefaults(PushyDefaults());
+        std::string hashStd = PushyToStdString(hash);
+        BOOL legacyActivated = state.current_version == hashStd || state.last_version == hashStd;
+        if (!PushyHasCompletedVersionAtPath(versionDir, hash) && !legacyActivated) {
+            BOOL hasBundle = [[NSFileManager defaultManager] fileExistsAtPath:
+                [versionDir stringByAppendingPathComponent:BUNDLE_FILE_NAME]];
+            switchError = PushyErrorWithCode(
+                pushy::error_codes::kSwitchVersionFailed,
+                [NSString stringWithFormat:@"Bundle version %@ %@", hash,
+                    hasBundle ? @"is incomplete." : @"not found."]);
+            return;
+        }
+        if (!legacyActivated) {
+            // The record's bundle digest must match the bytes on disk before
+            // the next launch is pointed at them.
+            NSString *reason = PushyVerifyInstallForActivation(versionDir, hash);
+            if (reason != nil) {
+                switchError = PushyErrorWithCode(pushy::error_codes::kSwitchVersionFailed, reason);
+                return;
+            }
+        }
         PushySwitchVersionLocked(hash);
     });
+    if (switchError != nil) {
+        if (error != NULL) {
+            *error = switchError;
+        }
+        return NO;
+    }
     return YES;
 }
 
@@ -1397,8 +1682,37 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
             [fileManager removeItemAtPath:destination error:nil];
         }
 
+        // Resource caps before the first byte is extracted
+        // (cpp/patch_core/archive_limits.h). The central directory is not
+        // readable up front through SSZipArchive, so the disk check uses a
+        // 2x-archive heuristic; the delegate below enforces the exact caps
+        // entry by entry.
+        long long archiveBytes = PushyFileSizeAtPath(path);
+        NSError *preflight = nil;
+        if (archiveBytes > pushy::archive_limits::kMaxArchiveBytes) {
+            preflight = PushyErrorWithCode(pushy::error_codes::kPatchFailed,
+                [NSString stringWithFormat:@"archive too large: %lld bytes", archiveBytes]);
+        } else {
+            preflight = PushyEnsureFreeSpace(destination, MAX(0LL, archiveBytes) * 2);
+        }
+        if (preflight != nil) {
+            [fileManager removeItemAtPath:path error:nil];
+            [fileManager removeItemAtPath:[path stringByAppendingString:@".resume"] error:nil];
+            if (completionHandler != nil) {
+                completionHandler(preflight);
+            }
+            return;
+        }
+
+        PushyUnzipGuard *guard = [PushyUnzipGuard new];
         [SSZipArchive unzipFileAtPath:path
                         toDestination:destination
+                   preserveAttributes:YES
+                            overwrite:YES
+                       nestedZipLevel:0
+                             password:nil
+                                error:nil
+                             delegate:guard
                       progressHandler:nil
                     completionHandler:^(NSString *archivePath, BOOL succeeded, NSError *error) {
             [fileManager removeItemAtPath:archivePath error:nil];
@@ -1412,8 +1726,20 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
             }
 
             NSError *unzipError = error;
-            if (!succeeded && unzipError == nil) {
+            if (guard.violation != nil) {
+                unzipError = PushyErrorWithCode(pushy::error_codes::kPatchFailed, guard.violation);
+            } else if (!succeeded && unzipError == nil) {
                 unzipError = PushyErrorWithCode(pushy::error_codes::kPatchFailed, @"unzip failed");
+            } else if (succeeded && unzipError == nil
+                       && [fileManager fileExistsAtPath:
+                           [destination stringByAppendingPathComponent:VERSION_COMPLETE_FILE_NAME]]) {
+                // The completion marker is written by this SDK only, after the
+                // whole install succeeded. An archive that ships its own would
+                // be trusted as a finished install even if the patch step
+                // that follows fails — reject the package outright (the
+                // caller removes the half-unpacked directory).
+                unzipError = PushyErrorWithCode(pushy::error_codes::kPatchFailed,
+                                                @"archive contains reserved entry " VERSION_COMPLETE_FILE_NAME_LITERAL);
             } else if (unzipError != nil && unzipError.userInfo[PushyErrorCodeKey] == nil) {
                 // SSZipArchive's own NSError (corrupt zip, bad magic, ...) has
                 // no stable code; without one, downloadUpdate's fallback would
@@ -1540,7 +1866,12 @@ static NSString *PushyHttpRequest(NSString *urlString, NSString *method,
                     ? (NSHTTPURLResponse *)response
                     : nil;
             NSInteger status = httpResponse.statusCode;
-            if (error == nil && httpResponse != nil && status >= 200 &&
+            // The shared session follows redirects; an https endpoint that
+            // ended up on plaintext http is a failed endpoint, same as the
+            // artifact download.
+            BOOL downgraded = [[url.scheme lowercaseString] isEqualToString:@"https"]
+                && [[httpResponse.URL.scheme lowercaseString] isEqualToString:@"http"];
+            if (error == nil && httpResponse != nil && !downgraded && status >= 200 &&
                 status < 300 && data != nil) {
                 result = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
             }
@@ -1567,9 +1898,9 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
     if (responseText == nil) {
         return NO;
     }
-    bool ok = false;
-    flowjson::Value parsed = flowjson::Parse(PushyToStdString(responseText), &ok);
-    return ok && parsed.IsObject();
+    // Shared schema rule (update_flow_core::IsValidCheckResponse): a 200 with
+    // `{"error": ...}` is a failed endpoint, not a verdict.
+    return updateflow::IsValidCheckResponse(PushyToStdString(responseText)) ? YES : NO;
 }
 
 @implementation RCTPushyOrchestrator
@@ -1595,10 +1926,38 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
             [defaults objectForKey:keyNativeCheckIncomplete] != nil ? 0 : 5;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, delaySeconds * NSEC_PER_SEC),
                        dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+            if ([self isJsCheckCompleted]) {
+                // Not consuming the round: a later crash rescue may still
+                // need it.
+                NSLog(@"RCTPushy -- native check skipped: JS check completed in this process");
+                return;
+            }
             [self startRoundWithDeadline:0];
         });
     });
 #endif
+}
+
++ (void)markJsCheckCompleted:(NSString *)config {
+    @synchronized (RCTPushyOrchestrator.class) {
+        pushyJsCompletedConfig = [config copy];
+    }
+}
+
+// True when JS already obtained a valid response in this process for the
+// exact config the native round would use (§10.3): the delayed round is
+// then a duplicate request. Only the scheduled round asks — the crash-rescue
+// path still runs, JS is dead by then.
++ (BOOL)isJsCheckCompleted {
+    NSString *jsConfig;
+    @synchronized (RCTPushyOrchestrator.class) {
+        jsConfig = pushyJsCompletedConfig;
+    }
+    if (jsConfig == nil) {
+        return NO;
+    }
+    NSString *persisted = [PushyDefaults() stringForKey:keyNativeConfig];
+    return persisted != nil && [persisted isEqualToString:jsConfig];
 }
 
 // Runs the process's single round on the calling thread if nobody has
@@ -1656,7 +2015,7 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
     // that are gone (e.g. wiped by a reset whose generation bump we would
     // catch below anyway, or by cleanup).
     NSString *versionDir = [[RCTPushy downloadDir] stringByAppendingPathComponent:hash];
-    if (!PushyHasCompletedVersionAtPath(versionDir)) {
+    if (!PushyHasCompletedVersionAtPath(versionDir, hash)) {
         NSLog(@"RCTPushy -- crash rescue: version %@ no longer on disk, dropping activation", hash);
         return;
     }
@@ -1827,7 +2186,7 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
     }
 
     NSString *versionDir = [[RCTPushy downloadDir] stringByAppendingPathComponent:hash];
-    BOOL downloaded = PushyHasCompletedVersionAtPath(versionDir);
+    BOOL downloaded = PushyHasCompletedVersionAtPath(versionDir, hash);
     if (!downloaded) {
         downloaded = [self performAttempts:decision.Get("attempts")
                                       hash:hash

@@ -497,6 +497,34 @@
             "os": "ios 17.5",
             "uuid": "u-1"
           },
+          "extra": {}
+        }
+      ],
+      "expected": {
+        "packageVersion": "2.3.4",
+        "hash": "abcdef1234",
+        "buildTime": "1719999999",
+        "cInfo": {
+          "rnu": "10.50.0",
+          "rn": "0.85.2",
+          "os": "ios 17.5",
+          "uuid": "u-1"
+        }
+      }
+    },
+    {
+      "fn": "buildCheckRequestBody",
+      "args": [
+        {
+          "packageVersion": "2.3.4",
+          "currentVersion": "abcdef1234",
+          "buildTime": "1719999999",
+          "cInfo": {
+            "rnu": "10.50.0",
+            "rn": "0.85.2",
+            "os": "ios 17.5",
+            "uuid": "u-1"
+          },
           "extra": {
             "toHash": "debug-hash",
             "hash": "override-hash"
@@ -504,8 +532,9 @@
         }
       ],
       "expected": {
+        "toHash": "debug-hash",
+        "hash": "abcdef1234",
         "packageVersion": "2.3.4",
-        "hash": "override-hash",
         "buildTime": "1719999999",
         "cInfo": {
           "rnu": "10.50.0",
@@ -513,7 +542,10 @@
           "os": "ios 17.5",
           "uuid": "u-1"
         },
-        "toHash": "debug-hash"
+        "extra": {
+          "toHash": "debug-hash",
+          "hash": "override-hash"
+        }
       }
     },
     {
@@ -543,6 +575,9 @@
           "rn": "0.85.2",
           "os": "ios 17.5",
           "uuid": "u-1"
+        },
+        "extra": {
+          "buildTime": "injected"
         }
       }
     },
@@ -570,6 +605,111 @@
           "uuid": "u-1"
         }
       }
+    },
+    {
+      "fn": "isValidCheckResponse",
+      "args": [
+        "{\"upToDate\":true}"
+      ],
+      "expected": true
+    },
+    {
+      "fn": "isValidCheckResponse",
+      "args": [
+        "{\"update\":true,\"hash\":\"h\"}"
+      ],
+      "expected": true
+    },
+    {
+      "fn": "isValidCheckResponse",
+      "args": [
+        "{\"update\":false}"
+      ],
+      "expected": true
+    },
+    {
+      "fn": "isValidCheckResponse",
+      "args": [
+        "{\"expired\":true,\"downloadUrl\":\"https://x\"}"
+      ],
+      "expected": true
+    },
+    {
+      "fn": "isValidCheckResponse",
+      "args": [
+        "{\"paused\":\"app\"}"
+      ],
+      "expected": true
+    },
+    {
+      "fn": "isValidCheckResponse",
+      "args": [
+        "{\"error\":\"internal\"}"
+      ],
+      "expected": false
+    },
+    {
+      "fn": "isValidCheckResponse",
+      "args": [
+        "{}"
+      ],
+      "expected": false
+    },
+    {
+      "fn": "isValidCheckResponse",
+      "args": [
+        "[]"
+      ],
+      "expected": false
+    },
+    {
+      "fn": "isValidCheckResponse",
+      "args": [
+        "\"upToDate\""
+      ],
+      "expected": false
+    },
+    {
+      "fn": "isValidCheckResponse",
+      "args": [
+        "null"
+      ],
+      "expected": false
+    },
+    {
+      "fn": "isValidCheckResponse",
+      "args": [
+        "{\"upToDate\":\"yes\"}"
+      ],
+      "expected": false
+    },
+    {
+      "fn": "isValidCheckResponse",
+      "args": [
+        "{\"update\":1}"
+      ],
+      "expected": false
+    },
+    {
+      "fn": "isValidCheckResponse",
+      "args": [
+        "{\"paused\":true}"
+      ],
+      "expected": false
+    },
+    {
+      "fn": "isValidCheckResponse",
+      "args": [
+        "not json"
+      ],
+      "expected": false
+    },
+    {
+      "fn": "isValidCheckResponse",
+      "args": [
+        ""
+      ],
+      "expected": false
     },
     {
       "fn": "resolveCheckResult",

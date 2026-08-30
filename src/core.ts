@@ -36,8 +36,15 @@ export const downloadRootDir: string = PushyConstants.downloadRootDir;
 export const packageVersion: string = PushyConstants.packageVersion;
 export const currentVersion: string = PushyConstants.currentVersion;
 
-export function setLocalHashInfo(hash: string, info: Record<string, any>) {
-  PushyModule.setLocalHashInfo(hash, JSON.stringify(info));
+export function setLocalHashInfo(
+  hash: string,
+  info: Record<string, any>
+): Promise<void> {
+  // Always a promise so callers can await native persistence (the legacy
+  // bridge returns undefined when no promise is exposed).
+  return Promise.resolve(
+    PushyModule.setLocalHashInfo(hash, JSON.stringify(info))
+  );
 }
 
 const currentVersionInfoString: string = PushyConstants.currentVersionInfo;
@@ -49,7 +56,9 @@ if (currentVersionInfoString) {
     if (_currentVersionInfo.debugChannel) {
       isDebugChannel = true;
       delete _currentVersionInfo.debugChannel;
-      setLocalHashInfo(currentVersion, _currentVersionInfo);
+      setLocalHashInfo(currentVersion, _currentVersionInfo).catch((e) => {
+        error('failed to persist version info', e);
+      });
     }
   } catch {
     error(
@@ -58,6 +67,11 @@ if (currentVersionInfoString) {
   }
 }
 export const currentVersionInfo = _currentVersionInfo;
+/** SHA-256 of the running hot-update bundle from its install record; '' when unknown. */
+export const currentBundleSha256: string =
+  typeof PushyConstants.currentBundleSha256 === 'string'
+    ? PushyConstants.currentBundleSha256
+    : '';
 
 export const isFirstTime: boolean = PushyConstants.isFirstTime;
 export const isFirstTimeDebug: boolean = isFirstTime && isDebugChannel;

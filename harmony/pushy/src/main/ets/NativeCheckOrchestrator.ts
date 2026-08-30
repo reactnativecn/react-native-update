@@ -92,6 +92,22 @@ interface RespCacheEntry {
 }
 
 let scheduled = false;
+// JS 在本进程内已拿到有效检查响应时对应的配置 JSON(markJsCheckCompleted)。
+// 进程级:下次启动无信号,冷启动轮次照常运行。
+let jsCompletedConfig: string | undefined;
+
+export function markJsCheckCompleted(config: string): void {
+  jsCompletedConfig = config;
+}
+
+// JS 已用与原生完全相同的配置拿到有效响应(§10.3):延迟轮次就是一次重复请求。
+// 只有计划内的轮次会问这个问题——JS 没起来、启动即崩、检查失败时都不会有信号。
+function isJsCheckCompleted(context: UpdateContext): boolean {
+  return (
+    jsCompletedConfig !== undefined &&
+    jsCompletedConfig === context.getKv(KEY_CONFIG)
+  );
+}
 
 export function scheduleNativeCheck(
   context: UpdateContext,
@@ -105,6 +121,13 @@ export function scheduleNativeCheck(
   // 除非上个进程死于轮中(残留标记),那时每一秒启动时间都要用来续传。
   const delayMs = context.getKv(KEY_ROUND_INCOMPLETE) ? 0 : START_DELAY_MS;
   setTimeout(() => {
+    if (isJsCheckCompleted(context)) {
+      logger.info(
+        TAG,
+        'native check skipped: JS check completed in this process',
+      );
+      return;
+    }
     runOnce(context, launchRolledBackVersion).catch((e: Object) => {
       // 救援路径自身绝不能把应用拖垮。
       logger.error(TAG, `native check failed: ${e}`);
@@ -315,8 +338,7 @@ function isValidCheckResponse(responseText: string | undefined): boolean {
     return false;
   }
   try {
-    const parsed = JSON.parse(responseText) as Object | null;
-    return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed);
+    return NativePatchCore.isValidCheckResponse(responseText);
   } catch (e) {
     return false;
   }

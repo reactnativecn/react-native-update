@@ -25,7 +25,7 @@ function findSdkEtsDir() {
   }
   bases.push(
     '/Applications/DevEco-Studio.app/Contents/sdk',
-    path.join(process.env.HOME || '', 'Library/OpenHarmony/Sdk'),
+    path.join(process.env.HOME || '', 'Library/OpenHarmony/Sdk')
   );
 
   for (const base of bases) {
@@ -37,7 +37,7 @@ function findSdkEtsDir() {
     for (const entry of fs.readdirSync(base)) {
       candidates.push(
         path.join(base, entry, 'openharmony', 'ets'),
-        path.join(base, entry, 'ets'),
+        path.join(base, entry, 'ets')
       );
     }
     for (const candidate of candidates) {
@@ -53,14 +53,14 @@ const sdkEts = findSdkEtsDir();
 if (!sdkEts) {
   console.log(
     'check-harmony-types: no DevEco/OpenHarmony SDK found ' +
-      '(set DEVECO_SDK_HOME to enable), skipping harmony type check.',
+      '(set DEVECO_SDK_HOME to enable), skipping harmony type check.'
   );
   process.exit(0);
 }
 if (!fs.existsSync(ohModules)) {
   console.log(
     'check-harmony-types: harmony/pushy/oh_modules not installed, ' +
-      'skipping harmony type check.',
+      'skipping harmony type check.'
   );
   process.exit(0);
 }
@@ -88,10 +88,19 @@ const config = {
 
 fs.writeFileSync(generatedConfigPath, JSON.stringify(config, null, 2));
 
-const tscBin = path.join(path.dirname(require.resolve('typescript/package.json', { paths: [repoRoot] })), 'bin/tsc');
-const result = spawnSync(process.execPath, [tscBin, '-p', generatedConfigPath], {
-  stdio: 'inherit',
-});
+const tscBin = path.join(
+  path.dirname(
+    require.resolve('typescript/package.json', { paths: [repoRoot] })
+  ),
+  'bin/tsc'
+);
+const result = spawnSync(
+  process.execPath,
+  [tscBin, '-p', generatedConfigPath],
+  {
+    stdio: 'inherit',
+  }
+);
 
 if (result.status !== 0) {
   console.error('check-harmony-types: harmony type check failed.');

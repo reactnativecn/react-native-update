@@ -48,6 +48,18 @@ class DownloadTask implements Runnable {
         NativeUpdateCore.ensureLoaded();
     }
 
+    // Two-phase install (cpp/patch_core/install_record.h): all unpack/patch
+    // work happens in <hash>.staging; the final <hash> directory only ever
+    // appears through an atomic rename after the completion record was
+    // written, so a crash or failure can never leave a half-installed
+    // directory that looks like a version.
+    private File stagingDirectory() {
+        return InstallRecord.stagingDirectoryFor(params.unzipDirectory);
+    }
+
+    // SHA-256 of the downloaded archive, computed right before extraction.
+    private String artifactSha256 = "";
+
     private static final class PatchArchiveContents {
         final ArrayList<String> entryNames = new ArrayList<String>();
         final ArrayList<String> copyFroms = new ArrayList<String>();
@@ -287,6 +299,7 @@ class DownloadTask implements Runnable {
         }
 
         try (Response response = requestClient.newCall(builder.build()).execute()) {
+            rejectProtocolDowngrade(url, response);
             if (response.code() == 416) {
                 long total = resumeMeta == null ? 0 : resumeMeta.optLong("total", 0);
                 if (total > 0 && writePath.length() == total) {
@@ -333,6 +346,11 @@ class DownloadTask implements Runnable {
             } else {
                 totalAll = contentLength > 0 ? contentLength : 0;
             }
+            if (totalAll > ArchiveLimits.MAX_ARCHIVE_BYTES) {
+                throw new IOException("archive too large: " + totalAll + " bytes");
+            }
+            ArchiveLimits.ensureFreeSpace(
+                writePath, totalAll > 0 ? totalAll - baseOffset : 0);
             if (!append) {
                 // Destroy the old bytes before the sidecar can vouch for
                 // them with the new validators (a crash between the two
@@ -364,6 +382,11 @@ class DownloadTask implements Runnable {
                     sink.emit();
 
                     long overall = baseOffset + received;
+                    if (overall > ArchiveLimits.MAX_ARCHIVE_BYTES) {
+                        // Unknown/chunked length backstop.
+                        throw new IOException(
+                            "archive too large: exceeded " + ArchiveLimits.MAX_ARCHIVE_BYTES);
+                    }
                     if (totalAll > 0) {
                         int percentage = (int) (overall * 100.0 / totalAll + 0.5);
                         if (percentage > currentPercentage) {
@@ -396,12 +419,21 @@ class DownloadTask implements Runnable {
     }
 
     private byte[] readBytes(InputStream input) throws IOException {
+        return readBytes(input, Long.MAX_VALUE);
+    }
+
+    private byte[] readBytes(InputStream input, long maxBytes) throws IOException {
         try (
             InputStream in = input;
             ByteArrayOutputStream out = new ByteArrayOutputStream()
         ) {
             int count;
+            long total = 0;
             while ((count = in.read(buffer)) != -1) {
+                total += count;
+                if (total > maxBytes) {
+                    throw new IOException("content exceeds " + maxBytes + " bytes");
+                }
                 out.write(buffer, 0, count);
             }
             return out.toByteArray();
@@ -486,6 +518,7 @@ class DownloadTask implements Runnable {
 
         PatchArchiveContents contents = new PatchArchiveContents();
         try (SafeZipFile zipFile = new SafeZipFile(archiveFile)) {
+            ensureArchiveWithinLimits(archiveFile, zipFile, unzipDirectory);
             Enumeration<? extends ZipEntry> entries = zipFile.entries();
             while (entries.hasMoreElements()) {
                 ZipEntry entry = entries.nextElement();
@@ -493,7 +526,11 @@ class DownloadTask implements Runnable {
                 contents.entryNames.add(name);
 
                 if (name.equals("__diff.json")) {
-                    byte[] bytes = readBytes(zipFile.getInputStream(entry));
+                    if (entry.getSize() > ArchiveLimits.MAX_MANIFEST_BYTES) {
+                        throw new IOException("patch manifest too large: " + entry.getSize());
+                    }
+                    byte[] bytes = readBytes(
+                        zipFile.getInputStream(entry), ArchiveLimits.MAX_MANIFEST_BYTES);
                     String json = new String(bytes, StandardCharsets.UTF_8);
                     JSONObject manifest = (JSONObject) new JSONTokener(json).nextValue();
                     appendManifestEntries(
@@ -516,17 +553,59 @@ class DownloadTask implements Runnable {
     private void doFullPatch() throws IOException {
         downloadFile();
 
-        UpdateFileUtils.removeDirectory(params.unzipDirectory);
-        UpdateFileUtils.ensureDirectory(params.unzipDirectory);
+        File work = stagingDirectory();
+        UpdateFileUtils.removeDirectory(work);
+        UpdateFileUtils.ensureDirectory(work);
+        artifactSha256 = UpdateFileUtils.sha256Hex(params.targetFile);
 
         try (SafeZipFile zipFile = new SafeZipFile(params.targetFile)) {
+            ensureArchiveWithinLimits(params.targetFile, zipFile, work);
             Enumeration<? extends ZipEntry> entries = zipFile.entries();
             while (entries.hasMoreElements()) {
-                zipFile.unzipToPath(entries.nextElement(), params.unzipDirectory);
+                zipFile.unzipToPath(entries.nextElement(), work);
             }
         }
 
         deleteConsumedArchive();
+    }
+
+    /**
+     * Last step of a successful patch task: the completion record (with the
+     * final bundle's digest) goes into the staging directory, which is then
+     * renamed over the version directory in one atomic step.
+     */
+    private void promoteStaging() throws IOException, JSONException {
+        File work = stagingDirectory();
+        File bundle = new File(work, "index.bundlejs");
+        if (!bundle.isFile()) {
+            throw new IOException("bundle missing after install: " + bundle);
+        }
+        String bundleSha256 = UpdateFileUtils.sha256Hex(bundle);
+        InstallRecord.write(
+            work, InstallRecord.build(params.hash, bundleSha256, artifactSha256));
+        if (params.unzipDirectory.exists()) {
+            UpdateFileUtils.removeDirectory(params.unzipDirectory);
+        }
+        if (!work.renameTo(params.unzipDirectory)) {
+            throw new IOException("failed to promote staging directory to " + params.unzipDirectory);
+        }
+    }
+
+    /**
+     * Resource caps before extraction (cpp/patch_core/archive_limits.h): the
+     * archive itself, the central directory's declared contents, and the
+     * free space the expansion needs. Failing here is a PATCH_FAILED (the
+     * bytes arrived; they cannot be applied).
+     */
+    private static void ensureArchiveWithinLimits(
+        File archiveFile, SafeZipFile zipFile, File unzipDirectory
+    ) throws IOException {
+        long archiveBytes = archiveFile.length();
+        if (archiveBytes > ArchiveLimits.MAX_ARCHIVE_BYTES) {
+            throw new IOException("archive too large: " + archiveBytes + " bytes");
+        }
+        SafeZipFile.Inspection inspection = zipFile.inspect();
+        ArchiveLimits.ensureFreeSpace(unzipDirectory, inspection.totalUncompressed);
     }
 
     // The archive and its resume sidecar live and die together: once the
@@ -541,7 +620,9 @@ class DownloadTask implements Runnable {
 
     private void doPatchFromApk() throws IOException, JSONException {
         downloadFile();
-        PatchArchiveContents contents = extractPatchArchive(params.targetFile, params.unzipDirectory);
+        File work = stagingDirectory();
+        artifactSha256 = UpdateFileUtils.sha256Hex(params.targetFile);
+        PatchArchiveContents contents = extractPatchArchive(params.targetFile, work);
 
         buildArchivePatchPlan(
             DownloadTaskParams.TASK_TYPE_PATCH_FROM_APK,
@@ -552,22 +633,22 @@ class DownloadTask implements Runnable {
         );
 
         HashMap<String, ArrayList<File>> copyList = buildCopyList(
-            params.unzipDirectory,
+            work,
             buildCopyGroups(
                 contents.copyFroms.toArray(new String[0]),
                 contents.copyTos.toArray(new String[0])
             )
         );
 
-        File originBundleFile = new File(params.unzipDirectory, ".origin.bundle");
+        File originBundleFile = new File(work, ".origin.bundle");
         copyBundledAssetToFile("index.android.bundle", originBundleFile);
         try {
             applyPatchFromFileSource(
-                params.unzipDirectory.getAbsolutePath(),
-                params.unzipDirectory.getAbsolutePath(),
+                work.getAbsolutePath(),
+                work.getAbsolutePath(),
                 originBundleFile.getAbsolutePath(),
-                new File(params.unzipDirectory, "index.bundlejs.patch").getAbsolutePath(),
-                new File(params.unzipDirectory, "index.bundlejs").getAbsolutePath(),
+                new File(work, "index.bundlejs.patch").getAbsolutePath(),
+                new File(work, "index.bundlejs").getAbsolutePath(),
                 "",
                 false,
                 new String[0],
@@ -585,7 +666,9 @@ class DownloadTask implements Runnable {
 
     private void doPatchFromPpk() throws IOException, JSONException {
         downloadFile();
-        PatchArchiveContents contents = extractPatchArchive(params.targetFile, params.unzipDirectory);
+        File work = stagingDirectory();
+        artifactSha256 = UpdateFileUtils.sha256Hex(params.targetFile);
+        PatchArchiveContents contents = extractPatchArchive(params.targetFile, work);
 
         ArchivePatchPlanResult plan = buildArchivePatchPlan(
             DownloadTaskParams.TASK_TYPE_PATCH_FROM_PPK,
@@ -597,10 +680,10 @@ class DownloadTask implements Runnable {
 
         applyPatchFromFileSource(
             params.originDirectory.getAbsolutePath(),
-            params.unzipDirectory.getAbsolutePath(),
+            work.getAbsolutePath(),
             new File(params.originDirectory, "index.bundlejs").getAbsolutePath(),
-            new File(params.unzipDirectory, "index.bundlejs.patch").getAbsolutePath(),
-            new File(params.unzipDirectory, "index.bundlejs").getAbsolutePath(),
+            new File(work, "index.bundlejs.patch").getAbsolutePath(),
+            new File(work, "index.bundlejs").getAbsolutePath(),
             plan.mergeSourceSubdir,
             plan.enableMerge,
             contents.copyFroms.toArray(new String[0]),
@@ -625,10 +708,12 @@ class DownloadTask implements Runnable {
             case DownloadTaskParams.TASK_TYPE_PATCH_FULL:
             case DownloadTaskParams.TASK_TYPE_PATCH_FROM_APK:
             case DownloadTaskParams.TASK_TYPE_PATCH_FROM_PPK:
+                // Only the staging directory is ours to drop: the final
+                // version directory is never touched by a failed install.
                 try {
-                    UpdateFileUtils.removeDirectory(params.unzipDirectory);
+                    UpdateFileUtils.removeDirectory(stagingDirectory());
                 } catch (IOException ioException) {
-                    Log.e(UpdateContext.TAG, "Failed to clean patched directory", ioException);
+                    Log.e(UpdateContext.TAG, "Failed to clean staging directory", ioException);
                 }
                 if (downloadPhaseCompleted) {
                     // Fully received but failed to unzip/patch: the archive is
@@ -653,6 +738,23 @@ class DownloadTask implements Runnable {
         }
     }
 
+    /**
+     * An https artifact URL must stay on https through every redirect: the
+     * package is the supply-chain boundary and TLS is what authenticates
+     * it. OkHttp follows cross-scheme redirects by default, so the final
+     * request is checked here (the redirected bytes are discarded).
+     */
+    static void rejectProtocolDowngrade(String requestedUrl, Response response)
+        throws IOException {
+        if (requestedUrl != null
+            && requestedUrl.regionMatches(true, 0, "https:", 0, 6)
+            && !response.request().url().isHttps()) {
+            throw new IOException(
+                "https download redirected to plaintext http: "
+                    + response.request().url());
+        }
+    }
+
     private boolean isPatchTask(int taskType) {
         return taskType == DownloadTaskParams.TASK_TYPE_PATCH_FULL
             || taskType == DownloadTaskParams.TASK_TYPE_PATCH_FROM_APK
@@ -661,11 +763,9 @@ class DownloadTask implements Runnable {
 
     private boolean hasCompletedPatchDirectory() {
         return params.unzipDirectory != null
+            && params.hash != null
             && new File(params.unzipDirectory, "index.bundlejs").isFile()
-            && new File(
-                params.unzipDirectory,
-                UpdateContext.VERSION_COMPLETE_FILE
-            ).isFile();
+            && InstallRecord.isComplete(params.unzipDirectory, params.hash);
     }
 
     @Override
@@ -681,12 +781,15 @@ class DownloadTask implements Runnable {
                 switch (taskType) {
                     case DownloadTaskParams.TASK_TYPE_PATCH_FULL:
                         doFullPatch();
+                        promoteStaging();
                         break;
                     case DownloadTaskParams.TASK_TYPE_PATCH_FROM_APK:
                         doPatchFromApk();
+                        promoteStaging();
                         break;
                     case DownloadTaskParams.TASK_TYPE_PATCH_FROM_PPK:
                         doPatchFromPpk();
+                        promoteStaging();
                         break;
                     case DownloadTaskParams.TASK_TYPE_CLEANUP:
                         doCleanUp();
@@ -729,25 +832,6 @@ class DownloadTask implements Runnable {
             // sidecar would make a later download of the same URL return
             // these bytes without ever asking the server again.
             deleteResumeSidecar(params.targetFile);
-        }
-
-        if (isPatchTask(taskType) && !alreadyCompleted) {
-            try {
-                File marker = new File(
-                    params.unzipDirectory,
-                    UpdateContext.VERSION_COMPLETE_FILE
-                );
-                if (!marker.createNewFile() && !marker.isFile()) {
-                    throw new IOException("Failed to mark completed update: " + marker);
-                }
-            } catch (Throwable error) {
-                Log.e(UpdateContext.TAG, "failed to mark completed update", error);
-                cleanUpAfterFailure(taskType);
-                if (params.listener != null) {
-                    params.listener.onDownloadFailed(error);
-                }
-                return;
-            }
         }
 
         // The task itself succeeded. Run the completion callback outside the

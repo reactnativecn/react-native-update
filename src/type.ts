@@ -162,6 +162,28 @@ export interface ClientOptions {
     | null;
   checkStrategy?: 'onAppStart' | 'onAppResume' | 'both' | null;
   autoMarkSuccess?: boolean;
+  /**
+   * Delay before the Provider marks the running update as successful when
+   * `autoMarkSuccess` is on. Default 1000ms. Apps whose critical modules load
+   * after the first frame (navigation, remote config) should raise it — a
+   * version that crashes 3s after mount would otherwise already be marked
+   * good and never rolled back. For full control use `autoMarkSuccess: false`
+   * and call `markSuccess()` once the app is really ready.
+   */
+  autoMarkSuccessDelayMs?: number;
+  /**
+   * Consulted when the auto-mark timer fires: return false (or throw) to
+   * skip marking this launch — the next launch's crash protection then still
+   * applies. Call `markSuccess()` yourself later once the app is healthy.
+   */
+  healthCheck?: () => boolean | Promise<boolean>;
+  /**
+   * Whether the Provider honours test-channel payloads (`parseTestQrCode`,
+   * `__rnPushyVersionHash` deep links / QR codes) that target a specific
+   * version hash. Default true. Set to false in production builds that must
+   * not let a scanned code pull an arbitrary published version.
+   */
+  testChannel?: boolean;
   dismissErrorAfter?: number;
   debug?: boolean;
   throwError?: boolean;

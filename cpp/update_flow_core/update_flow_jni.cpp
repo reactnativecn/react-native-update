@@ -104,6 +104,18 @@ Java_cn_reactnative_modules_update_NativeUpdateFlow_orderEndpointCandidates(
                             endpoints, randomSample)));
 }
 
+extern "C" JNIEXPORT jboolean JNICALL
+Java_cn_reactnative_modules_update_NativeUpdateFlow_isValidCheckResponse(
+    JNIEnv* env, jclass, jstring responseText) {
+  if (responseText == nullptr) {
+    return JNI_FALSE;
+  }
+  return updateflow::IsValidCheckResponse(
+             pushy::jni_util::JStringToString(env, responseText))
+             ? JNI_TRUE
+             : JNI_FALSE;
+}
+
 extern "C" JNIEXPORT jstring JNICALL
 Java_cn_reactnative_modules_update_NativeUpdateFlow_handleCheckResponse(
     JNIEnv* env, jclass, jstring responseText, jstring identityJson,

@@ -1,9 +1,11 @@
 import preferences from '@ohos.data.preferences';
 import fileIo from '@ohos.file.fs';
 import {
-  DownloadTask,
-  VERSION_COMPLETE_FILE_NAME,
-} from './DownloadTask';
+  isInstallComplete,
+  readInstallRecord,
+  verifyInstallForActivation,
+} from './InstallRecord';
+import { DownloadTask } from './DownloadTask';
 import common from '@ohos.app.ability.common';
 import { DownloadTaskParams } from './DownloadTaskParams';
 import { bundleManager } from '@kit.AbilityKit';
@@ -201,7 +203,27 @@ export class UpdateContext {
     return defaultValue;
   }
 
+  // >0 while a multi-write commit is open: putSync/deleteSync still apply in
+  // memory, the single flush happens when the outermost batch closes. The
+  // cold-start round's three writes (hash info, activation, response cache)
+  // thus reach disk as one preferences file write, not three.
+  private flushBatchDepth = 0;
+
+  private beginFlushBatch(): void {
+    this.flushBatchDepth += 1;
+  }
+
+  private endFlushBatch(reason: string): void {
+    this.flushBatchDepth = Math.max(0, this.flushBatchDepth - 1);
+    if (this.flushBatchDepth === 0) {
+      this.flushPreferences(reason);
+    }
+  }
+
   private flushPreferences(reason: string): void {
+    if (this.flushBatchDepth > 0) {
+      return;
+    }
     const flushablePreferences = this.preferences as FlushablePreferences;
     if (typeof flushablePreferences.flushSync === 'function') {
       try {
@@ -506,14 +528,21 @@ export class UpdateContext {
     if (UpdateContext.resetGeneration !== expectedGeneration) {
       return false;
     }
-    if (hash && hashInfoJson) {
-      this.setKv(`hash_${hash}`, hashInfoJson);
-    }
-    if (activate && hash) {
-      this.switchVersion(hash);
-    }
-    if (responseCacheJson) {
-      this.setKv(KEY_RESP_CACHE, responseCacheJson);
+    // One flush for the whole round (see beginFlushBatch): version info,
+    // activation and response cache land together or not at all.
+    this.beginFlushBatch();
+    try {
+      if (hash && hashInfoJson) {
+        this.setKv(`hash_${hash}`, hashInfoJson);
+      }
+      if (activate && hash) {
+        this.switchVersion(hash);
+      }
+      if (responseCacheJson) {
+        this.setKv(KEY_RESP_CACHE, responseCacheJson);
+      }
+    } finally {
+      this.endFlushBatch('commit native check result');
     }
     return true;
   }
@@ -595,13 +624,27 @@ export class UpdateContext {
 
   // 原生冷启动检测(NativeCheckOrchestrator)用来跳过已就绪版本的重复下载
   // ——alert 类策略下版本已下载但未激活,若不判在这里会每次冷启动重下一遍。
+  // 运行中热更版本安装记录里的 bundleSha256(崩溃归因用);内置 bundle /
+  // 历史安装 / 记录不可读时为空串。
+  public currentBundleSha256(hash: string): string {
+    if (!hash) {
+      return '';
+    }
+    try {
+      const record = readInstallRecord(
+        `${this.rootDir}/${assertSafePathComponent(hash)}`,
+      );
+      return record?.bundleSha256 ?? '';
+    } catch (e) {
+      return '';
+    }
+  }
+
   public hasDownloadedVersion(hash: string): boolean {
     try {
       const safeHash = assertSafePathComponent(hash);
       return fileIo.accessSync(this.getBundlePath(safeHash))
-        && fileIo.accessSync(
-          `${this.rootDir}/${safeHash}/${VERSION_COMPLETE_FILE_NAME}`,
-        );
+        && isInstallComplete(`${this.rootDir}/${safeHash}`, safeHash);
     } catch (e) {
       return false;
     }
@@ -609,9 +652,29 @@ export class UpdateContext {
 
   public switchVersion(hash: string): void {
     try {
-      const bundlePath = this.getBundlePath(assertSafePathComponent(hash));
+      const safeHash = assertSafePathComponent(hash);
+      const bundlePath = this.getBundlePath(safeHash);
       if (!fileIo.accessSync(bundlePath)) {
         throw Error(`Bundle version ${hash} not found.`);
+      }
+      // Same rule as Android/iOS: only a version this SDK recorded as
+      // completely installed (bundle + marker) may be activated. Versions
+      // activated before markers existed are grandfathered through
+      // current/last state; any other markerless directory may be a
+      // crash-left partial install.
+      const legacyActivated =
+        this.readString('currentVersion') === safeHash ||
+        this.readString('lastVersion') === safeHash;
+      if (!this.hasDownloadedVersion(safeHash) && !legacyActivated) {
+        throw Error(`Bundle version ${hash} is incomplete.`);
+      }
+      if (!legacyActivated) {
+        // 记录里的 bundle 摘要必须与盘上字节一致,才能把下次启动指向它。
+        verifyInstallForActivation(
+          `${this.rootDir}/${safeHash}`,
+          safeHash,
+          bundlePath,
+        );
       }
 
       this.trace(`switchVersion:before ${hash}`);

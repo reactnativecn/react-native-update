@@ -5,7 +5,10 @@ import path from 'node:path';
 import { $ } from 'bun';
 
 function normalizeVersion(version: string): string {
-  return version.trim().replace(/^refs\/tags\//, '').replace(/^v/, '');
+  return version
+    .trim()
+    .replace(/^refs\/tags\//, '')
+    .replace(/^v/, '');
 }
 
 const SEMVER_REGEX = /^\d+\.\d+\.\d+(-.+)?$/;
@@ -60,7 +63,7 @@ async function getVersionFromGit(): Promise<string> {
     if (message.includes('detected dubious ownership')) {
       throw new Error(
         'Git refused to read repository metadata because this checkout is not marked as safe. Configure safe.directory in CI or provide RELEASE_VERSION/GITHUB_REF_NAME.',
-        { cause: error },
+        { cause: error }
       );
     }
 
@@ -98,7 +101,7 @@ async function modifyPackageJson({
   await writeFile(
     packageJsonPath,
     JSON.stringify(packageJson, null, 2),
-    'utf-8',
+    'utf-8'
   );
 
   console.log('package.json has been modified for publishing');
@@ -109,7 +112,9 @@ function isGitHubCI(): boolean {
 }
 
 function shouldSkipNativeBuild(): boolean {
-  return process.argv.includes('--skip') || process.env.SKIP_NATIVE_BUILD === '1';
+  return (
+    process.argv.includes('--skip') || process.env.SKIP_NATIVE_BUILD === '1'
+  );
 }
 
 async function buildNativeArtifacts(): Promise<void> {
@@ -120,7 +125,7 @@ async function buildNativeArtifacts(): Promise<void> {
   });
   if (harResult.exitCode !== 0) {
     throw new Error(
-      `Harmony HAR build failed with exit code ${harResult.exitCode}`,
+      `Harmony HAR build failed with exit code ${harResult.exitCode}`
     );
   }
 
@@ -131,7 +136,7 @@ async function buildNativeArtifacts(): Promise<void> {
   });
   if (soResult.exitCode !== 0) {
     throw new Error(
-      `Android SO build failed with exit code ${soResult.exitCode}`,
+      `Android SO build failed with exit code ${soResult.exitCode}`
     );
   }
 }
@@ -156,21 +161,19 @@ async function main(): Promise<void> {
       console.log('Verifying Android native libraries...');
       const verifyResult = Bun.spawnSync(
         ['node', path.join(__dirname, 'verify-android-so.js')],
-        { stdio: ['inherit', 'inherit', 'inherit'] },
+        { stdio: ['inherit', 'inherit', 'inherit'] }
       );
       if (verifyResult.exitCode !== 0) {
         throw new Error(
-          `Android .so verification failed with exit code ${verifyResult.exitCode}`,
+          `Android .so verification failed with exit code ${verifyResult.exitCode}`
         );
       }
     } else {
       console.log(
-        'ℹ️  Not in GitHub CI, skipping version resolution and package.json modification',
+        'ℹ️  Not in GitHub CI, skipping version resolution and package.json modification'
       );
       if (shouldSkipNativeBuild()) {
-        console.log(
-          'ℹ️  --skip flag detected, skipping native artifacts build',
-        );
+        console.log('ℹ️  --skip flag detected, skipping native artifacts build');
       } else {
         await buildNativeArtifacts();
       }

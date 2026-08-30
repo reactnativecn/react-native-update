@@ -15,12 +15,12 @@ const harmonyNativeStageDir = path.join(
   'src',
   'main',
   'cpp',
-  'android-generated',
+  'android-generated'
 );
 const harmonyNativeStageJniDir = path.join(harmonyNativeStageDir, 'jni');
 const harmonyNativeStagePatchCoreDir = path.join(
   harmonyNativeStageDir,
-  'patch_core',
+  'patch_core'
 );
 const wrapperProjectDir = path.join(projectRoot, 'harmony', 'har-wrapper');
 const defaultOutputPath = path.join(projectRoot, 'harmony', 'pushy.har');
@@ -34,7 +34,7 @@ const wrapperProjectFiles = [
 
 const args = parseArgs(process.argv.slice(2));
 const buildMode = normalizeBuildMode(
-  args['build-mode'] || process.env.HARMONY_BUILD_MODE || 'debug',
+  args['build-mode'] || process.env.HARMONY_BUILD_MODE || 'debug'
 );
 const skipInstall =
   args['skip-install'] || process.env.HARMONY_SKIP_INSTALL === '1';
@@ -77,7 +77,7 @@ function main() {
       console.warn(
         `Warning: failed to clean staged Harmony native sources: ${
           error instanceof Error ? error.message : String(error)
-        }`,
+        }`
       );
     }
   }
@@ -94,20 +94,18 @@ function buildHar() {
   const hvigorwPath = resolveBinary('hvigorw', [
     process.env.HVIGORW_PATH,
     ...devecoRoots.map((root) =>
-      path.join(root, 'tools', 'hvigor', 'bin', 'hvigorw'),
+      path.join(root, 'tools', 'hvigor', 'bin', 'hvigorw')
     ),
   ]);
   const ohpmPath = resolveBinary('ohpm', [
     process.env.OHPM_PATH,
     ...devecoRoots.map((root) =>
-      path.join(root, 'tools', 'ohpm', 'bin', 'ohpm'),
+      path.join(root, 'tools', 'ohpm', 'bin', 'ohpm')
     ),
   ]);
 
   if (!hvigorwPath) {
-    fail(
-      'Cannot find hvigorw. Set HVIGORW_PATH or install DevEco Studio.',
-    );
+    fail('Cannot find hvigorw. Set HVIGORW_PATH or install DevEco Studio.');
   }
 
   if (!ohpmPath) {
@@ -120,7 +118,7 @@ function buildHar() {
 
   if (!env.DEVECO_SDK_HOME) {
     const devecoSdkHome = findExistingPath(
-      devecoRoots.map((root) => path.join(root, 'sdk')),
+      devecoRoots.map((root) => path.join(root, 'sdk'))
     );
     if (devecoSdkHome) {
       env.DEVECO_SDK_HOME = devecoSdkHome;
@@ -170,8 +168,8 @@ function buildHar() {
   if (!harPath) {
     fail(
       `Build finished but no .har artifact was found under ${relativeToProject(
-        harmonyBuildDir,
-      )}`,
+        harmonyBuildDir
+      )}`
     );
   }
 
@@ -189,38 +187,38 @@ function syncHarmonyNativeSources() {
   ensureFileExists(
     path.join(androidJniDir, 'hpatch.c'),
     `Missing Android native source: ${relativeToProject(
-      path.join(androidJniDir, 'hpatch.c'),
-    )}`,
+      path.join(androidJniDir, 'hpatch.c')
+    )}`
   );
   ensureFileExists(
     path.join(androidJniDir, 'hpatch.h'),
     `Missing Android native source: ${relativeToProject(
-      path.join(androidJniDir, 'hpatch.h'),
-    )}`,
+      path.join(androidJniDir, 'hpatch.h')
+    )}`
   );
   ensureFileExists(
     path.join(androidJniDir, 'HDiffPatch'),
     `Missing Android native source directory: ${relativeToProject(
-      path.join(androidJniDir, 'HDiffPatch'),
-    )}`,
+      path.join(androidJniDir, 'HDiffPatch')
+    )}`
   );
   ensureFileExists(
     path.join(androidJniDir, 'lzma', 'C'),
     `Missing Android native source directory: ${relativeToProject(
-      path.join(androidJniDir, 'lzma', 'C'),
-    )}`,
+      path.join(androidJniDir, 'lzma', 'C')
+    )}`
   );
   ensureFileExists(
     path.join(patchCoreDir, 'patch_core.cpp'),
     `Missing shared patch core source: ${relativeToProject(
-      path.join(patchCoreDir, 'patch_core.cpp'),
-    )}`,
+      path.join(patchCoreDir, 'patch_core.cpp')
+    )}`
   );
   ensureFileExists(
     path.join(updateFlowCoreDir, 'update_flow_core.cpp'),
     `Missing shared update flow core source: ${relativeToProject(
-      path.join(updateFlowCoreDir, 'update_flow_core.cpp'),
-    )}`,
+      path.join(updateFlowCoreDir, 'update_flow_core.cpp')
+    )}`
   );
 
   fs.rmSync(harmonyNativeStageDir, { recursive: true, force: true });
@@ -230,24 +228,24 @@ function syncHarmonyNativeSources() {
 
   copyPath(
     path.join(androidJniDir, 'hpatch.c'),
-    path.join(harmonyNativeStageJniDir, 'hpatch.c'),
+    path.join(harmonyNativeStageJniDir, 'hpatch.c')
   );
   copyPath(
     path.join(androidJniDir, 'hpatch.h'),
-    path.join(harmonyNativeStageJniDir, 'hpatch.h'),
+    path.join(harmonyNativeStageJniDir, 'hpatch.h')
   );
   copyPath(
     path.join(androidJniDir, 'HDiffPatch'),
-    path.join(harmonyNativeStageJniDir, 'HDiffPatch'),
+    path.join(harmonyNativeStageJniDir, 'HDiffPatch')
   );
   copyPath(
     path.join(androidJniDir, 'lzma', 'C'),
-    path.join(harmonyNativeStageJniDir, 'lzma', 'C'),
+    path.join(harmonyNativeStageJniDir, 'lzma', 'C')
   );
   copyPath(patchCoreDir, harmonyNativeStagePatchCoreDir);
   copyPath(
     updateFlowCoreDir,
-    path.join(harmonyNativeStageDir, 'update_flow_core'),
+    path.join(harmonyNativeStageDir, 'update_flow_core')
   );
 }
 
@@ -275,7 +273,7 @@ function ensureWrapperProject() {
     const fullPath = path.join(wrapperProjectDir, relativePath);
     ensureFileExists(
       fullPath,
-      `Missing Harmony wrapper file: ${relativeToProject(fullPath)}`,
+      `Missing Harmony wrapper file: ${relativeToProject(fullPath)}`
     );
   });
 }
@@ -463,10 +461,15 @@ function hasDependencies(dir) {
       return false;
     }
     const pkgContent = fs.readFileSync(pkgPath, 'utf8');
-    const cleanJson = pkgContent.replace(/\/\*[\s\S]*?\*\/|([^\\:]|^)\/\/.*$/gm, '');
+    const cleanJson = pkgContent.replace(
+      /\/\*[\s\S]*?\*\/|([^\\:]|^)\/\/.*$/gm,
+      ''
+    );
     const pkg = eval('(' + cleanJson + ')');
-    const hasDeps = pkg.dependencies && Object.keys(pkg.dependencies).length > 0;
-    const hasDevDeps = pkg.devDependencies && Object.keys(pkg.devDependencies).length > 0;
+    const hasDeps =
+      pkg.dependencies && Object.keys(pkg.dependencies).length > 0;
+    const hasDevDeps =
+      pkg.devDependencies && Object.keys(pkg.devDependencies).length > 0;
     return !!(hasDeps || hasDevDeps);
   } catch (e) {
     return true;

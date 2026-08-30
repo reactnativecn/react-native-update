@@ -99,6 +99,11 @@ public class UpdateModule extends NativePushySpec {
     }
 
     @Override
+    public void markJsCheckCompleted(String config, Promise promise) {
+        UpdateModuleImpl.markJsCheckCompleted(updateContext, config, promise);
+    }
+
+    @Override
     public void setLocalHashInfo(String hash, String info, Promise promise) {
         UpdateModuleImpl.setLocalHashInfo(updateContext, hash, info, promise);
     }

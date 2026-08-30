@@ -58,6 +58,8 @@ export default {
   error_all_promises_rejected: '所有请求都被拒绝',
   error_ping_failed: 'Ping 失败',
   error_ping_timeout: 'Ping 超时',
+  error_insecure_redirect: '请求被从 https 重定向到明文 http',
+  error_invalid_check_response: '更新检查响应不是有效结果',
   error_http_status: '{{status}} {{statusText}}',
   error_apk_pending_install: '安装包已下载完成，请在系统安装界面完成安装',
   error_storage_permission_rejected: '存储权限被拒绝，无法下载安装包',

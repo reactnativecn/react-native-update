@@ -18,6 +18,8 @@ final class NativeUpdateFlow {
 
     static native String orderEndpointCandidates(String endpointsJson, double randomSample);
 
+    static native boolean isValidCheckResponse(String responseText);
+
     static native String handleCheckResponse(
         String responseText, String identityJson, String afterDownload);
 }

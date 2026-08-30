@@ -43,6 +43,27 @@ final class UpdateFileUtils {
         }
     }
 
+    /** Streaming SHA-256 of a file, lowercase hex. */
+    static String sha256Hex(File file) throws IOException {
+        try (InputStream in = new FileInputStream(file)) {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+            byte[] buffer = new byte[64 * 1024];
+            int read;
+            while ((read = in.read(buffer)) != -1) {
+                md.update(buffer, 0, read);
+            }
+            byte[] digest = md.digest();
+            StringBuilder hex = new StringBuilder(digest.length * 2);
+            for (byte b : digest) {
+                hex.append(Character.forDigit((b >> 4) & 0xf, 16));
+                hex.append(Character.forDigit(b & 0xf, 16));
+            }
+            return hex.toString();
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IOException("SHA-256 unavailable", e);
+        }
+    }
+
     static void copyFile(File from, File to) throws IOException {
         ensureParentDirectory(to);
         try (

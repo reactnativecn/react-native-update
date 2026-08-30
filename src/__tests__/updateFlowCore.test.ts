@@ -1,8 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import type { CheckResult } from '../type';
 import {
+  buildCheckFingerprint,
   buildCheckRequestBody,
   decideDownload,
+  isMirrorRetryableCode,
+  isValidCheckResult,
   orderEndpointCandidates,
 } from '../updateFlowCore';
 
@@ -52,13 +55,56 @@ describe('buildCheckRequestBody', () => {
     expect(body).not.toHaveProperty('bundleHash');
   });
 
-  test('spreads extra last so it can override fields', () => {
+  test('extra can add fields but never overrides the SDK identity fields', () => {
     const body = buildCheckRequestBody({
       ...baseInput,
-      extra: { toHash: 'debug-hash', hash: 'override-hash' },
+      supportedDiffVersion: 2,
+      bundleHash: 'b'.repeat(64),
+      extra: {
+        toHash: 'debug-hash',
+        hash: 'override-hash',
+        packageVersion: '9.9.9',
+        buildTime: 'forged',
+        cInfo: { rnu: 'forged' },
+        diffV: 99,
+        bundleHash: 'forged',
+      },
     });
     expect(body.toHash).toBe('debug-hash');
-    expect(body.hash).toBe('override-hash');
+    // Nested copy for new servers, identity fields untouched inside it too.
+    expect(body.extra).toEqual({
+      toHash: 'debug-hash',
+      hash: 'override-hash',
+      packageVersion: '9.9.9',
+      buildTime: 'forged',
+      cInfo: { rnu: 'forged' },
+      diffV: 99,
+      bundleHash: 'forged',
+    });
+    expect(body.hash).toBe('current-hash');
+    expect(body.packageVersion).toBe('1.0.0');
+    expect(body.buildTime).toBe('2023-01-01');
+    expect(body.cInfo).toEqual(cInfo);
+    expect(body.diffV).toBe(2);
+    expect(body.bundleHash).toBe('b'.repeat(64));
+  });
+
+  test('no extra means no nested extra key', () => {
+    expect(buildCheckRequestBody(baseInput)).not.toHaveProperty('extra');
+    expect(
+      buildCheckRequestBody({ ...baseInput, extra: {} })
+    ).not.toHaveProperty('extra');
+  });
+
+  test('extra cannot smuggle diffV / bundleHash when the SDK omits them', () => {
+    const body = buildCheckRequestBody({
+      ...baseInput,
+      supportedDiffVersion: 0,
+      bundleHash: '',
+      extra: { diffV: 2, bundleHash: 'forged' },
+    });
+    expect(body).not.toHaveProperty('diffV');
+    expect(body).not.toHaveProperty('bundleHash');
   });
 
   test('drops buildTime in dev, even when set via extra', () => {
@@ -230,5 +276,62 @@ describe('decideDownload', () => {
     }
     expect(decision.attempts).toEqual([]);
     expect(decision.devNoop).toBe(true);
+  });
+});
+
+describe('buildCheckFingerprint', () => {
+  const base = {
+    appKey: 'app',
+    endpoints: ['https://a.example.com'],
+    queryUrls: ['https://q.example.com'],
+    body: '{"hash":"x"}',
+  };
+
+  test('identical inputs produce identical fingerprints', () => {
+    expect(buildCheckFingerprint(base)).toBe(
+      buildCheckFingerprint({ ...base })
+    );
+  });
+
+  test('any change in body, appKey or endpoints changes the fingerprint', () => {
+    const fp = buildCheckFingerprint(base);
+    expect(buildCheckFingerprint({ ...base, body: '{"hash":"y"}' })).not.toBe(
+      fp
+    );
+    expect(buildCheckFingerprint({ ...base, appKey: 'other' })).not.toBe(fp);
+    expect(
+      buildCheckFingerprint({ ...base, endpoints: ['https://b.example.com'] })
+    ).not.toBe(fp);
+    expect(buildCheckFingerprint({ ...base, queryUrls: [] })).not.toBe(fp);
+  });
+});
+
+describe('isMirrorRetryableCode', () => {
+  test('transport failures try the next mirror', () => {
+    expect(isMirrorRetryableCode('DOWNLOAD_FAILED')).toBe(true);
+    expect(isMirrorRetryableCode(undefined)).toBe(true);
+  });
+
+  test('an unapplicable patch does not get re-downloaded elsewhere', () => {
+    expect(isMirrorRetryableCode('PATCH_FAILED')).toBe(false);
+  });
+});
+
+describe('isValidCheckResult', () => {
+  test('accepts every verdict shape', () => {
+    expect(isValidCheckResult({ upToDate: true })).toBe(true);
+    expect(isValidCheckResult({ update: true, hash: 'h' })).toBe(true);
+    expect(isValidCheckResult({ expired: true, downloadUrl: 'u' })).toBe(true);
+    expect(isValidCheckResult({ paused: 'app' })).toBe(true);
+  });
+
+  test('rejects non-verdict payloads that still parse as JSON', () => {
+    expect(isValidCheckResult({ error: 'internal' })).toBe(false);
+    expect(isValidCheckResult({})).toBe(false);
+    expect(isValidCheckResult([])).toBe(false);
+    expect(isValidCheckResult(null)).toBe(false);
+    expect(isValidCheckResult('upToDate')).toBe(false);
+    expect(isValidCheckResult({ upToDate: 'yes' })).toBe(false);
+    expect(isValidCheckResult({ update: 1 })).toBe(false);
   });
 });

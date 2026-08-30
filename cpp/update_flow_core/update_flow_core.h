@@ -56,6 +56,15 @@ flowjson::Value DecideDownload(const flowjson::Value& info,
 // JS, so activation cannot wait for it). Native-only; the device-local
 // rolledBackVersion guard in DecideDownload still wins, and the activated
 // version keeps the first_time crash-protection rollback.
+// Schema gate for a checkUpdate response. A valid response is a JSON object
+// carrying at least one verdict field of the expected type: `upToDate`,
+// `update` or `expired` (boolean), or `paused` (string). Anything else — an
+// array, `{"error": "..."}`, an HTML page that happened to parse — is a
+// failed endpoint and must not stop the endpoint fallback. Mirrors
+// src/updateFlowCore.ts isValidCheckResult.
+bool IsValidCheckResult(const flowjson::Value& root);
+bool IsValidCheckResponse(const std::string& responseText);
+
 bool ShouldActivateAfterDownload(const flowjson::Value& info,
                                  const std::string& afterDownload);
 

@@ -58,6 +58,25 @@ final class NativeCheckOrchestrator {
     private static volatile long unactivatedGeneration;
     private static volatile UpdateContext sContext;
     private static volatile String sLaunchRolledBackVersion;
+    // Config JSON for which JS reported a completed check in this process
+    // (markJsCheckCompleted). Process-scoped by design: the next launch
+    // starts with no signal and the cold-start round runs again.
+    private static volatile String sJsCompletedConfig;
+
+    static void markJsCheckCompleted(String config) {
+        sJsCompletedConfig = config;
+    }
+
+    /**
+     * True when JS already obtained a valid response in this process for the
+     * exact config the native round would use: the delayed round is then a
+     * duplicate request. Only the scheduled round consults this — the
+     * crash-rescue path still runs, JS is dead by then.
+     */
+    private static boolean isJsCheckCompleted(UpdateContext context) {
+        String jsConfig = sJsCompletedConfig;
+        return jsConfig != null && jsConfig.equals(context.getKv(KEY_CONFIG));
+    }
 
     private NativeCheckOrchestrator() {
     }
@@ -85,6 +104,13 @@ final class NativeCheckOrchestrator {
                     // in which case every launch second counts (§11.4).
                     if (context.getKv(KEY_ROUND_INCOMPLETE) == null) {
                         Thread.sleep(5000);
+                    }
+                    if (isJsCheckCompleted(context)) {
+                        // Not consuming the round: a later crash rescue may
+                        // still need it.
+                        Log.i(UpdateContext.TAG,
+                            "native check skipped: JS check completed in this process");
+                        return;
                     }
                     startRound(0);
                 } catch (Throwable e) {
@@ -211,13 +237,21 @@ final class NativeCheckOrchestrator {
         }
         // From here on the round does real work: leave the breadcrumb that
         // the next launch reads to skip its 5s delay if we die mid-round.
-        context.setKv(KEY_ROUND_INCOMPLETE, "1");
+        // Best-effort: a lost breadcrumb costs one 5s delay, it must not
+        // abort the rescue round itself.
+        try {
+            context.setKv(KEY_ROUND_INCOMPLETE, "1");
+        } catch (IllegalStateException ignored) {
+        }
         try {
             runConfiguredRound(
                 context, launchRolledBackVersion, deadlineNanos,
                 resetGeneration, configJson, config, appKey);
         } finally {
-            context.removeKv(KEY_ROUND_INCOMPLETE);
+            try {
+                context.removeKv(KEY_ROUND_INCOMPLETE);
+            } catch (IllegalStateException ignored) {
+            }
         }
     }
 
@@ -430,6 +464,9 @@ final class NativeCheckOrchestrator {
                 }
             }
             try (Response response = client.newCall(builder.build()).execute()) {
+                // Same rule as the artifact download: an https endpoint that
+                // redirects to plaintext http is a failed endpoint.
+                DownloadTask.rejectProtocolDowngrade(url, response);
                 if (!response.isSuccessful() || response.body() == null) {
                     return null;
                 }
@@ -440,16 +477,11 @@ final class NativeCheckOrchestrator {
         }
     }
 
+    // Shared schema rule (update_flow_core::IsValidCheckResponse): a 200 with
+    // `{"error": ...}` is a failed endpoint, not a verdict, and must not stop
+    // the endpoint fallback.
     private static boolean isValidCheckResponse(String responseText) {
-        if (responseText == null) {
-            return false;
-        }
-        try {
-            new JSONObject(responseText);
-            return true;
-        } catch (JSONException e) {
-            return false;
-        }
+        return responseText != null && NativeUpdateFlow.isValidCheckResponse(responseText);
     }
 
     private static String normalizeEndpointBase(String base) {

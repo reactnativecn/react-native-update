@@ -10,6 +10,7 @@ import { UpdateContext } from './UpdateContext';
 import { EventHub } from './EventHub';
 import {
   KEY_CONFIG,
+  markJsCheckCompleted,
   KEY_RESP_CACHE,
 } from './NativeCheckOrchestrator';
 
@@ -136,6 +137,7 @@ export class PushyTurboModule extends UITurboModule {
     const currentVersionInfo = currentVersion
       ? this.context.getKv(`hash_${currentVersion}`)
       : '';
+    const currentBundleSha256 = this.context.currentBundleSha256(currentVersion);
     const isFirstTime = this.context.consumeFirstLoadMarker();
     const rolledBackVersion = this.context.rolledBackVersion();
     const uuid = this.context.getKv('uuid');
@@ -148,6 +150,7 @@ export class PushyTurboModule extends UITurboModule {
     const result = {
       downloadRootDir: `${this.mUiCtx.filesDir}/_update`,
       currentVersionInfo,
+      currentBundleSha256,
       packageVersion,
       currentVersion,
       buildTime,
@@ -199,6 +202,15 @@ export class PushyTurboModule extends UITurboModule {
     logger.debug(TAG, ',call syncNativeConfig');
     JSON.parse(config);
     this.context.setKv(KEY_CONFIG, config);
+  }
+
+  // JS 本进程已拿到有效检查响应:延迟的原生轮次据此跳过重复请求(§10.3)。
+  async markJsCheckCompleted(config: string): Promise<void> {
+    logger.debug(TAG, ',call markJsCheckCompleted');
+    if (typeof config !== 'string' || config.length === 0) {
+      throw Error('config must be a non-empty string');
+    }
+    markJsCheckCompleted(config);
   }
 
   // 原生冷启动检测落盘的原始响应缓存,JS 侧新鲜期内直接复用免二次请求

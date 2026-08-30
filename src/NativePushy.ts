@@ -12,6 +12,12 @@ export interface Spec extends TurboModule {
     isUsingBundleUrl: boolean;
     currentVersionInfo: string;
     supportedDiffVersion: number;
+    /**
+     * SHA-256 of the running hot-update bundle as recorded by the install
+     * (cpp/patch_core/install_record.h); '' for the embedded bundle, legacy
+     * installs, or older native modules.
+     */
+    currentBundleSha256?: string;
   };
   setLocalHashInfo(hash: string, info: string): Promise<void>;
   getLocalHashInfo(hash: string): Promise<string>;
@@ -30,6 +36,13 @@ export interface Spec extends TurboModule {
    * an empty string when absent; never rejects.
    */
   getNativeCheckCache(): Promise<string>;
+  /**
+   * JS obtained a valid check response in this process for `config` (the
+   * same JSON syncNativeConfig persists). The delayed cold-start round skips
+   * its own request when its persisted config matches; a crash-rescue round
+   * is unaffected (§10.3). Older native modules lack this method.
+   */
+  markJsCheckCompleted(config: string): Promise<void>;
   reloadUpdate(options: { hash: string }): Promise<void>;
   restartApp(): Promise<void>;
   setNeedUpdate(options: { hash: string }): Promise<void>;

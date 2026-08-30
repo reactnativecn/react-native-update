@@ -148,6 +148,15 @@ Value OrderEndpointCandidates(const Value& endpoints, double randomSample) {
 
 Value BuildCheckRequestBody(const Value& input) {
   Value body = Value::Object();
+  // Caller extras go in FIRST: they may add fields but never override the
+  // identity fields the server keys its decision on (mirrors the TS
+  // `{ ...extra, packageVersion, hash, ... }` spread, including key order).
+  const Value& extra = input.Get("extra");
+  if (extra.IsObject()) {
+    for (const auto& member : extra.members()) {
+      body.Set(member.first, member.second);
+    }
+  }
   body.Set("packageVersion", input.Get("packageVersion"));
   body.Set("hash", input.Get("currentVersion"));
   body.Set("buildTime", input.Get("buildTime"));
@@ -155,19 +164,26 @@ Value BuildCheckRequestBody(const Value& input) {
   const Value& diffV = input.Get("supportedDiffVersion");
   if (diffV.Truthy()) {
     body.Set("diffV", diffV);
+  } else {
+    body.Remove("diffV");
   }
   const Value& bundleHash = input.Get("bundleHash");
   if (bundleHash.Truthy()) {
     body.Set("bundleHash", bundleHash);
-  }
-  const Value& extra = input.Get("extra");
-  if (extra.IsObject()) {
-    for (const auto& member : extra.members()) {
-      body.Set(member.first, member.second);
-    }
+  } else {
+    body.Remove("bundleHash");
   }
   if (input.Get("isDev").Truthy()) {
     body.Remove("buildTime");
+  }
+  // Transitional dual form (mirrors the TS side): nested copy of the caller
+  // extras next to the legacy root-level spread.
+  if (extra.IsObject() && !extra.members().empty()) {
+    Value nested = Value::Object();
+    for (const auto& member : extra.members()) {
+      nested.Set(member.first, member.second);
+    }
+    body.Set("extra", std::move(nested));
   }
   return body;
 }
@@ -280,12 +296,30 @@ bool ShouldActivateAfterDownload(const Value& info,
          info.Get("config").Get("forceBoot").Truthy();
 }
 
+bool IsValidCheckResult(const Value& root) {
+  if (!root.IsObject()) {
+    return false;
+  }
+  const Value& upToDate = root.Get("upToDate");
+  const Value& update = root.Get("update");
+  const Value& expired = root.Get("expired");
+  const Value& paused = root.Get("paused");
+  return upToDate.IsBool() || update.IsBool() || expired.IsBool() ||
+         paused.IsString();
+}
+
+bool IsValidCheckResponse(const std::string& responseText) {
+  bool ok = false;
+  Value root = flowjson::Parse(responseText, &ok);
+  return ok && IsValidCheckResult(root);
+}
+
 Value HandleCheckResponse(const std::string& responseText,
                           const Value& identity, bool isDev,
                           const std::string& afterDownload) {
   bool ok = false;
   Value root = flowjson::Parse(responseText, &ok);
-  if (!ok || !root.IsObject()) {
+  if (!ok || !IsValidCheckResult(root)) {
     return DeclineDownload("invalidResponse");
   }
   Value resolved = ResolveCheckResult(root, identity);

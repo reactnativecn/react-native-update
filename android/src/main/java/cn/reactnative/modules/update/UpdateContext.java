@@ -8,6 +8,7 @@ import android.os.Build;
 import android.util.Log;
 import com.facebook.react.ReactInstanceManager;
 import java.io.File;
+import org.json.JSONObject;
 import java.io.IOException;
 import java.io.InputStream;
 import java.security.MessageDigest;
@@ -46,7 +47,7 @@ public class UpdateContext {
     private static final int STATE_OP_CLEAR_ROLLBACK_MARK = 5;
     private static final int STATE_OP_RESOLVE_LAUNCH = 6;
     private static final String KEY_FIRST_LOAD_MARKED = "firstLoadMarked";
-    static final String VERSION_COMPLETE_FILE = ".pushy-complete";
+    static final String VERSION_COMPLETE_FILE = InstallRecord.FILE_NAME;
     // Bumped by resetToPackagedBundle. The cold-start check runs for minutes
     // and may already hold a decision when the app resets to the packaged
     // bundle; the orchestrator samples this counter and abandons activation
@@ -367,15 +368,39 @@ public class UpdateContext {
         putNullableString(editor, "rolledBackVersion", state.rolledBackVersion);
     }
 
-    private void persistEditor(SharedPreferences.Editor editor, String reason) {
+    /**
+     * Best-effort persistence for launch-path bookkeeping (binary-version
+     * sync, first-load markers, rollback resolution): a failure is logged but
+     * must not take the app down while it is resolving which bundle to run.
+     */
+    private boolean persistEditor(SharedPreferences.Editor editor, String reason) {
         // A lost state write can mean a missed rollback or a version switch
         // that silently never happens, so this must be visible in release too.
         if (!editor.commit()) {
             Log.e(TAG, "Failed to persist update state for " + reason);
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * Persistence for operations whose result is promised to a caller
+     * (switchVersion / markSuccess / setLocalHashInfo / the cold-start round):
+     * a commit that did not reach disk is a failed operation, never a
+     * resolved promise whose effect silently evaporates on the next launch.
+     */
+    private void persistEditorOrThrow(SharedPreferences.Editor editor, String reason) {
+        if (!persistEditor(editor, reason)) {
+            throw new IllegalStateException("Failed to persist update state for " + reason);
         }
     }
 
-    public void switchVersion(String hash) {
+    /**
+     * Validates that {@code hash} is a switchable version and computes the
+     * resulting state without persisting it, so callers can fold the switch
+     * into a larger single-commit transaction.
+     */
+    private StateCoreResult computeSwitchVersion(String hash) {
         if (!isSafePathComponent(hash)) {
             throw new IllegalArgumentException("Invalid hash: " + hash);
         }
@@ -387,31 +412,42 @@ public class UpdateContext {
         StateCoreResult currentState = getStateSnapshot();
         boolean isLegacyActivatedVersion = hash.equals(currentState.currentVersion)
             || hash.equals(currentState.lastVersion);
-        if (!new File(versionDir, VERSION_COMPLETE_FILE).isFile()
-            && !isLegacyActivatedVersion) {
+        if (!InstallRecord.isComplete(versionDir, hash) && !isLegacyActivatedVersion) {
             // Versions activated before completion markers were introduced are
             // explicitly grandfathered through current/last state. An arbitrary
             // markerless directory may be a crash-left partial install.
             throw new IllegalStateException("Bundle version " + hash + " is incomplete.");
         }
-        StateCoreResult nextState = runStateCore(
+        if (!isLegacyActivatedVersion) {
+            // The record's bundle digest must match the bytes on disk before
+            // the next launch is pointed at them.
+            try {
+                InstallRecord.verifyForActivation(versionDir, hash, bundleFile);
+            } catch (IOException e) {
+                throw new IllegalStateException(e.getMessage(), e);
+            }
+        }
+        return runStateCore(
             STATE_OP_SWITCH_VERSION,
             currentState,
-            hash
-            ,
+            hash,
             false,
             false
         );
+    }
+
+    public void switchVersion(String hash) {
+        StateCoreResult nextState = computeSwitchVersion(hash);
         SharedPreferences.Editor editor = sp.edit();
         applyState(editor, nextState);
-        persistEditor(editor, "switch version");
+        persistEditorOrThrow(editor, "switch version");
         ignoreRollback = false;
     }
 
     public void setKv(String key, String value) {
         SharedPreferences.Editor editor = sp.edit();
         editor.putString(key, value);
-        persistEditor(editor, "set key " + key);
+        persistEditorOrThrow(editor, "set key " + key);
     }
 
     public String getKv(String key) {
@@ -421,7 +457,7 @@ public class UpdateContext {
     void removeKv(String key) {
         SharedPreferences.Editor editor = sp.edit();
         editor.remove(key);
-        persistEditor(editor, "remove key " + key);
+        persistEditorOrThrow(editor, "remove key " + key);
     }
 
     public String getCurrentVersion() {
@@ -461,7 +497,7 @@ public class UpdateContext {
             if (nextState.staleVersionToDelete != null) {
                 editor.remove("hash_" + nextState.staleVersionToDelete);
             }
-            persistEditor(editor, "mark success");
+            persistEditorOrThrow(editor, "mark success");
 
             this.cleanUp();
         }
@@ -479,7 +515,7 @@ public class UpdateContext {
         SharedPreferences.Editor editor = sp.edit();
         applyState(editor, nextState);
         editor.remove(KEY_FIRST_LOAD_MARKED);
-        persistEditor(editor, "clear first time");
+        persistEditorOrThrow(editor, "clear first time");
 
         this.cleanUp();
     }
@@ -515,7 +551,7 @@ public class UpdateContext {
         if (uuid != null) {
             editor.putString("uuid", uuid);
         }
-        persistEditor(editor, "reset to packaged bundle");
+        persistEditorOrThrow(editor, "reset to packaged bundle");
         ignoreRollback = false;
         // editor.clear() above already dropped the cached check response; it
         // still advertised the version this reset removed.
@@ -543,6 +579,7 @@ public class UpdateContext {
         );
         SharedPreferences.Editor editor = sp.edit();
         applyState(editor, nextState);
+        // Runs from getConstants on the launch path: best-effort only.
         persistEditor(editor, "clear rollback mark");
 
         this.cleanUp();
@@ -676,17 +713,40 @@ public class UpdateContext {
             if (resetGeneration.get() != expectedGeneration) {
                 return false;
             }
+            // One editor, one commit: the version info, the activation and
+            // the response cache land together or not at all. Three separate
+            // commits under the same lock only prevented interleaving, not a
+            // half-written round after a failed or interrupted write.
+            SharedPreferences.Editor editor = sp.edit();
             if (hash != null && hashInfoJson != null) {
-                setKv("hash_" + hash, hashInfoJson);
+                editor.putString("hash_" + hash, hashInfoJson);
             }
-            if (activate && hash != null) {
-                switchVersion(hash);
+            boolean switching = activate && hash != null;
+            if (switching) {
+                applyState(editor, computeSwitchVersion(hash));
             }
             if (responseCacheJson != null) {
-                setKv(NativeCheckOrchestrator.KEY_RESP_CACHE, responseCacheJson);
+                editor.putString(NativeCheckOrchestrator.KEY_RESP_CACHE, responseCacheJson);
+            }
+            persistEditorOrThrow(editor, "commit native check result");
+            if (switching) {
+                ignoreRollback = false;
             }
             return true;
         }
+    }
+
+    /**
+     * bundleSha256 from the running version's install record (see
+     * InstallRecord); "" for the embedded bundle, a legacy install or an
+     * unreadable record. Exposed to JS for crash-report attribution.
+     */
+    String currentBundleSha256(String hash) {
+        if (hash == null || hash.isEmpty() || !isSafePathComponent(hash)) {
+            return "";
+        }
+        JSONObject record = InstallRecord.read(new File(rootDir, hash));
+        return record == null ? "" : record.optString("bundleSha256", "");
     }
 
     boolean hasCompletedVersion(String hash) {
@@ -695,7 +755,7 @@ public class UpdateContext {
         }
         File versionDir = new File(rootDir, hash);
         return new File(versionDir, "index.bundlejs").isFile()
-            && new File(versionDir, VERSION_COMPLETE_FILE).isFile();
+            && InstallRecord.isComplete(versionDir, hash);
     }
 
     private String rollBack() {

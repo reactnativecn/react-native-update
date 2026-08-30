@@ -172,20 +172,111 @@ export function buildCheckRequestBody({
   isDev,
   extra,
 }: CheckRequestInput): Record<string, any> {
+  // Caller extras are spread FIRST so they can add fields (channel, custom
+  // filters, the debug-channel toHash) but never override the SDK identity
+  // fields the server keys its decision on: a stray `packageVersion` or
+  // `hash` in extra would otherwise make the server hand out a package for
+  // the wrong binary.
   const body: Record<string, any> = {
+    ...extra,
     packageVersion,
     hash: currentVersion,
     buildTime,
     cInfo,
-    // 可消费的 diff 轨道版本(2 = hdiffv2 轨道),服务端据此门控下发
-    ...(supportedDiffVersion ? { diffV: supportedDiffVersion } : {}),
-    ...(bundleHash ? { bundleHash } : {}),
-    ...extra,
   };
+  // 可消费的 diff 轨道版本(2 = hdiffv2 轨道),服务端据此门控下发
+  if (supportedDiffVersion) {
+    body.diffV = supportedDiffVersion;
+  } else {
+    delete body.diffV;
+  }
+  if (bundleHash) {
+    body.bundleHash = bundleHash;
+  } else {
+    delete body.bundleHash;
+  }
   if (isDev) {
     delete body.buildTime;
   }
+  // Transitional dual form: the legacy root-level spread above is what
+  // servers before 2026-08-30 read; the nested copy is what new servers read
+  // first (extra.toHash wins there) and lets caller keys stop sharing the
+  // SDK's namespace once the root spread is retired.
+  if (extra) {
+    // Match JSON.stringify semantics: undefined values do not exist on the
+    // wire, so they must not create a nested copy either (the native check
+    // cache compares serialized requests).
+    const defined: Record<string, any> = {};
+    for (const [key, value] of Object.entries(extra)) {
+      if (value !== undefined) {
+        defined[key] = value;
+      }
+    }
+    if (Object.keys(defined).length > 0) {
+      body.extra = defined;
+    }
+  }
   return body;
+}
+
+export interface CheckFingerprintInput {
+  appKey?: string;
+  endpoints?: string[];
+  queryUrls?: string[];
+  uuid?: string;
+  /** The exact serialized request body (identity fields + extra). */
+  body: string;
+}
+
+/**
+ * Identity of one update check. Two checks may share an in-flight response
+ * only when every input that could change the server's answer is identical.
+ */
+export function buildCheckFingerprint({
+  appKey,
+  endpoints,
+  queryUrls,
+  uuid,
+  body,
+}: CheckFingerprintInput): string {
+  return JSON.stringify([
+    appKey ?? '',
+    endpoints ?? [],
+    queryUrls ?? [],
+    uuid ?? '',
+    body,
+  ]);
+}
+
+/**
+ * Whether a failed download attempt is worth retrying on another mirror of
+ * the same artifact. Transport failures (DNS, connect, timeout, truncated
+ * body, 5xx) and corrupt bytes are; a patch that downloaded fine but could
+ * not be applied is not — every mirror serves the same bytes, so the next
+ * strategy is the only way forward.
+ */
+export function isMirrorRetryableCode(code?: string): boolean {
+  return code !== 'PATCH_FAILED';
+}
+
+/**
+ * Schema gate for a checkUpdate response (mirrors C++ IsValidCheckResult): a
+ * JSON object carrying at least one verdict field of the expected type —
+ * `upToDate` / `update` / `expired` (boolean) or `paused` (string). A 200
+ * with `{"error": ...}`, an array or an HTML page that happened to parse is
+ * a failed endpoint, not a verdict, and must not stop the endpoint fallback.
+ */
+export function isValidCheckResult(value: unknown): value is CheckResult {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+  const root = value as Record<string, unknown>;
+  return (
+    typeof root.upToDate === 'boolean' ||
+    typeof root.update === 'boolean' ||
+    typeof root.expired === 'boolean' ||
+    typeof root.paused === 'string'
+  );
 }
 
 export interface UpdateIdentity {

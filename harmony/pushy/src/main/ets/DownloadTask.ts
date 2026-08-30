@@ -12,6 +12,18 @@ import NativePatchCore, {
   CopyGroupResult,
 } from './NativePatchCore';
 import { monotonicNowMs } from './MonotonicClock';
+import {
+  MAX_ARCHIVE_BYTES,
+  MAX_MANIFEST_BYTES,
+  ensureFreeSpace,
+  measureExtractedDirectory,
+} from './ArchiveLimits';
+import {
+  HARMONY_BUNDLE_FILE_NAME,
+  buildInstallRecord,
+  stagingDirectoryFor,
+  writeInstallRecord,
+} from './InstallRecord';
 
 export const VERSION_COMPLETE_FILE_NAME = '.pushy-complete';
 
@@ -144,6 +156,32 @@ export class DownloadTask {
   // 一经 downloadFile 正常返回即置位:之后的失败是 patch 应用失败,归档
   // 已被判定有毒,清理时必须连 sidecar 一起删,绝不能续传进同一个失败。
   private downloadPhaseCompleted = false;
+  // 下载归档的 SHA-256,解压前计算,写进完成记录。
+  private artifactSha256 = '';
+
+  // 两阶段安装(cpp/patch_core/install_record.h):解压/打补丁全部在
+  // <hash>.staging 里进行,写完完成记录后一次 rename 成 <hash>;失败或崩溃
+  // 都不会留下一个"看起来像版本"的半成品目录。
+  private stagingDirectory(params: DownloadTaskParams): string {
+    return stagingDirectoryFor(params.unzipDirectory);
+  }
+
+  private async promoteStaging(params: DownloadTaskParams): Promise<void> {
+    const work = this.stagingDirectory(params);
+    const bundlePath = `${work}/${HARMONY_BUNDLE_FILE_NAME}`;
+    if (!fileIo.accessSync(bundlePath)) {
+      throw Error(`bundle missing after install: ${bundlePath}`);
+    }
+    const bundleSha256 = NativePatchCore.sha256HexFile(bundlePath);
+    await writeInstallRecord(
+      work,
+      buildInstallRecord(params.hash, bundleSha256, this.artifactSha256),
+    );
+    if (fileIo.accessSync(params.unzipDirectory)) {
+      await this.removeDirectory(params.unzipDirectory);
+    }
+    await fileIo.rename(work, params.unzipDirectory);
+  }
 
   constructor(context: common.Context) {
     this.context = context;
@@ -267,6 +305,49 @@ export class DownloadTask {
     await this.ensureDirectory(parentPath);
   }
 
+  /**
+   * The completion marker is written by this SDK only, after the whole
+   * install succeeded. zlib.decompressFile offers no per-entry filter, so an
+   * archive that ships its own marker is detected right after extraction:
+   * the marker is removed (so the failure cleanup below cannot mistake the
+   * directory for a finished install) and the package is rejected.
+   */
+  private async rejectReservedEntries(unzipDirectory: string): Promise<void> {
+    const marker = `${unzipDirectory}/${VERSION_COMPLETE_FILE_NAME}`;
+    if (!fileIo.accessSync(marker)) {
+      return;
+    }
+    try {
+      await fileIo.unlink(marker);
+    } catch (e) {
+      // The directory is removed by the failure cleanup either way.
+    }
+    const error: Error & { code?: string } = Error(
+      `archive contains reserved entry ${VERSION_COMPLETE_FILE_NAME}`,
+    );
+    error.code = 'PATCH_FAILED';
+    throw error;
+  }
+
+  /**
+   * 解压 + 资源上限(cpp/patch_core/archive_limits.h)。zlib.decompressFile
+   * 没有逐条钩子:解压前按归档大小与 2 倍启发式查磁盘,解压后统计条目数与
+   * 总字节数(超限即失败,目录由失败清理删除),再拒绝保留条目。
+   */
+  private async extractArchive(
+    archiveFile: string,
+    unzipDirectory: string,
+  ): Promise<void> {
+    const archiveStat = await fileIo.stat(archiveFile);
+    if (archiveStat.size > MAX_ARCHIVE_BYTES) {
+      throw Error(`archive too large: ${archiveStat.size} bytes`);
+    }
+    await ensureFreeSpace(unzipDirectory, archiveStat.size * 2);
+    await zlib.decompressFile(archiveFile, unzipDirectory);
+    await measureExtractedDirectory(unzipDirectory);
+    await this.rejectReservedEntries(unzipDirectory);
+  }
+
   private async recreateDirectory(path: string): Promise<void> {
     await this.removeDirectory(path);
     await this.ensureDirectory(path);
@@ -353,6 +434,10 @@ export class DownloadTask {
       };
     }
 
+    const manifestStat = await fileIo.stat(manifestPath);
+    if (manifestStat.size > MAX_MANIFEST_BYTES) {
+      throw Error(`patch manifest too large: ${manifestStat.size} bytes`);
+    }
     return parseManifestToArrays(
       this.parseJsonEntry(await this.readFileContent(manifestPath)),
       normalizeResourceCopies,
@@ -553,6 +638,10 @@ export class DownloadTask {
 
     const enqueueWrite = (data: ArrayBuffer) => {
       received += data.byteLength;
+      if (!writeError && baseOffset + received > MAX_ARCHIVE_BYTES) {
+        // 未知长度/分块传输的兜底:超过上限即停写,请求在下面结算时失败。
+        writeError = Error(`archive too large: exceeded ${MAX_ARCHIVE_BYTES}`);
+      }
       writeQueue = writeQueue.then(async () => {
         if (!writer || writeError) {
           return;
@@ -771,6 +860,14 @@ export class DownloadTask {
           fileIo.OpenMode.CREATE | fileIo.OpenMode.WRITE_ONLY,
         );
       }
+      if (totalAll > MAX_ARCHIVE_BYTES) {
+        writeError = Error(`archive too large: ${totalAll} bytes`);
+        throw writeError;
+      }
+      await ensureFreeSpace(
+        params.targetFile,
+        totalAll > 0 ? totalAll - baseOffset : 0,
+      );
       // 先落 sidecar 再放行写入,流中崩溃才有得续。
       const meta: ResumeMeta = { url: params.url };
       const etag = etagHeader || resumeMeta?.etag;
@@ -874,8 +971,10 @@ export class DownloadTask {
 
   private async doFullPatch(params: DownloadTaskParams): Promise<void> {
     await this.downloadFile(params);
-    await this.recreateDirectory(params.unzipDirectory);
-    await zlib.decompressFile(params.targetFile, params.unzipDirectory);
+    const work = this.stagingDirectory(params);
+    await this.recreateDirectory(work);
+    this.artifactSha256 = NativePatchCore.sha256HexFile(params.targetFile);
+    await this.extractArchive(params.targetFile, work);
     await this.deleteArchiveAndSidecar(params.targetFile);
   }
 
@@ -895,12 +994,14 @@ export class DownloadTask {
   private async doPatchFromAppAfterDownload(
     params: DownloadTaskParams,
   ): Promise<void> {
-    await this.recreateDirectory(params.unzipDirectory);
+    const work = this.stagingDirectory(params);
+    await this.recreateDirectory(work);
+    this.artifactSha256 = NativePatchCore.sha256HexFile(params.targetFile);
 
-    await zlib.decompressFile(params.targetFile, params.unzipDirectory);
+    await this.extractArchive(params.targetFile, work);
     const [entryNames, manifestArrays] = await Promise.all([
-      this.listEntryNames(params.unzipDirectory),
-      this.readManifestArrays(params.unzipDirectory, true),
+      this.listEntryNames(work),
+      this.readManifestArrays(work, true),
     ]);
 
     NativePatchCore.buildArchivePatchPlan(
@@ -912,7 +1013,7 @@ export class DownloadTask {
       HARMONY_BUNDLE_PATCH_ENTRY,
     );
 
-    const bundlePatchPath = `${params.unzipDirectory}/${HARMONY_BUNDLE_PATCH_ENTRY}`;
+    const bundlePatchPath = `${work}/${HARMONY_BUNDLE_PATCH_ENTRY}`;
     if (!fileIo.accessSync(bundlePatchPath)) {
       throw Error('bundle patch not found');
     }
@@ -922,9 +1023,9 @@ export class DownloadTask {
     );
     await this.applyBundlePatchFromFileSource(
       originContent.buffer as ArrayBuffer,
-      params.unzipDirectory,
+      work,
       bundlePatchPath,
-      `${params.unzipDirectory}/bundle.harmony.js`,
+      `${work}/${HARMONY_BUNDLE_FILE_NAME}`,
       manifestArrays.hbcTransformMeta,
     );
     // 组按 from 聚合;同一 from 的内容必然一致,所以每组一个 CRC 即可
@@ -941,7 +1042,7 @@ export class DownloadTask {
         manifestArrays.copyFroms,
         manifestArrays.copyTos,
       ),
-      params.unzipDirectory,
+      work,
       crcByFrom,
     );
     await this.deleteArchiveAndSidecar(params.targetFile);
@@ -961,12 +1062,14 @@ export class DownloadTask {
   private async doPatchFromPpkAfterDownload(
     params: DownloadTaskParams,
   ): Promise<void> {
-    await this.recreateDirectory(params.unzipDirectory);
+    const work = this.stagingDirectory(params);
+    await this.recreateDirectory(work);
+    this.artifactSha256 = NativePatchCore.sha256HexFile(params.targetFile);
 
-    await zlib.decompressFile(params.targetFile, params.unzipDirectory);
+    await this.extractArchive(params.targetFile, work);
     const [entryNames, manifestArrays] = await Promise.all([
-      this.listEntryNames(params.unzipDirectory),
-      this.readManifestArrays(params.unzipDirectory, false),
+      this.listEntryNames(work),
+      this.readManifestArrays(work, false),
     ]);
 
     const plan = NativePatchCore.buildArchivePatchPlan(
@@ -982,10 +1085,10 @@ export class DownloadTask {
       copyTos: manifestArrays.copyTos,
       deletes: manifestArrays.deletes,
       sourceRoot: params.originDirectory,
-      targetRoot: params.unzipDirectory,
+      targetRoot: work,
       originBundlePath: `${params.originDirectory}/bundle.harmony.js`,
-      bundlePatchPath: `${params.unzipDirectory}/${HARMONY_BUNDLE_PATCH_ENTRY}`,
-      bundleOutputPath: `${params.unzipDirectory}/bundle.harmony.js`,
+      bundlePatchPath: `${work}/${HARMONY_BUNDLE_PATCH_ENTRY}`,
+      bundleOutputPath: `${work}/${HARMONY_BUNDLE_FILE_NAME}`,
       mergeSourceSubdir: plan.mergeSourceSubdir,
       enableMerge: plan.enableMerge,
       bundleHbcTransformMeta: manifestArrays.hbcTransformMeta,
@@ -1147,10 +1250,7 @@ export class DownloadTask {
           throw Error(`Unknown task type: ${params.type}`);
       }
       if (isPatchTask) {
-        await this.writeFileContent(
-          `${params.unzipDirectory}/${VERSION_COMPLETE_FILE_NAME}`,
-          new Uint8Array(0),
-        );
+        await this.promoteStaging(params);
       }
     } catch (error: any) {
       console.error('Task execution failed:', error.message);
@@ -1159,15 +1259,11 @@ export class DownloadTask {
           if (params.type === DownloadTaskParams.TASK_TYPE_PLAIN_DOWNLOAD) {
             await fileIo.unlink(params.targetFile);
             await this.deleteResumeSidecar(params.targetFile);
-          } else if (
-            !fileIo.accessSync(
-              `${params.unzipDirectory}/${VERSION_COMPLETE_FILE_NAME}`,
-            ) ||
-            !fileIo.accessSync(`${params.unzipDirectory}/bundle.harmony.js`)
-          ) {
-            // Never let a failed duplicate task remove an install already
-            // handed off by an earlier task via marker + bundle.
-            await this.removeDirectory(params.unzipDirectory);
+          } else {
+            // Only the staging directory is ours to drop: the final version
+            // directory is never touched by a failed install, so a failed
+            // duplicate task cannot remove an earlier task's install.
+            await this.removeDirectory(this.stagingDirectory(params));
             if (this.downloadPhaseCompleted) {
               // 收齐后才失败的是解压/patch 失败:归档有毒,续传只会撞上
               // 同一个失败。下载阶段的失败则保留 partial + sidecar——那

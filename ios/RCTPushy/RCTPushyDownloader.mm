@@ -273,6 +273,31 @@ completionHandler:(void (^)(NSString *path, NSError *error))completionHandler
 
 #pragma mark - session delegate
 
+// An https artifact URL must stay on https through every redirect: the
+// package is the supply-chain boundary and TLS is what authenticates it.
+// Returning nil delivers the 3xx itself as the response, which the status
+// check below then rejects with the recorded reason.
+- (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task
+willPerformHTTPRedirection:(NSHTTPURLResponse *)response
+        newRequest:(NSURLRequest *)request
+ completionHandler:(void (^)(NSURLRequest *))completionHandler
+{
+    if (session != self.session) {
+        completionHandler(nil);
+        return;
+    }
+    NSString *originalScheme = [[NSURL URLWithString:self.urlString].scheme lowercaseString];
+    NSString *nextScheme = [request.URL.scheme lowercaseString];
+    if ([originalScheme isEqualToString:@"https"] && [nextScheme isEqualToString:@"http"]) {
+        [self failWithDescription:[NSString stringWithFormat:
+            @"https download redirected to plaintext http: %@", request.URL.absoluteString]
+                             code:-1];
+        completionHandler(nil);
+        return;
+    }
+    completionHandler(request);
+}
+
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)dataTask
 didReceiveResponse:(NSURLResponse *)response
  completionHandler:(void (^)(NSURLSessionResponseDisposition))completionHandler
@@ -286,6 +311,13 @@ didReceiveResponse:(NSURLResponse *)response
         [response isKindOfClass:[NSHTTPURLResponse class]] ? (NSHTTPURLResponse *)response : nil;
     NSInteger statusCode = httpResponse.statusCode;
 
+    if (self.fileError != nil) {
+        // A refused redirect (see willPerformHTTPRedirection) already
+        // recorded the real reason; the 3xx being delivered here is not it.
+        completionHandler(NSURLSessionResponseCancel);
+        [self completeWithError:self.fileError];
+        return;
+    }
     if (statusCode == 416) {
         long long knownTotal = [self.resumeMeta[@"total"] longLongValue];
         completionHandler(NSURLSessionResponseCancel);
