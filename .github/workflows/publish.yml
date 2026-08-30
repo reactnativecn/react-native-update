@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   check_changes:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest  # npm --provenance requires a GitHub-hosted runner
     outputs:
       harmony_changed: ${{ steps.check.outputs.changed }}
       prev_tag: ${{ steps.check.outputs.prev_tag }}
@@ -57,7 +57,7 @@ jobs:
   # can never ship a stale librnupdate.so after a cpp/patch_core change (the
   # committed binaries are for local dev / git installs only).
   build_android_so:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest  # npm --provenance requires a GitHub-hosted runner
     timeout-minutes: 15
     env:
       # Keep in sync with PINNED_NDK_VERSION in scripts/build-android-so.sh.
@@ -83,7 +83,7 @@ jobs:
   publish_with_harmony:
     needs: [check_changes, build_android_so]
     if: needs.check_changes.outputs.harmony_changed == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest  # npm --provenance requires a GitHub-hosted runner
     # Pinned by digest (manifest list of :latest as of 2026-08-30); bump deliberately.
     container: ghcr.io/sanchuanhehe/harmony-next-pipeline-docker/harmonyos-ci-image:latest@sha256:2836142b7b6ae8837ad0e36cacc650f00e8c88f55b4e9f34be66cc98a731c5da
     timeout-minutes: 15
@@ -136,7 +136,7 @@ jobs:
   publish_without_harmony:
     needs: [check_changes, build_android_so]
     if: needs.check_changes.outputs.harmony_changed == 'false'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest  # npm --provenance requires a GitHub-hosted runner
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
