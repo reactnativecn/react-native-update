@@ -1,9 +1,10 @@
 name: cut-release
 
-# One-input release: bump package.json to the requested version on master,
-# tag it and publish the GitHub release that triggers "Publish Package to
-# npmjs". The publish workflow re-verifies tag == package.json version, the
-# pack list and the native artifacts before anything reaches npm.
+# One-input release. master is protected by required status checks, so the
+# version bump goes through a short-lived PR that auto-merges once lint and
+# the unit tests pass; the merged commit is then tagged and published as a
+# GitHub release, which triggers "Publish Package to npmjs" (tag == package.json
+# version, pack list and native artifacts are re-verified there).
 on:
   workflow_dispatch:
     inputs:
@@ -17,11 +18,12 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   cut:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
         with:
@@ -33,23 +35,53 @@ jobs:
         run: |
           set -euo pipefail
           echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$' || { echo "not a semver: $VERSION"; exit 1; }
-          git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null && { echo "tag v$VERSION already exists"; exit 1; } || true
-      - name: Bump, tag and release
+          if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then echo "tag v$VERSION already exists"; exit 1; fi
+      - name: Open the version bump PR
+        id: pr
         env:
           VERSION: ${{ inputs.version }}
-          NOTES: ${{ inputs.notes }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          branch="release/v$VERSION"
+          git checkout -b "$branch"
           node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.version=process.env.VERSION;fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
           git add package.json
           git commit -m "chore(release): $VERSION"
-          git push origin HEAD:master
+          git push -u origin "$branch"
+          url="$(gh pr create --base master --head "$branch" --title "chore(release): $VERSION" --body "Automated version bump for v$VERSION (cut-release workflow).")"
+          gh pr merge "$url" --squash --auto --delete-branch
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+      - name: Wait for the merge
+        id: merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ steps.pr.outputs.url }}
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 80); do
+            state="$(gh pr view "$PR_URL" --json state,mergeCommit --jq '.state + " " + (.mergeCommit.oid // "")')"
+            case "$state" in
+              MERGED*) echo "commit=${state#MERGED }" >> "$GITHUB_OUTPUT"; exit 0 ;;
+              CLOSED*) echo "PR closed without merging"; exit 1 ;;
+            esac
+            sleep 30
+          done
+          echo "PR did not merge in time (required checks failing?)"; exit 1
+      - name: Tag and publish the GitHub release
+        env:
+          VERSION: ${{ inputs.version }}
+          NOTES: ${{ inputs.notes }}
+          COMMIT: ${{ steps.merge.outputs.commit }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git fetch -q origin master
           if [ -z "$NOTES" ]; then
-            last="$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || true)"
-            NOTES="$(git log --pretty='- %s' ${last:+$last..}HEAD~0 | head -100)"
+            last="$(git describe --tags --abbrev=0 "$COMMIT~1" 2>/dev/null || true)"
+            NOTES="$(git log --pretty='- %s' ${last:+$last..}$COMMIT | head -100)"
           fi
           if echo "$VERSION" | grep -q -- '-'; then pre=--prerelease; else pre=""; fi
-          gh release create "v$VERSION" --target "$(git rev-parse HEAD)" --title "v$VERSION" --notes "$NOTES" $pre
+          gh release create "v$VERSION" --target "$COMMIT" --title "v$VERSION" --notes "$NOTES" $pre
