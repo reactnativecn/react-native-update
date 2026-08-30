@@ -74,7 +74,7 @@ jobs:
           path: react-native-update-cli
 
       - name: Setup Node.js
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
 
@@ -84,7 +84,7 @@ jobs:
           bun-version: 1.4.0
 
       - name: Cache Bun dependencies
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.bun/install/cache
           key: ${{ runner.os }}-bun-e2e-${{ hashFiles('Example/e2etest/bun.lock', 'react-native-update-cli/bun.lock') }}
@@ -112,7 +112,7 @@ jobs:
 
       - name: Cache Homebrew downloads
         # bottle 按 URL 内容寻址,restore-keys 前缀命中即省下载(装/链接照常)
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/Library/Caches/Homebrew
           key: ${{ runner.os }}-brew-e2e-${{ github.sha }}
@@ -126,7 +126,7 @@ jobs:
         # ccache 按(预处理后)内容寻址,不受 fresh checkout 的 mtime 影响——
         # 这是 DerivedData 缓存在 -UseNewBuildSystem=NO 下做不到的。
         # 陈旧条目不影响正确性,只影响命中率,所以 restore-keys 用前缀即可。
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/Library/Caches/ccache
           key: ${{ runner.os }}-ccache-e2e-xcode-26.4-${{ github.sha }}
@@ -153,7 +153,7 @@ jobs:
 
       - name: Cache Metro transform cache
         # 内容寻址(等价 ccache 之于 clang):陈旧条目只影响命中率不影响正确性
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: Example/e2etest/.metro-cache
           key: ${{ runner.os }}-metro-e2e-${{ github.sha }}
@@ -167,7 +167,7 @@ jobs:
         run: cd Example/e2etest && bun run prepare:e2e
 
       - name: Cache CocoaPods downloads
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/Library/Caches/CocoaPods
           key: ${{ runner.os }}-cocoapods-e2e-${{ hashFiles('Example/e2etest/ios/Podfile.lock', 'Example/e2etest/ios/Podfile', 'Example/e2etest/bun.lock') }}
@@ -182,7 +182,7 @@ jobs:
         # 会在改 spec 后把新 JS 注入到旧胶水的二进制上。
         # 故意不设 restore-keys:部分命中就是错的二进制,宁可全量重建。
         id: cache-ios-app
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             Example/e2etest/ios/build/Build/Products/Release-iphonesimulator/AwesomeProject.app
@@ -197,7 +197,7 @@ jobs:
 
       - name: Cache Detox iOS framework
         id: cache-detox-ios-framework
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/Library/Detox
           key: ${{ runner.os }}-detox-ios-framework-xcode-26.4-${{ hashFiles('Example/e2etest/bun.lock') }}
