@@ -40,6 +40,7 @@ const REQUIRED_SYMBOLS = [
   'Java_cn_reactnative_modules_update_NativeUpdateFlow_buildCheckRequestBody',
   'Java_cn_reactnative_modules_update_NativeUpdateFlow_orderEndpointCandidates',
   'Java_cn_reactnative_modules_update_NativeUpdateFlow_handleCheckResponse',
+  'Java_cn_reactnative_modules_update_NativeUpdateFlow_isValidCheckResponse',
 ];
 
 const SHT_DYNSYM = 11;
