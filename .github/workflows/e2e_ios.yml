@@ -44,7 +44,7 @@ jobs:
   e2e-ios:
     # 不带 matrix 值全量拼名,否则 check 叫 "e2e-ios (native, --config e2e/…)"
     name: e2e-ios (${{ matrix.suite }})
-    runs-on: macos-26
+    runs-on: blacksmith-6vcpu-macos-26
     # 绿色基线 ~16 分钟。60 分钟覆盖最坏情况:一个用例等满 300s testTimeout,
     # 再叠一次 --retries 1 全量重试。40 分钟不够——实测重试跑到一半被腰斩,
     # 把"慢但能恢复"的运行变成 cancelled,等于白开了 retries。

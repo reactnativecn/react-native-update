@@ -15,7 +15,7 @@ jobs:
     if: contains(fromJSON('["failure","timed_out","action_required"]'), github.event.workflow_run.conclusion)
     permissions:
       issues: write
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Create or update failure issue
         env:
@@ -74,7 +74,7 @@ jobs:
     if: github.event.workflow_run.conclusion == 'success'
     permissions:
       issues: write
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Close recovered failure issues
         env:
