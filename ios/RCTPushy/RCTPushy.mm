@@ -14,8 +14,15 @@
 
 #import <UIKit/UIKit.h>
 
+// use_frameworks! 构建里 React 头文件只有 <React/…> 框架形式可见,引号形式的
+// __has_include 会探测失败;漏掉这里会静默编入 [self.bridge reload] 兜底,而
+// bridgeless 下 bridge 是 nil/代理,reload 变成无声 no-op(切版本后不重启)。
 #if __has_include("RCTReloadCommand.h")
 #import "RCTReloadCommand.h"
+#define PUSHY_HAS_RELOAD_COMMAND 1
+#elif __has_include(<React/RCTReloadCommand.h>)
+#import <React/RCTReloadCommand.h>
+#define PUSHY_HAS_RELOAD_COMMAND 1
 #endif
 #ifdef RCT_NEW_ARCH_ENABLED
 #import "RCTPushySpec.h"
@@ -1256,7 +1263,7 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
 - (void)reloadBridgeWithReason:(NSString *)reason
 {
     dispatch_async(dispatch_get_main_queue(), ^{
-        #if __has_include("RCTReloadCommand.h")
+        #if PUSHY_HAS_RELOAD_COMMAND
             RCTReloadCommandSetBundleURL([[self class] bundleURL]);
             RCTTriggerReloadCommandListeners(reason);
         #else
