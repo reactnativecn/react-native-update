@@ -25,6 +25,13 @@ import {
   UpdateError,
   type UpdateErrorCode,
 } from './error';
+import {
+  type ErrorReportContext,
+  type ErrorReportingOptions,
+  installGlobalErrorHandler,
+  type SerializedException,
+  serializeException,
+} from './errorReporting';
 import i18n from './i18n';
 import {
   resolveServerEventHash,
@@ -121,6 +128,7 @@ const createDefaultClientOptions = (): ClientOptions => ({
   logger: noop,
   debug: false,
   throwError: false,
+  disableErrorReporting: false,
 });
 
 export const sharedState: {
@@ -178,6 +186,8 @@ export class Pushy {
   private pendingNativeConfigJson?: string;
   private nativeConfigSyncInFlight = false;
   private reportedInvalidUpdates = new Set<string>();
+  private reportedExceptions = new WeakSet<object>();
+  private globalErrorCleanup?: () => void;
 
   version = cInfo.rnu;
   loggerPromise = (() => {
@@ -276,7 +286,16 @@ export class Pushy {
         log('onOptionsChange listener error:', e?.message || e);
       }
     }
+    this.syncAutomaticErrorReporting();
     this.syncNativeConfig();
+  };
+
+  private syncAutomaticErrorReporting = (): void => {
+    if (this.options.disableTelemetry || this.options.disableErrorReporting) {
+      this.globalErrorCleanup?.();
+      return;
+    }
+    this.enableErrorReporting();
   };
 
   /** Build the subset of options used by the native cold-start check. */
@@ -512,6 +531,115 @@ export class Pushy {
           : 'update response contains no downloadable artifact',
       ...(hash ? { data: { newVersion: hash } } : {}),
     });
+  };
+
+  /**
+   * Best-effort JS exception reporting for the currently running OTA release.
+   * It is intentionally synchronous to call and never throws; the transport
+   * runs in the background and preserves the app's existing error flow.
+   */
+  captureException = (
+    error: unknown,
+    context: ErrorReportContext = {}
+  ): void => {
+    try {
+      if (
+        __DEV__ ||
+        this.options.disableTelemetry ||
+        this.options.disableErrorReporting
+      ) {
+        return;
+      }
+      if (
+        error !== null &&
+        (typeof error === 'object' || typeof error === 'function')
+      ) {
+        const object = error as object;
+        if (this.reportedExceptions.has(object)) {
+          return;
+        }
+        this.reportedExceptions.add(object);
+      }
+      this.reportExceptionToServer(serializeException(error, context));
+    } catch (e: any) {
+      log('exception telemetry error:', e?.message || e);
+    }
+  };
+
+  /**
+   * Ensure uncaught JS exception capture is installed and return a runtime
+   * cleanup function. Capture is installed automatically by default; this
+   * method remains an idempotent compatibility hook. The wrapper always
+   * chains the handler that was installed before it and only restores that
+   * handler when no later integration has replaced ours.
+   */
+  enableErrorReporting = (
+    options: ErrorReportingOptions = {}
+  ): (() => void) => {
+    if (
+      options.captureGlobal === false ||
+      this.options.disableTelemetry ||
+      this.options.disableErrorReporting
+    ) {
+      return () => {};
+    }
+    if (this.globalErrorCleanup) {
+      return this.globalErrorCleanup;
+    }
+    const uninstall = installGlobalErrorHandler((error, isFatal) => {
+      this.captureException(error, { fatal: isFatal === true });
+    });
+    let active = true;
+    const cleanup = () => {
+      if (!active) {
+        return;
+      }
+      active = false;
+      uninstall();
+      if (this.globalErrorCleanup === cleanup) {
+        this.globalErrorCleanup = undefined;
+      }
+    };
+    this.globalErrorCleanup = cleanup;
+    return cleanup;
+  };
+
+  private reportExceptionToServer = (error: SerializedException): void => {
+    try {
+      if (
+        __DEV__ ||
+        this.options.disableTelemetry ||
+        this.options.disableErrorReporting ||
+        !currentVersion
+      ) {
+        return;
+      }
+      const { appKey } = this.options;
+      const endpoint =
+        this.lastWorkingEndpoint || this.options.server?.main?.[0];
+      if (!appKey || !endpoint) {
+        return;
+      }
+      fetchWithTimeout(
+        `${endpoint}/report/${appKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'js_exception',
+            hash: currentVersion,
+            packageVersion: this.getEffectivePackageVersion(),
+            cInfo,
+            error,
+          }),
+        },
+        DEFAULT_FETCH_TIMEOUT_MS
+      ).catch((e: any) => {
+        log('exception telemetry report failed:', e?.message || e);
+      });
+    } catch (e: any) {
+      log('exception telemetry error:', e?.message || e);
+    }
   };
 
   report = async ({

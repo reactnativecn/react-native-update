@@ -14,6 +14,37 @@ See the docs:
 
 - English docs: <https://cresc.dev/docs/getting-started>
 
+## JS error reporting
+
+The SDK reports uncaught and manually captured JavaScript errors against the
+currently running OTA release. Reporting is enabled by default, best-effort,
+disabled in development and when `disableTelemetry` is enabled, and never
+replaces an existing React Native, Sentry or Crashlytics global handler.
+
+```ts
+import { Cresc } from 'react-native-update';
+
+const client = new Cresc({ appKey: 'your-app-key' });
+
+try {
+  await submitOrder();
+} catch (error) {
+  client.captureException(error, {
+    extra: { screen: 'checkout', retry: 1 },
+  });
+}
+
+// Explicit runtime opt-out (also disables manual captureException transport):
+client.setOptions({ disableErrorReporting: true });
+```
+
+You can also opt out at construction with
+`new Cresc({ appKey, disableErrorReporting: true })`.
+
+Only errors from an OTA version with a known version hash are uploaded. Context
+is deliberately restricted to bounded scalar values; do not include secrets or
+personal information.
+
 ## Advantages
 
 1. react-native-update provides a dedicated global service with fast and reliable worldwide delivery.
@@ -85,4 +116,3 @@ Since 10.52.1 every cold start runs one background update check that **does not 
 | **Technical Support** | ✅ Paid dedicated support | ⚠️ Community support | ❌ **Discontinued** |
 | **Server Deployment** | ✅ Hosted service or paid private deployment | ✅ Hosted by Expo (EAS Update) | ❌ **Discontinued** |
 | **Bandwidth Usage** | ⭐⭐⭐⭐⭐ Very low (incremental) | ⭐⭐⭐ Higher (full bundle) | ❌ **Discontinued** |
-

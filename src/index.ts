@@ -10,6 +10,12 @@ export {
 export { PushyModule, UpdateModule } from './core';
 export type { UpdateErrorCode } from './error';
 export { UpdateError } from './error';
+export type {
+  ErrorContextValue,
+  ErrorReportContext,
+  ErrorReportingOptions,
+  SerializedException,
+} from './errorReporting';
 export type { CrashReporterLike, UpdateMetadata } from './metadata';
 export {
   attachToCrashlytics,

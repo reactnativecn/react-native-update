@@ -3,10 +3,16 @@ import { afterEach, describe, expect, mock, test } from 'bun:test';
 const importFreshClient = (cacheKey: string) => import(`../client?${cacheKey}`);
 
 const originalDev = (globalThis as any).__DEV__;
+const originalErrorUtils = (globalThis as any).ErrorUtils;
 
 // Module mocks and mock.restore() are handled globally in setup.ts.
 afterEach(() => {
   (globalThis as any).__DEV__ = originalDev;
+  if (originalErrorUtils === undefined) {
+    delete (globalThis as any).ErrorUtils;
+  } else {
+    (globalThis as any).ErrorUtils = originalErrorUtils;
+  }
 });
 
 const createJsonResponse = (payload: unknown) =>
@@ -545,6 +551,128 @@ describe('Pushy server config', () => {
 
     expect(calls).toEqual(['beforeReload', 'restartApp']);
     expect(restartApp).toHaveBeenCalled();
+  });
+});
+
+describe('JS exception reporting', () => {
+  test('reports the current OTA identity and deduplicates the same Error object', async () => {
+    setupClientMocks();
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    (globalThis as any).fetch = mock(
+      async (url: string, init?: RequestInit) => {
+        requests.push({ url, init });
+        return createJsonResponse({ ok: 1 });
+      }
+    );
+
+    const { Pushy } = await importFreshClient('js-exception-report');
+    const client = new Pushy({ appKey: 'demo-app' });
+    const error = Object.assign(new Error('boom'), {
+      name: 'TypeError',
+      stack: 'TypeError: boom\n at index.bundlejs:12:34',
+    });
+    client.captureException(error, {
+      fatal: true,
+      componentStack: 'at Screen',
+      extra: { screen: 'order', retry: 2 },
+    });
+    client.captureException(error);
+    await Promise.resolve();
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0].url).toBe(
+      'https://update.react-native.cn/api/report/demo-app'
+    );
+    expect(JSON.parse(String(requests[0].init?.body))).toEqual({
+      type: 'js_exception',
+      hash: 'hash',
+      packageVersion: '1.0.0',
+      cInfo: {
+        rnu: '10.0.0',
+        rn: '0.73.0',
+        os: 'ios',
+        uuid: 'uuid',
+      },
+      error: {
+        name: 'TypeError',
+        message: 'boom',
+        stack: error.stack,
+        fatal: true,
+        componentStack: 'at Screen',
+        extra: { screen: 'order', retry: 2 },
+      },
+    });
+  });
+
+  test('global reporting is enabled by default, chains, and restores ErrorUtils', async () => {
+    setupClientMocks();
+    const fetch = mock(async () => createJsonResponse({ ok: 1 }));
+    (globalThis as any).fetch = fetch;
+    const previous = mock((_error: unknown, _fatal?: boolean) => {});
+    let current: (error: unknown, fatal?: boolean) => void = previous;
+    (globalThis as any).ErrorUtils = {
+      getGlobalHandler: () => current,
+      setGlobalHandler: (handler: typeof current) => {
+        current = handler;
+      },
+    };
+
+    const { Pushy } = await importFreshClient('js-exception-global');
+    const client = new Pushy({ appKey: 'demo-app' });
+    expect(current).not.toBe(previous);
+    const cleanup = client.enableErrorReporting();
+    const error = new Error('fatal');
+    current(error, true);
+    await Promise.resolve();
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(previous).toHaveBeenCalledWith(error, true);
+    cleanup();
+    expect(current).toBe(previous);
+  });
+
+  test('disableErrorReporting explicitly opts out and can be toggled', async () => {
+    setupClientMocks();
+    const fetch = mock(async () => createJsonResponse({ ok: 1 }));
+    (globalThis as any).fetch = fetch;
+    const previous = mock((_error: unknown, _fatal?: boolean) => {});
+    let current: (error: unknown, fatal?: boolean) => void = previous;
+    (globalThis as any).ErrorUtils = {
+      getGlobalHandler: () => current,
+      setGlobalHandler: (handler: typeof current) => {
+        current = handler;
+      },
+    };
+
+    const { Pushy } = await importFreshClient('js-exception-opt-out');
+    const client = new Pushy({
+      appKey: 'demo-app',
+      disableErrorReporting: true,
+    });
+    expect(current).toBe(previous);
+    client.captureException(new Error('ignored'));
+    await Promise.resolve();
+    expect(fetch).not.toHaveBeenCalled();
+
+    client.setOptions({ disableErrorReporting: false });
+    expect(current).not.toBe(previous);
+    current(new Error('reported'), false);
+    await Promise.resolve();
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    client.setOptions({ disableErrorReporting: true });
+    expect(current).toBe(previous);
+  });
+
+  test('disableTelemetry also disables exception transport', async () => {
+    setupClientMocks();
+    const fetch = mock(async () => createJsonResponse({ ok: 1 }));
+    (globalThis as any).fetch = fetch;
+    const { Pushy } = await importFreshClient('js-exception-disabled');
+    const client = new Pushy({ appKey: 'demo-app', disableTelemetry: true });
+    client.captureException(new Error('ignored'));
+    await Promise.resolve();
+    expect(fetch).not.toHaveBeenCalled();
   });
 });
 

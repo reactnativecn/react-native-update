@@ -206,6 +206,13 @@ export interface ClientOptions {
    */
   disableTelemetry?: boolean;
   /**
+   * Disable automatic and manual JavaScript exception reporting. Reporting is
+   * enabled by default and chains React Native's existing global ErrorUtils
+   * handler. Set this to true for an explicit opt-out; update lifecycle
+   * telemetry remains controlled separately by `disableTelemetry`.
+   */
+  disableErrorReporting?: boolean;
+  /**
    * Disable the native cold-start update check: the background check that runs
    * a few seconds after every launch, independent of JS
    * (NATIVE_CHECKUPDATE_DESIGN §10). Default: false (enabled).

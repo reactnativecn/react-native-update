@@ -16,6 +16,34 @@
 
 请查看[文档](https://pushy.reactnative.cn/docs/getting-started.html)
 
+### JS 错误上报
+
+SDK 可以把未捕获错误和手动捕获的 JavaScript 错误关联到当前实际运行的热更版本。
+此能力默认开启、仅做尽力上报，在开发环境或启用 `disableTelemetry` 时不发送；
+全局处理器采用链式安装，不会取代 React Native、Sentry 或 Crashlytics 已有的处理器。
+
+```ts
+import { Pushy } from 'react-native-update';
+
+const client = new Pushy({ appKey: 'your-app-key' });
+
+try {
+  await submitOrder();
+} catch (error) {
+  client.captureException(error, {
+    extra: { screen: 'checkout', retry: 1 },
+  });
+}
+
+// 运行时显式退出（同时关闭手动 captureException 的传输）：
+client.setOptions({ disableErrorReporting: true });
+```
+
+也可以在初始化时通过 `new Pushy({ appKey, disableErrorReporting: true })` 直接退出。
+
+只有携带明确版本 hash 的热更版本错误会被上传。上下文字段只接受经过限长的标量值；
+不要放入密钥或个人信息。
+
 ### 优势
 
 1. 对中国用户使用阿里云高速 CDN 分发，对比其他服务器在国外的热更新服务，分发更稳定，更新成功率极高。海外用户智能分流至 cloudflare，同样提供稳定高速的分发体验。
