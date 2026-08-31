@@ -1291,6 +1291,14 @@ export class Pushy {
   ) => {
     const { name, description = '', metaInfo } = updateInfo;
     const { hash, attempts, devNoop } = plan;
+    if (devNoop) {
+      // Dev without a full package URL: nothing can be fetched, let alone
+      // installed. Say so and deliver nothing — faking a success here used to
+      // hand the caller a hash whose switchVersion the native side (rightly)
+      // rejects with SWITCH_VERSION_FAILED.
+      log(this.t('dev_incremental_update_disabled'));
+      return;
+    }
     const patchStartTime = Date.now();
     // One native listener per hash dispatching to a callback set, so
     // concurrent callers deduped onto this task can each observe progress
@@ -1396,10 +1404,6 @@ export class Pushy {
           attempt,
         },
       });
-      if (devNoop) {
-        log(this.t('dev_incremental_update_disabled'));
-        succeeded = 'full';
-      }
       for (const { type, urls } of attempts) {
         if (succeeded) {
           break;
