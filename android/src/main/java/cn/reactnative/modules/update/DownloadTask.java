@@ -16,6 +16,7 @@ import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.zip.ZipEntry;
+import okhttp3.Call;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
@@ -180,31 +181,6 @@ class DownloadTask implements Runnable {
         }
     }
 
-    // "bytes <start>-<end>/<total>". Returns the total (0 when "*"), or -1
-    // when the header is missing/malformed or the start does not match the
-    // local partial — either way the appended bytes could not be trusted.
-    private static long parseContentRange(String header, long expectedStart) {
-        if (header == null || !header.startsWith("bytes ")) {
-            return -1;
-        }
-        try {
-            String range = header.substring("bytes ".length()).trim();
-            int slash = range.indexOf('/');
-            int dash = range.indexOf('-');
-            if (slash < 0 || dash < 0 || dash > slash) {
-                return -1;
-            }
-            long start = Long.parseLong(range.substring(0, dash).trim());
-            if (start != expectedStart) {
-                return -1;
-            }
-            String totalPart = range.substring(slash + 1).trim();
-            return totalPart.equals("*") ? 0 : Long.parseLong(totalPart);
-        } catch (NumberFormatException e) {
-            return -1;
-        }
-    }
-
     private void downloadFile() throws IOException {
         this.hash = params.hash;
         String url = params.url;
@@ -298,7 +274,11 @@ class DownloadTask implements Runnable {
                 .build();
         }
 
-        try (Response response = requestClient.newCall(builder.build()).execute()) {
+        Call call = requestClient.newCall(builder.build());
+        // Registered so an orchestrated phase timeout can cancel it
+        // (CODE_AUDIT 2.12); cleared once the transfer is over.
+        params.attachCall(call);
+        try (Response response = call.execute()) {
             rejectProtocolDowngrade(url, response);
             if (response.code() == 416) {
                 long total = resumeMeta == null ? 0 : resumeMeta.optLong("total", 0);
@@ -335,7 +315,8 @@ class DownloadTask implements Runnable {
             long contentLength = body.contentLength();
             long totalAll;
             if (append) {
-                totalAll = parseContentRange(response.header("Content-Range"), resumeOffset);
+                totalAll = HttpUtils.parseContentRange(
+                    response.header("Content-Range"), resumeOffset);
                 if (totalAll < 0) {
                     // Malformed or mismatched Content-Range: treat like a
                     // stale partial (one clean retry from zero) instead of
@@ -414,6 +395,8 @@ class DownloadTask implements Runnable {
             if (baseOffset + received != lastPostedBytes) {
                 postProgress(baseOffset + received, totalAll);
             }
+        } finally {
+            params.attachCall(null);
         }
         return true;
     }
@@ -576,6 +559,14 @@ class DownloadTask implements Runnable {
      */
     private void promoteStaging() throws IOException, JSONException {
         File work = stagingDirectory();
+        if (targetsRunningVersion()) {
+            // The process switched to this very version while the task ran
+            // (a restartApp racing the download): never rename over the
+            // live directory. Its verified install stands; staging goes.
+            ensureNotReinstallingRunningVersion();
+            UpdateFileUtils.removeDirectory(work);
+            return;
+        }
         File bundle = new File(work, "index.bundlejs");
         if (!bundle.isFile()) {
             throw new IOException("bundle missing after install: " + bundle);
@@ -768,13 +759,51 @@ class DownloadTask implements Runnable {
             && InstallRecord.isComplete(params.unzipDirectory, params.hash);
     }
 
+    // True when this task targets the version the process is running from.
+    private boolean targetsRunningVersion() {
+        String running = UpdateContext.runningVersion();
+        return running != null && params.hash != null && running.equals(params.hash);
+    }
+
+    /**
+     * The running version's directory is never replaced in place
+     * (CODE_AUDIT 2.10): images and fonts are read from it on demand, and an
+     * install from before completion records existed has no marker, so a
+     * re-download of the same hash would wipe the live directory. A running
+     * version whose record verifies against the bundle on disk needs no
+     * install and passes; anything else is refused as a file-operation
+     * failure rather than overwritten.
+     */
+    private void ensureNotReinstallingRunningVersion() throws IOException {
+        File bundle = new File(params.unzipDirectory, "index.bundlejs");
+        if (bundle.isFile() && InstallRecord.isComplete(params.unzipDirectory, params.hash)) {
+            try {
+                InstallRecord.verifyForActivation(params.unzipDirectory, params.hash, bundle);
+                return;
+            } catch (IOException e) {
+                throw new FileOperationException("Running version " + params.hash
+                    + " cannot be reinstalled in place: " + e.getMessage());
+            }
+        }
+        throw new FileOperationException("Running version " + params.hash
+            + " has no verifiable install record and cannot be reinstalled in place");
+    }
+
     @Override
     public void run() {
         int taskType = params.type;
+        final boolean runningVersion = isPatchTask(taskType) && targetsRunningVersion();
         final boolean alreadyCompleted = isPatchTask(taskType)
             && hasCompletedPatchDirectory();
         try {
-            if (alreadyCompleted) {
+            if (params.isCancelled()) {
+                throw new IOException("download task cancelled before it started");
+            }
+            if (runningVersion) {
+                ensureNotReinstallingRunningVersion();
+                Log.i(UpdateContext.TAG, "download task: version " + params.hash
+                    + " is running in this process and already installed");
+            } else if (alreadyCompleted) {
                 Log.i(UpdateContext.TAG,
                     "download task: version " + params.hash + " already completed");
             } else {
@@ -818,7 +847,8 @@ class DownloadTask implements Runnable {
                 Throwable classified = error;
                 if (downloadPhaseCompleted
                     && isPatchTask(taskType)
-                    && !(error instanceof PatchFailedException)) {
+                    && !(error instanceof PatchFailedException)
+                    && !(error instanceof FileOperationException)) {
                     classified = new PatchFailedException(
                         String.valueOf(error.getMessage()), error);
                 }

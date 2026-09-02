@@ -2,6 +2,10 @@ package cn.reactnative.modules.update;
 
 import android.os.Build;
 import android.util.Log;
+import androidx.annotation.Nullable;
+import java.io.IOException;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -11,6 +15,8 @@ import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
+import okhttp3.ResponseBody;
+import okio.BufferedSource;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -35,6 +41,9 @@ final class NativeCheckOrchestrator {
     static final String KEY_ROUND_INCOMPLETE = "nativeCheckIncomplete";
     private static final int MAX_CHECK_HTTP_ATTEMPTS = 8;
     private static final long DOWNLOAD_PHASE_TIMEOUT_SECONDS = 600;
+    // The check response (and a remote queryUrls list) is a small JSON
+    // document; anything bigger is a broken or hijacked endpoint.
+    private static final long MAX_CHECK_RESPONSE_BYTES = 1024 * 1024;
 
     private static final AtomicBoolean scheduled = new AtomicBoolean(false);
     // One round per process, whoever starts it first — the delayed cold-start
@@ -177,7 +186,8 @@ final class NativeCheckOrchestrator {
 
     // The alert-strategy variant of the §10.7 hole: the round downloaded a
     // fix but deferred activation to JS, and JS is now dead. Activation is
-    // local and bounded (a state switch under the commit lock).
+    // local and bounded (the bundle digest, then a state switch under the
+    // commit lock).
     private static void activatePendingVersion(UpdateContext context) {
         String hash = unactivatedHash;
         if (hash == null) {
@@ -341,7 +351,7 @@ final class NativeCheckOrchestrator {
             return;
         }
         String hash = decision.optString("hash", "");
-        if (!UpdateContext.isSafePathComponent(hash)) {
+        if (!UpdateFileUtils.isSafePathComponent(hash)) {
             return;
         }
 
@@ -467,14 +477,41 @@ final class NativeCheckOrchestrator {
                 // Same rule as the artifact download: an https endpoint that
                 // redirects to plaintext http is a failed endpoint.
                 DownloadTask.rejectProtocolDowngrade(url, response);
-                if (!response.isSuccessful() || response.body() == null) {
+                ResponseBody body = response.body();
+                if (!response.isSuccessful() || body == null) {
                     return null;
                 }
-                return response.body().string();
+                return readBoundedBody(body);
             }
         } catch (Exception e) {
+            // One line per failed endpoint; the fallback chain is otherwise
+            // invisible in the field.
+            Log.w(UpdateContext.TAG, "native check: request failed with "
+                + e.getClass().getName() + ": " + e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * Reads the body with a hard cap (CODE_AUDIT 2.7): a hijacked endpoint
+     * must not be able to OOM this thread with an unbounded string. Over the
+     * cap counts as a failed endpoint (null), like any other bad response.
+     */
+    @Nullable
+    private static String readBoundedBody(ResponseBody body) throws IOException {
+        if (body.contentLength() > MAX_CHECK_RESPONSE_BYTES) {
+            return null;
+        }
+        BufferedSource source = body.source();
+        if (source.request(MAX_CHECK_RESPONSE_BYTES + 1)) {
+            Log.w(UpdateContext.TAG, "native check: response exceeds "
+                + MAX_CHECK_RESPONSE_BYTES + " bytes, ignoring endpoint");
+            return null;
+        }
+        MediaType contentType = body.contentType();
+        Charset charset = contentType == null
+            ? null : contentType.charset(StandardCharsets.UTF_8);
+        return source.readString(charset == null ? StandardCharsets.UTF_8 : charset);
     }
 
     // Shared schema rule (update_flow_core::IsValidCheckResponse): a 200 with
@@ -482,13 +519,6 @@ final class NativeCheckOrchestrator {
     // the endpoint fallback.
     private static boolean isValidCheckResponse(String responseText) {
         return responseText != null && NativeUpdateFlow.isValidCheckResponse(responseText);
-    }
-
-    private static String normalizeEndpointBase(String base) {
-        while (base.endsWith("/")) {
-            base = base.substring(0, base.length() - 1);
-        }
-        return base;
     }
 
     /**
@@ -513,7 +543,7 @@ final class NativeCheckOrchestrator {
         HashSet<String> tried = new HashSet<>();
         int httpAttempts = 0;
         for (int i = 0; i < ordered.length(); i++) {
-            String base = normalizeEndpointBase(ordered.optString(i, ""));
+            String base = HttpUtils.normalizeEndpointBase(ordered.optString(i, ""));
             if (base.isEmpty() || !tried.add(base)) {
                 continue;
             }
@@ -549,7 +579,7 @@ final class NativeCheckOrchestrator {
                 continue;
             }
             for (int j = 0; j < remote.length(); j++) {
-                String base = normalizeEndpointBase(remote.optString(j, ""));
+                String base = HttpUtils.normalizeEndpointBase(remote.optString(j, ""));
                 if (base.isEmpty() || tried.contains(base)) {
                     continue;
                 }
@@ -644,20 +674,28 @@ final class NativeCheckOrchestrator {
                             latch.countDown();
                         }
                     };
+                DownloadTaskParams task;
                 if ("diff".equals(type)) {
-                    context.downloadPatchFromPpk(
+                    task = context.downloadPatchFromPpk(
                         url, hash, originHash, listener, deadlineNanos);
                 } else if ("pdiff".equals(type)) {
-                    context.downloadPatchFromApk(
+                    task = context.downloadPatchFromApk(
                         url, hash, listener, deadlineNanos);
                 } else {
-                    context.downloadFullUpdate(
+                    task = context.downloadFullUpdate(
                         url, hash, listener, deadlineNanos);
                 }
                 try {
                     if (!latch.await(remainingNanos, TimeUnit.NANOSECONDS)) {
                         Log.w(UpdateContext.TAG,
                             "native check: download phase timed out during " + type);
+                        // The task shares one download thread with the next
+                        // attempt: cancel its transfer (or keep it from
+                        // starting) instead of queueing behind it
+                        // (CODE_AUDIT 2.12).
+                        if (task != null) {
+                            task.cancel();
+                        }
                         if (isFullAttempt) {
                             return false;
                         }
@@ -665,6 +703,9 @@ final class NativeCheckOrchestrator {
                     }
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
+                    if (task != null) {
+                        task.cancel();
+                    }
                     return false;
                 }
                 if (succeeded.get()) {

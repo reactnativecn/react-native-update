@@ -4,8 +4,8 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
-import android.os.Build;
 import android.util.Log;
+import androidx.annotation.Nullable;
 import com.facebook.react.ReactInstanceManager;
 import java.io.File;
 import org.json.JSONObject;
@@ -15,6 +15,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
 
 public class UpdateContext {
     static {
@@ -28,8 +29,15 @@ public class UpdateContext {
     private final File rootDir;
     private final Executor executor;
     private final SharedPreferences sp;
+    // Our own PackageInfo, looked up once: every getPackageInfo call is a
+    // Binder IPC, and the constructor, the bundle-hash cache and the native
+    // check all need the version name / install time.
+    @Nullable
+    private final PackageInfo packageInfo;
 
-    private ReactInstanceManager reactInstanceManager;
+    // Written under sLock (setCustomInstanceManager), read on the restart
+    // path without it.
+    private volatile ReactInstanceManager reactInstanceManager;
     // Written on the launch path, read from executor/JS threads.
     private volatile boolean isUsingBundleUrl;
     private volatile boolean ignoreRollback;
@@ -38,12 +46,12 @@ public class UpdateContext {
     // update assets (images/fonts) are read from it on demand at runtime, so
     // wiping it under a silent (no-restart) reset would break every image the
     // running app has not loaded yet. Volatile: written during launch, read
-    // from the state serial executor.
+    // from the state serial and download executors.
     private volatile String launchVersion;
     private static final int STATE_OP_SWITCH_VERSION = 1;
     private static final int STATE_OP_MARK_SUCCESS = 2;
     private static final int STATE_OP_ROLLBACK = 3;
-    private static final int STATE_OP_CLEAR_FIRST_TIME = 4;
+    // 4 (clear first time) exists in the state core but has no Android caller.
     private static final int STATE_OP_CLEAR_ROLLBACK_MARK = 5;
     private static final int STATE_OP_RESOLVE_LAUNCH = 6;
     private static final String KEY_FIRST_LOAD_MARKED = "firstLoadMarked";
@@ -55,8 +63,17 @@ public class UpdateContext {
     // can never resurrect the version the app just reset away from.
     private static final java.util.concurrent.atomic.AtomicLong resetGeneration =
         new java.util.concurrent.atomic.AtomicLong(0);
-    // Held by resetToPackagedBundle and by the cold-start check's commit, so
-    // the generation check and the writes it guards are one atomic step.
+    // The one mutex for every snapshot -> state core -> commit sequence
+    // (switchVersion, markSuccess, the launch resolution and its rollback,
+    // the launch markers, the cold-start round's commit,
+    // resetToPackagedBundle). They are read-modify-write cycles on the same
+    // SharedPreferences from different threads (state serial executor,
+    // native check thread, JS thread); without a common lock a commit built
+    // on an older snapshot silently undoes an earlier one — e.g. a JS
+    // markSuccess erasing the activation a crash-rescue round just committed
+    // (CODE_AUDIT 2.1). Intrinsic locks are reentrant, so nested takers such
+    // as getBundleUrl -> rollBack are fine. Nothing slow runs inside it: the
+    // bundle digest of a switch is verified before the lock is taken.
     private static final Object commitLock = new Object();
     
     // Singleton instance
@@ -80,7 +97,12 @@ public class UpdateContext {
 
     private UpdateContext(Context context) {
         this.context = context.getApplicationContext();
-        this.executor = Executors.newSingleThreadExecutor();
+        this.executor = Executors.newSingleThreadExecutor(new ThreadFactory() {
+            @Override
+            public Thread newThread(Runnable r) {
+                return new Thread(r, "pushy-download");
+            }
+        });
 
         this.rootDir = new File(this.context.getFilesDir(), "_update");
 
@@ -89,6 +111,7 @@ public class UpdateContext {
         }
 
         this.sp = this.context.getSharedPreferences("update", Context.MODE_PRIVATE);
+        this.packageInfo = lookupPackageInfo(this.context);
         this.reactInstanceManager = pendingReactInstanceManager;
 
         String packageVersion = getPackageVersion();
@@ -113,16 +136,20 @@ public class UpdateContext {
         return rootDir.toString();
     }
 
-    public String getPackageVersion() {
-        PackageManager pm = context.getPackageManager();
-        PackageInfo pi = null;
+    @Nullable
+    private static PackageInfo lookupPackageInfo(Context context) {
         try {
-            pi = pm.getPackageInfo(context.getPackageName(), 0);
-            return pi.versionName;
-        } catch( PackageManager.NameNotFoundException e) {
-            e.printStackTrace();
+            return context.getPackageManager().getPackageInfo(context.getPackageName(), 0);
+        } catch (PackageManager.NameNotFoundException e) {
+            // Our own package is always installed; a failure here is a
+            // platform bug worth a log line, not a crash on the launch path.
+            Log.e(TAG, "Unable to read own package info", e);
+            return null;
         }
-        return null;
+    }
+
+    public String getPackageVersion() {
+        return packageInfo == null ? null : packageInfo.versionName;
     }
 
     public String getBuildTime() {
@@ -188,13 +215,7 @@ public class UpdateContext {
     }
 
     private long getPackageLastUpdateTime() {
-        try {
-            PackageInfo pi = context.getPackageManager()
-                .getPackageInfo(context.getPackageName(), 0);
-            return pi.lastUpdateTime;
-        } catch (PackageManager.NameNotFoundException e) {
-            return 0;
-        }
+        return packageInfo == null ? 0 : packageInfo.lastUpdateTime;
     }
 
     private String sha256OfBundledAsset(String assetName) {
@@ -224,21 +245,8 @@ public class UpdateContext {
         executor.execute(new DownloadTask(context, params));
     }
 
-    // Server-provided identifiers (hash/originHash/fileName) become child
-    // names under rootDir; anything that could resolve outside of it (path
-    // separators, "..", ".") must be rejected before touching the filesystem.
-    static boolean isSafePathComponent(String name) {
-        return name != null
-                && !name.isEmpty()
-                && !name.equals(".")
-                && !name.equals("..")
-                && !name.contains("/")
-                && !name.contains("\\")
-                && name.indexOf('\0') < 0;
-    }
-
     private static boolean rejectUnsafeComponent(String name, DownloadFileListener listener) {
-        if (isSafePathComponent(name)) {
+        if (UpdateFileUtils.isSafePathComponent(name)) {
             return false;
         }
         listener.onDownloadFailed(new IllegalArgumentException("Invalid path component: " + name));
@@ -254,11 +262,18 @@ public class UpdateContext {
         downloadFullUpdate(url, hash, listener, 0);
     }
 
-    void downloadFullUpdate(
+    /**
+     * The deadline-taking overloads (native cold-start check) return the
+     * queued task's params so the orchestrator can cancel the task when its
+     * phase budget expires (CODE_AUDIT 2.12); null when the request was
+     * rejected up front (the listener has already been told).
+     */
+    @Nullable
+    DownloadTaskParams downloadFullUpdate(
         String url, String hash, DownloadFileListener listener, long deadlineNanos
     ) {
         if (rejectUnsafeComponent(hash, listener)) {
-            return;
+            return null;
         }
         DownloadTaskParams params = new DownloadTaskParams();
         params.type = DownloadTaskParams.TASK_TYPE_PATCH_FULL;
@@ -269,6 +284,7 @@ public class UpdateContext {
         params.targetFile = new File(rootDir, hash + ".ppk");
         params.unzipDirectory = new File(rootDir, hash);
         enqueue(params);
+        return params;
     }
 
     public void downloadFile(String url, String hash, String fileName, DownloadFileListener listener) {
@@ -290,11 +306,12 @@ public class UpdateContext {
         downloadPatchFromApk(url, hash, listener, 0);
     }
 
-    void downloadPatchFromApk(
+    @Nullable
+    DownloadTaskParams downloadPatchFromApk(
         String url, String hash, DownloadFileListener listener, long deadlineNanos
     ) {
         if (rejectUnsafeComponent(hash, listener)) {
-            return;
+            return null;
         }
         DownloadTaskParams params = new DownloadTaskParams();
         params.type = DownloadTaskParams.TASK_TYPE_PATCH_FROM_APK;
@@ -305,13 +322,15 @@ public class UpdateContext {
         params.targetFile = new File(rootDir, hash + ".apk.patch");
         params.unzipDirectory = new File(rootDir, hash);
         enqueue(params);
+        return params;
     }
 
     public void downloadPatchFromPpk(String url, String hash, String originHash, DownloadFileListener listener) {
         downloadPatchFromPpk(url, hash, originHash, listener, 0);
     }
 
-    void downloadPatchFromPpk(
+    @Nullable
+    DownloadTaskParams downloadPatchFromPpk(
         String url,
         String hash,
         String originHash,
@@ -319,7 +338,7 @@ public class UpdateContext {
         long deadlineNanos
     ) {
         if (rejectUnsafeComponent(hash, listener) || rejectUnsafeComponent(originHash, listener)) {
-            return;
+            return null;
         }
         DownloadTaskParams params = new DownloadTaskParams();
         params.type = DownloadTaskParams.TASK_TYPE_PATCH_FROM_PPK;
@@ -332,6 +351,7 @@ public class UpdateContext {
         params.unzipDirectory = new File(rootDir, hash);
         params.originDirectory = new File(rootDir, originHash);
         enqueue(params);
+        return params;
     }
 
     private StateCoreResult getStateSnapshot() {
@@ -396,12 +416,14 @@ public class UpdateContext {
     }
 
     /**
-     * Validates that {@code hash} is a switchable version and computes the
-     * resulting state without persisting it, so callers can fold the switch
-     * into a larger single-commit transaction.
+     * Validates that {@code hash} is a switchable version: the slow half of
+     * a switch (file checks and the bundle digest of a multi-MB bundle),
+     * deliberately run without commitLock. The state snapshot read here only
+     * decides whether a markerless directory is grandfathered; a concurrent
+     * commit cannot make an unverified directory pass.
      */
-    private StateCoreResult computeSwitchVersion(String hash) {
-        if (!isSafePathComponent(hash)) {
+    private void verifySwitchTarget(String hash) {
+        if (!UpdateFileUtils.isSafePathComponent(hash)) {
             throw new IllegalArgumentException("Invalid hash: " + hash);
         }
         File versionDir = new File(rootDir, hash);
@@ -412,24 +434,34 @@ public class UpdateContext {
         StateCoreResult currentState = getStateSnapshot();
         boolean isLegacyActivatedVersion = hash.equals(currentState.currentVersion)
             || hash.equals(currentState.lastVersion);
-        if (!InstallRecord.isComplete(versionDir, hash) && !isLegacyActivatedVersion) {
+        if (isLegacyActivatedVersion) {
             // Versions activated before completion markers were introduced are
-            // explicitly grandfathered through current/last state. An arbitrary
-            // markerless directory may be a crash-left partial install.
+            // explicitly grandfathered through current/last state.
+            return;
+        }
+        if (!InstallRecord.isComplete(versionDir, hash)) {
+            // An arbitrary markerless directory may be a crash-left partial
+            // install.
             throw new IllegalStateException("Bundle version " + hash + " is incomplete.");
         }
-        if (!isLegacyActivatedVersion) {
-            // The record's bundle digest must match the bytes on disk before
-            // the next launch is pointed at them.
-            try {
-                InstallRecord.verifyForActivation(versionDir, hash, bundleFile);
-            } catch (IOException e) {
-                throw new IllegalStateException(e.getMessage(), e);
-            }
+        // The record's bundle digest must match the bytes on disk before
+        // the next launch is pointed at them.
+        try {
+            InstallRecord.verifyForActivation(versionDir, hash, bundleFile);
+        } catch (IOException e) {
+            throw new IllegalStateException(e.getMessage(), e);
         }
+    }
+
+    /**
+     * The fast half of a switch: snapshot -> state core, without persisting,
+     * so callers can fold it into a larger single-commit transaction. Caller
+     * holds commitLock and has run verifySwitchTarget.
+     */
+    private StateCoreResult computeSwitchState(String hash) {
         return runStateCore(
             STATE_OP_SWITCH_VERSION,
-            currentState,
+            getStateSnapshot(),
             hash,
             false,
             false
@@ -437,11 +469,14 @@ public class UpdateContext {
     }
 
     public void switchVersion(String hash) {
-        StateCoreResult nextState = computeSwitchVersion(hash);
-        SharedPreferences.Editor editor = sp.edit();
-        applyState(editor, nextState);
-        persistEditorOrThrow(editor, "switch version");
-        ignoreRollback = false;
+        verifySwitchTarget(hash);
+        synchronized (commitLock) {
+            StateCoreResult nextState = computeSwitchState(hash);
+            SharedPreferences.Editor editor = sp.edit();
+            applyState(editor, nextState);
+            persistEditorOrThrow(editor, "switch version");
+            ignoreRollback = false;
+        }
     }
 
     public void setKv(String key, String value) {
@@ -464,18 +499,53 @@ public class UpdateContext {
         return sp.getString("currentVersion", null);
     }
 
-    public boolean isFirstTime() {
-        return sp.getBoolean("firstTime", false);
+    /** The one-shot launch markers getConstants reports, consumed together. */
+    static final class LaunchMarkers {
+        final boolean isFirstTime;
+        @Nullable
+        final String rolledBackVersion;
+
+        LaunchMarkers(boolean isFirstTime, @Nullable String rolledBackVersion) {
+            this.isFirstTime = isFirstTime;
+            this.rolledBackVersion = rolledBackVersion;
+        }
     }
 
-    public boolean consumeFirstLoadMarker() {
-        boolean isFirstLoadMarked = sp.getBoolean(KEY_FIRST_LOAD_MARKED, false);
-        if (isFirstLoadMarked) {
-            SharedPreferences.Editor editor = sp.edit();
-            editor.remove(KEY_FIRST_LOAD_MARKED);
-            persistEditor(editor, "clear first load marker");
+    /**
+     * Reads and clears the first-load marker and the rollback mark in one
+     * commit. getConstants runs this synchronously on the JS thread (a
+     * TurboModule constant read), so the two writes are folded into a single
+     * editor; persistence is best-effort on this launch path.
+     */
+    LaunchMarkers consumeLaunchMarkers() {
+        LaunchMarkers markers;
+        synchronized (commitLock) {
+            boolean isFirstLoadMarked = sp.getBoolean(KEY_FIRST_LOAD_MARKED, false);
+            String rolledBackVersion = rolledBackVersion();
+            markers = new LaunchMarkers(isFirstLoadMarked, rolledBackVersion);
+            if (isFirstLoadMarked || rolledBackVersion != null) {
+                SharedPreferences.Editor editor = sp.edit();
+                if (isFirstLoadMarked) {
+                    editor.remove(KEY_FIRST_LOAD_MARKED);
+                }
+                if (rolledBackVersion != null) {
+                    StateCoreResult nextState = runStateCore(
+                        STATE_OP_CLEAR_ROLLBACK_MARK,
+                        getStateSnapshot(),
+                        null,
+                        false,
+                        false
+                    );
+                    applyState(editor, nextState);
+                }
+                persistEditor(editor, "consume launch markers");
+            }
         }
-        return isFirstLoadMarked;
+        if (markers.rolledBackVersion != null) {
+            // The rolled-back version's directory is now eligible for cleanup.
+            this.cleanUp();
+        }
+        return markers;
     }
 
     public String rolledBackVersion() {
@@ -483,7 +553,10 @@ public class UpdateContext {
     }
 
     public void markSuccess() {
-        if (!BuildConfig.DEBUG) {
+        if (BuildConfig.DEBUG) {
+            return;
+        }
+        synchronized (commitLock) {
             StateCoreResult currentState = getStateSnapshot();
             StateCoreResult nextState = runStateCore(
                 STATE_OP_MARK_SUCCESS,
@@ -498,24 +571,7 @@ public class UpdateContext {
                 editor.remove("hash_" + nextState.staleVersionToDelete);
             }
             persistEditorOrThrow(editor, "mark success");
-
-            this.cleanUp();
         }
-    }
-
-    public void clearFirstTime() {
-        StateCoreResult currentState = getStateSnapshot();
-        StateCoreResult nextState = runStateCore(
-            STATE_OP_CLEAR_FIRST_TIME,
-            currentState,
-            null,
-            false,
-            false
-        );
-        SharedPreferences.Editor editor = sp.edit();
-        applyState(editor, nextState);
-        editor.remove(KEY_FIRST_LOAD_MARKED);
-        persistEditorOrThrow(editor, "clear first time");
 
         this.cleanUp();
     }
@@ -568,24 +624,6 @@ public class UpdateContext {
         enqueue(params);
     }
 
-    public void clearRollbackMark() {
-        StateCoreResult currentState = getStateSnapshot();
-        StateCoreResult nextState = runStateCore(
-            STATE_OP_CLEAR_ROLLBACK_MARK,
-            currentState,
-            null,
-            false,
-            false
-        );
-        SharedPreferences.Editor editor = sp.edit();
-        applyState(editor, nextState);
-        // Runs from getConstants on the launch path: best-effort only.
-        persistEditor(editor, "clear rollback mark");
-
-        this.cleanUp();
-    }
-
-
     public static void setCustomInstanceManager(ReactInstanceManager instanceManager) {
         synchronized (sLock) {
             pendingReactInstanceManager = instanceManager;
@@ -629,59 +667,64 @@ public class UpdateContext {
         isUsingBundleUrl = true;
         String nativeCheckRolledBackVersion = null;
         try {
-            StateCoreResult currentState = getStateSnapshot();
-            StateCoreResult launchState = runStateCore(
-                STATE_OP_RESOLVE_LAUNCH,
-                currentState,
-                null,
-                ignoreRollback,
-                true
-            );
-            nativeCheckRolledBackVersion = launchState.rolledBackVersion;
-            if (launchState.didRollback) {
-                // The crash-protection rollback: the new version never called
-                // markSuccess. Keep this visible in release logs.
-                Log.e(TAG, "Version " + currentState.currentVersion
-                    + " was not marked as successful, rolling back to "
-                    + launchState.currentVersion);
-            }
-            if (launchState.didRollback || launchState.consumedFirstTime) {
-                SharedPreferences.Editor editor = sp.edit();
-                applyState(editor, launchState);
-                if (launchState.consumedFirstTime) {
-                    editor.putBoolean(KEY_FIRST_LOAD_MARKED, true);
+            // The whole resolution is one read-modify-write on the state
+            // (resolve, then possibly roll back missing bundles); see
+            // commitLock.
+            synchronized (commitLock) {
+                StateCoreResult currentState = getStateSnapshot();
+                StateCoreResult launchState = runStateCore(
+                    STATE_OP_RESOLVE_LAUNCH,
+                    currentState,
+                    null,
+                    ignoreRollback,
+                    true
+                );
+                nativeCheckRolledBackVersion = launchState.rolledBackVersion;
+                if (launchState.didRollback) {
+                    // The crash-protection rollback: the new version never called
+                    // markSuccess. Keep this visible in release logs.
+                    Log.e(TAG, "Version " + currentState.currentVersion
+                        + " was not marked as successful, rolling back to "
+                        + launchState.currentVersion);
                 }
-                persistEditor(editor, "resolve launch");
-            }
-            if (launchState.consumedFirstTime) {
-                // bundleURL may be resolved multiple times in one process.
-                ignoreRollback = true;
-            }
+                if (launchState.didRollback || launchState.consumedFirstTime) {
+                    SharedPreferences.Editor editor = sp.edit();
+                    applyState(editor, launchState);
+                    if (launchState.consumedFirstTime) {
+                        editor.putBoolean(KEY_FIRST_LOAD_MARKED, true);
+                    }
+                    persistEditor(editor, "resolve launch");
+                }
+                if (launchState.consumedFirstTime) {
+                    // bundleURL may be resolved multiple times in one process.
+                    ignoreRollback = true;
+                }
 
-            String currentVersion = launchState.loadVersion;
-            if (currentVersion == null) {
+                String currentVersion = launchState.loadVersion;
+                if (currentVersion == null) {
+                    return defaultAssetsUrl;
+                }
+
+                // Guard the rollback chain against cycles: a corrupted state returning
+                // an already-visited version would otherwise spin this loop forever on
+                // the main thread.
+                java.util.HashSet<String> visitedVersions = new java.util.HashSet<>();
+                while (currentVersion != null && visitedVersions.add(currentVersion)) {
+                    File bundleFile = new File(rootDir, currentVersion+"/index.bundlejs");
+                    if (!bundleFile.exists()) {
+                        Log.e(TAG, "Bundle version " + currentVersion + " not found.");
+                        currentVersion = this.rollBack();
+                        nativeCheckRolledBackVersion = rolledBackVersion();
+                        continue;
+                    }
+                    launchVersion = currentVersion;
+                    nativeCheckRolledBackVersion = rolledBackVersion();
+                    return bundleFile.toString();
+                }
+
+                nativeCheckRolledBackVersion = rolledBackVersion();
                 return defaultAssetsUrl;
             }
-
-            // Guard the rollback chain against cycles: a corrupted state returning
-            // an already-visited version would otherwise spin this loop forever on
-            // the main thread.
-            java.util.HashSet<String> visitedVersions = new java.util.HashSet<>();
-            while (currentVersion != null && visitedVersions.add(currentVersion)) {
-                File bundleFile = new File(rootDir, currentVersion+"/index.bundlejs");
-                if (!bundleFile.exists()) {
-                    Log.e(TAG, "Bundle version " + currentVersion + " not found.");
-                    currentVersion = this.rollBack();
-                    nativeCheckRolledBackVersion = rolledBackVersion();
-                    continue;
-                }
-                launchVersion = currentVersion;
-                nativeCheckRolledBackVersion = rolledBackVersion();
-                return bundleFile.toString();
-            }
-
-            nativeCheckRolledBackVersion = rolledBackVersion();
-            return defaultAssetsUrl;
         } finally {
             // Even corrupted state or a state-core exception must not disable
             // the next-launch rescue check. A null snapshot simply omits the
@@ -709,6 +752,13 @@ public class UpdateContext {
         boolean activate,
         String responseCacheJson
     ) {
+        boolean switching = activate && hash != null;
+        if (switching) {
+            // The bundle digest stays outside the lock (see switchVersion); a
+            // reset landing in between bumps the generation and is caught
+            // below.
+            verifySwitchTarget(hash);
+        }
         synchronized (commitLock) {
             if (resetGeneration.get() != expectedGeneration) {
                 return false;
@@ -721,9 +771,8 @@ public class UpdateContext {
             if (hash != null && hashInfoJson != null) {
                 editor.putString("hash_" + hash, hashInfoJson);
             }
-            boolean switching = activate && hash != null;
             if (switching) {
-                applyState(editor, computeSwitchVersion(hash));
+                applyState(editor, computeSwitchState(hash));
             }
             if (responseCacheJson != null) {
                 editor.putString(NativeCheckOrchestrator.KEY_RESP_CACHE, responseCacheJson);
@@ -742,7 +791,7 @@ public class UpdateContext {
      * unreadable record. Exposed to JS for crash-report attribution.
      */
     String currentBundleSha256(String hash) {
-        if (hash == null || hash.isEmpty() || !isSafePathComponent(hash)) {
+        if (hash == null || hash.isEmpty() || !UpdateFileUtils.isSafePathComponent(hash)) {
             return "";
         }
         JSONObject record = InstallRecord.read(new File(rootDir, hash));
@@ -750,7 +799,7 @@ public class UpdateContext {
     }
 
     boolean hasCompletedVersion(String hash) {
-        if (!isSafePathComponent(hash)) {
+        if (!UpdateFileUtils.isSafePathComponent(hash)) {
             return false;
         }
         File versionDir = new File(rootDir, hash);
@@ -759,27 +808,60 @@ public class UpdateContext {
     }
 
     private String rollBack() {
-        StateCoreResult currentState = getStateSnapshot();
-        StateCoreResult nextState = runStateCore(
-            STATE_OP_ROLLBACK,
-            currentState,
-            null,
-            false,
-            false
-        );
-        Log.e(TAG, "Rolling back version " + currentState.currentVersion
-            + " to " + nextState.currentVersion);
-        SharedPreferences.Editor editor = sp.edit();
-        applyState(editor, nextState);
-        persistEditor(editor, "rollback");
-        return nextState.currentVersion;
+        synchronized (commitLock) {
+            StateCoreResult currentState = getStateSnapshot();
+            StateCoreResult nextState = runStateCore(
+                STATE_OP_ROLLBACK,
+                currentState,
+                null,
+                false,
+                false
+            );
+            Log.e(TAG, "Rolling back version " + currentState.currentVersion
+                + " to " + nextState.currentVersion);
+            SharedPreferences.Editor editor = sp.edit();
+            applyState(editor, nextState);
+            persistEditor(editor, "rollback");
+            return nextState.currentVersion;
+        }
+    }
+
+    /**
+     * The version this process is running from (null before getBundleUrl
+     * resolved one, or when the packaged bundle runs). Read by DownloadTask
+     * to refuse reinstalling that directory in place.
+     */
+    @Nullable
+    static String runningVersion() {
+        UpdateContext instance = sInstance;
+        return instance == null ? null : instance.launchVersion;
     }
 
     private void cleanUp() {
+        String currentVersion = sp.getString("currentVersion", null);
+        String lastVersion = sp.getString("lastVersion", null);
+        String running = launchVersion;
+        if (running != null
+            && !running.equals(currentVersion)
+            && !running.equals(lastVersion)) {
+            // CleanupOldEntries (cpp/patch_core/patch_core.cpp) keeps exactly
+            // the two names it is handed plus dot-prefixed entries, and
+            // deletes every other entry older than maxAgeDays. Two switches
+            // without a restart (switchVersionLater(B), then a native round
+            // activating C) push the running version A out of current/last,
+            // and the next markSuccess/launch-marker cleanup would delete the
+            // directory its images and fonts are still read from. The JNI
+            // binding takes two keep names and must not change, so this
+            // process simply skips cleanup; the next launch runs from a
+            // current/last member again and cleans up then (CODE_AUDIT 2.5).
+            Log.i(TAG, "Skipping cleanup: running version " + running
+                + " is neither current nor last");
+            return;
+        }
         DownloadTaskParams params = new DownloadTaskParams();
         params.type = DownloadTaskParams.TASK_TYPE_CLEANUP;
-        params.hash = sp.getString("currentVersion", null);
-        params.originHash = sp.getString("lastVersion", null);
+        params.hash = currentVersion;
+        params.originHash = lastVersion;
         params.unzipDirectory = rootDir;
         enqueue(params);
     }

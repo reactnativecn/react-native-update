@@ -9,6 +9,11 @@ import com.facebook.react.module.model.ReactModuleInfoProvider;
 import java.util.HashMap;
 import java.util.Map;
 
+// TurboReactPackage and the 7-argument ReactModuleInfo are deprecated in
+// current React Native but still shipped; their replacements
+// (BaseReactPackage, the 6-argument constructor) only exist from RN 0.74,
+// and this module's peer floor is RN 0.59.
+@SuppressWarnings("deprecation")
 public class UpdatePackage extends TurboReactPackage {
     @Nullable
     @Override
