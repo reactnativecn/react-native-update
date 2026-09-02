@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from '@ohos/hypium';
+import { describe, it, expect } from '@ohos/hypium';
 import { EventHub } from '../main/ets/EventHub';
 
 export default function eventHubTest() {
@@ -24,11 +24,11 @@ export default function eventHubTest() {
     it('calls emitDeviceEvent on rnInstance when set', 0, () => {
       const hub = EventHub.getInstance();
       let capturedEvent = '';
-      let capturedData: any = null;
+      let capturedData: Record<string, number> = {};
       const mockRnInstance = {
-        emitDeviceEvent(event: string, data: any) {
+        emitDeviceEvent(event: string, data: Object) {
           capturedEvent = event;
-          capturedData = data;
+          capturedData = data as Record<string, number>;
         },
       };
       hub.setRNInstance(mockRnInstance);
@@ -39,13 +39,18 @@ export default function eventHubTest() {
       hub.setRNInstance(undefined);
     });
 
-    it('on/off manages listeners', 0, () => {
+    it('clearRNInstance only drops the instance it is given', 0, () => {
       const hub = EventHub.getInstance();
-      let callCount = 0;
-      const callback = () => { callCount++; };
-      hub.on('test-event', callback);
-      hub.off('test-event', callback);
-      expect(callCount).assertEqual(0);
+      let calls = 0;
+      const current = { emitDeviceEvent(_event: string, _data: Object) { calls++; } };
+      const stale = { emitDeviceEvent(_event: string, _data: Object) { calls++; } };
+      hub.setRNInstance(current);
+      hub.clearRNInstance(stale);
+      hub.emit('RCTPushyDownloadProgress', { received: 1, total: 2 });
+      expect(calls).assertEqual(1);
+      hub.clearRNInstance(current);
+      hub.emit('RCTPushyDownloadProgress', { received: 2, total: 2 });
+      expect(calls).assertEqual(1);
     });
   });
 }

@@ -667,10 +667,22 @@ struct CleanupWork {
   napi_async_work work = nullptr;
   napi_deferred deferred = nullptr;
   std::string root_dir;
-  std::string keep_current;
-  std::string keep_previous;
+  // Every version that may still be in use: persisted current/last AND the
+  // version this process booted from (two switches without a restart must not
+  // evict the running bundle while its on-demand assets are still served).
+  std::vector<std::string> keep_names;
   int32_t max_age_days = 0;
   pushy::patch::Status status{false, ""};
+};
+
+// Streaming file digest on a worker thread. A full package or bundle is tens
+// of MB; hashing it synchronously on the UI thread (where the TurboModule
+// runs) froze the app for hundreds of ms per archive/bundle/activation.
+struct Sha256FileWork {
+  napi_async_work work = nullptr;
+  napi_deferred deferred = nullptr;
+  std::string path;
+  std::string hex;
 };
 
 napi_value ApplyPatchFromFileSource(napi_env env, napi_callback_info info) {
@@ -785,10 +797,11 @@ napi_value ApplyPatchFromFileSource(napi_env env, napi_callback_info info) {
   return promise;
 }
 
+// cleanupOldEntries(rootDir, keepNames: string[], maxAgeDays)
 napi_value CleanupOldEntries(napi_env env, napi_callback_info info) {
-  napi_value args[4] = {nullptr, nullptr, nullptr, nullptr};
-  size_t argc = 4;
-  if (!GetArgCount(env, info, &argc, args) || argc < 4) {
+  napi_value args[3] = {nullptr, nullptr, nullptr};
+  size_t argc = 3;
+  if (!GetArgCount(env, info, &argc, args) || argc < 3) {
     ThrowError(env, "Wrong number of arguments");
     return nullptr;
   }
@@ -798,23 +811,18 @@ napi_value CleanupOldEntries(napi_env env, napi_callback_info info) {
   if (!ok) {
     return nullptr;
   }
-  const std::string keep_current = GetString(env, args[1], &ok);
-  if (!ok) {
-    return nullptr;
-  }
-  const std::string keep_previous = GetString(env, args[2], &ok);
-  if (!ok) {
+  std::vector<std::string> keep_names;
+  if (!GetStringArray(env, args[1], &keep_names)) {
     return nullptr;
   }
   int32_t max_age_days = 0;
-  if (!GetInt32(env, args[3], &max_age_days)) {
+  if (!GetInt32(env, args[2], &max_age_days)) {
     return nullptr;
   }
 
   auto* work_data = new CleanupWork();
   work_data->root_dir = root_dir;
-  work_data->keep_current = keep_current;
-  work_data->keep_previous = keep_previous;
+  work_data->keep_names = std::move(keep_names);
   work_data->max_age_days = max_age_days;
 
   napi_value promise = nullptr;
@@ -834,7 +842,7 @@ napi_value CleanupOldEntries(napi_env env, napi_callback_info info) {
           [](napi_env, void* data) {
             auto* w = static_cast<CleanupWork*>(data);
             w->status = pushy::patch::CleanupOldEntries(
-                w->root_dir, w->keep_current, w->keep_previous, w->max_age_days);
+                w->root_dir, w->keep_names, w->max_age_days);
           },
           [](napi_env cb_env, napi_status status, void* data) {
             auto* w = static_cast<CleanupWork*>(data);
@@ -851,6 +859,76 @@ napi_value CleanupOldEntries(napi_env env, napi_callback_info info) {
                   cb_env, w->status.message.c_str(), NAPI_AUTO_LENGTH, &message);
               napi_create_error(cb_env, nullptr, message, &error);
               napi_reject_deferred(cb_env, w->deferred, error);
+            }
+            napi_delete_async_work(cb_env, w->work);
+            delete w;
+          },
+          work_data,
+          &work_data->work) != napi_ok) {
+    RejectDeferredWithMessage(
+        env, work_data->deferred, "Unable to create async work");
+    delete work_data;
+    return promise;
+  }
+  if (napi_queue_async_work(env, work_data->work) != napi_ok) {
+    napi_delete_async_work(env, work_data->work);
+    RejectDeferredWithMessage(
+        env, work_data->deferred, "Unable to queue async work");
+    delete work_data;
+    return promise;
+  }
+  return promise;
+}
+
+// sha256HexFileAsync(path) -> Promise<hex>. Rejects when the file cannot be
+// read (Sha256File returns an empty digest in that case).
+napi_value Sha256HexFileAsync(napi_env env, napi_callback_info info) {
+  napi_value args[1] = {nullptr};
+  size_t argc = 1;
+  if (!GetArgCount(env, info, &argc, args) || argc < 1) {
+    ThrowError(env, "sha256HexFileAsync: missing path argument");
+    return nullptr;
+  }
+  bool ok = false;
+  std::string path = GetString(env, args[0], &ok);
+  if (!ok) {
+    return nullptr;
+  }
+  if (path.empty()) {
+    ThrowError(env, "sha256HexFileAsync: path must be a non-empty string");
+    return nullptr;
+  }
+
+  auto* work_data = new Sha256FileWork();
+  work_data->path = std::move(path);
+
+  napi_value promise = nullptr;
+  if (napi_create_promise(env, &work_data->deferred, &promise) != napi_ok) {
+    delete work_data;
+    ThrowError(env, "Unable to create promise");
+    return nullptr;
+  }
+
+  napi_value resource_name = nullptr;
+  napi_create_string_utf8(
+      env, "sha256HexFileAsync", NAPI_AUTO_LENGTH, &resource_name);
+  if (napi_create_async_work(
+          env,
+          nullptr,
+          resource_name,
+          [](napi_env, void* data) {
+            auto* w = static_cast<Sha256FileWork*>(data);
+            w->hex = pushy::digest::Sha256File(w->path);
+          },
+          [](napi_env cb_env, napi_status status, void* data) {
+            auto* w = static_cast<Sha256FileWork*>(data);
+            if (status != napi_ok) {
+              RejectDeferredWithMessage(cb_env, w->deferred, "async work aborted");
+            } else if (w->hex.empty()) {
+              RejectDeferredWithMessage(
+                  cb_env, w->deferred, "sha256HexFileAsync: cannot read file");
+            } else {
+              napi_resolve_deferred(cb_env, w->deferred, NewString(cb_env, w->hex));
             }
             napi_delete_async_work(cb_env, w->work);
             delete w;
@@ -898,7 +976,8 @@ bool ExportFunction(
 // rawfile 里的 bundle(已整体读入内存,与 pdiff 的读法一致),哈希本身毫秒级。
 static napi_value MakeUtf8String(napi_env env, const std::string& value);
 
-// Streaming file digest (bounded memory) for the install record.
+// Streaming file digest (bounded memory). Synchronous: small files only —
+// archives and bundles go through sha256HexFileAsync.
 static napi_value Sha256HexFile(napi_env env, napi_callback_info info) {
   size_t argc = 1;
   napi_value args[1] = {nullptr};
@@ -909,7 +988,7 @@ static napi_value Sha256HexFile(napi_env env, napi_callback_info info) {
   bool ok = false;
   std::string path = GetString(env, args[0], &ok);
   if (!ok) {
-    ThrowError(env, "sha256HexFile: path must be a string");
+    // GetString already raised the pending exception.
     return nullptr;
   }
   return MakeUtf8String(env, pushy::digest::Sha256File(path));
@@ -1089,8 +1168,13 @@ static napi_value FlowIsValidCheckResponse(napi_env env,
   }
   bool ok = false;
   std::string response_text = GetString(env, args[0], &ok);
+  if (!ok) {
+    // Exception pending (non-string argument): propagate it as a throw
+    // instead of a boolean that the caller would treat as a verdict.
+    return nullptr;
+  }
   napi_value result = nullptr;
-  napi_get_boolean(env, ok && updateflow::IsValidCheckResponse(response_text),
+  napi_get_boolean(env, updateflow::IsValidCheckResponse(response_text),
                    &result);
   return result;
 }
@@ -1135,6 +1219,7 @@ napi_value Init(napi_env env, napi_value exports) {
       !ExportFunction(env, exports, "cleanupOldEntries", CleanupOldEntries) ||
       !ExportFunction(env, exports, "sha256Hex", Sha256Hex) ||
       !ExportFunction(env, exports, "sha256HexFile", Sha256HexFile) ||
+      !ExportFunction(env, exports, "sha256HexFileAsync", Sha256HexFileAsync) ||
       !ExportFunction(env, exports, "crc32", Crc32) ||
       !ExportFunction(env, exports, "getSupportedDiffVersion", GetSupportedDiffVersion) ||
       !ExportFunction(env, exports, "buildCheckRequestBody", FlowBuildCheckRequestBody) ||

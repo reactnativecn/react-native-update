@@ -71,8 +71,18 @@ if(TARGET rnoh)
     target_link_libraries(rnoh_pushy PUBLIC rnoh)
 endif()
 
-# Optimize binary size and performance for Release builds
+# Optimize binary size for Release builds of the NAPI library. --gc-sections
+# only drops anything when every function/data item sits in its own section,
+# and the module registers itself through NAPI_MODULE's static constructor,
+# so no symbol needs default visibility. Scoped to rnupdate: rnoh_pushy must
+# keep exporting PushyTurboModule (JSI_EXPORT) for the host's PackageProvider.
 if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
-    # Strip debug symbols and perform garbage collection of unused code sections
-    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--gc-sections -s")
+    target_compile_options(rnupdate PRIVATE
+        -ffunction-sections
+        -fdata-sections
+        -fvisibility=hidden
+        -fvisibility-inlines-hidden
+    )
+    # Strip debug symbols and garbage-collect the unused sections.
+    target_link_options(rnupdate PRIVATE -Wl,--gc-sections -s)
 endif()

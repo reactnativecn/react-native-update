@@ -74,16 +74,23 @@ interface NativePatchCoreBindings {
   ): ArchivePatchPlanResult;
   buildCopyGroups(copyFroms: string[], copyTos: string[]): CopyGroupResult[];
   applyPatchFromFileSource(options: FileSourcePatchRequest): Promise<void>;
+  /**
+   * 删除 rootDir 下超过 maxAgeDays 且名字不在 keepNames 里的条目(native
+   * 工作线程)。keepNames 必须包含所有可能仍在使用的版本:持久化的
+   * current/last 以及本进程实际启动的版本。
+   */
   cleanupOldEntries(
     rootDir: string,
-    keepCurrent: string,
-    keepPrevious: string,
+    keepNames: string[],
     maxAgeDays: number,
   ): Promise<void>;
   /** sha256(小写 hex)。同步:输入是已在内存的 rawfile bundle,哈希毫秒级 */
   sha256Hex(data: Uint8Array): string;
-  // 文件流式 SHA-256(小写 hex;不可读时空串),供安装记录使用。
+  // 文件流式 SHA-256(小写 hex;不可读时空串)。同步,仅限小文件——整包/
+  // 整 bundle 用下面的异步版本,避免冻结 UI 线程。
   sha256HexFile(path: string): string;
+  // 同上,在 libuv 工作线程计算;文件不可读时 reject。
+  sha256HexFileAsync(path: string): Promise<string>;
   /** CRC32(zip/zlib 多项式)。pdiff 拷贝前与 copiesCrc 比对用 */
   crc32(data: Uint8Array | ArrayBuffer): number;
   /** 原生 patch 内核可消费的 diff 轨道版本(2 = hdiffv2 轨道) */

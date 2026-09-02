@@ -5,6 +5,11 @@ import NativePatchCore from './NativePatchCore';
 import type { UpdateContext } from './UpdateContext';
 import { isSafePathComponent } from './PathUtils';
 import { monotonicNowMs } from './MonotonicClock';
+import {
+  ERROR_DOWNLOAD_FAILED,
+  createUpdateError,
+  getErrorMessage,
+} from './ErrorCodes';
 
 // 原生冷启动检测(NATIVE_CHECKUPDATE_DESIGN §10):每进程一次,getBundleUrl
 // 后延迟数秒运行,完全不依赖 app bundle——坏热更把 JS 砸挂后,下次启动仍能
@@ -69,10 +74,19 @@ interface DecisionAttempt {
   urls?: string[];
 }
 
+interface DecisionInfoConfig {
+  forceBoot?: boolean;
+}
+
 interface DecisionInfo {
   name?: string;
   description?: string;
   metaInfo?: string;
+  // 服务端按版本下发的配置(forceBoot = 救砖指令)。
+  config?: DecisionInfoConfig;
+  // 写进 hash 信息:这个版本是被救援通道送进来的,JS 在 markSuccess 时据此
+  // 上报 forceBootRescue 回执(与 Android/iOS 一致)。
+  forceBootRescue?: boolean;
 }
 
 interface Decision {
@@ -130,7 +144,7 @@ export function scheduleNativeCheck(
     }
     runOnce(context, launchRolledBackVersion).catch((e: Object) => {
       // 救援路径自身绝不能把应用拖垮。
-      logger.error(TAG, `native check failed: ${e}`);
+      logger.error(TAG, `native check failed: ${getErrorMessage(e)}`);
     });
   }, delayMs);
 }
@@ -161,7 +175,16 @@ async function runOnce(
     return;
   }
   // 从这里起本轮开始做真实工作:留下面包屑,死于轮中时下次启动零延迟续传。
-  context.setKv(KEY_ROUND_INCOMPLETE, '1');
+  logger.info(
+    TAG,
+    `round started (resume=${!!context.getKv(KEY_ROUND_INCOMPLETE)})`,
+  );
+  // 面包屑只是"下次零延迟"的优化:落盘失败不能阻止救援轮次本身。
+  try {
+    await context.setKv(KEY_ROUND_INCOMPLETE, '1');
+  } catch (e) {
+    logger.warn(TAG, `cannot persist round marker: ${getErrorMessage(e)}`);
+  }
   try {
     await runConfiguredRound(
       context,
@@ -172,8 +195,33 @@ async function runOnce(
       appKey,
     );
   } finally {
-    context.removeKv(KEY_ROUND_INCOMPLETE);
+    try {
+      await context.removeKv(KEY_ROUND_INCOMPLETE);
+    } catch (e) {
+      // 残留标记只意味着下次启动少等 5 秒。
+      logger.warn(TAG, `cannot clear round marker: ${getErrorMessage(e)}`);
+    }
   }
+}
+
+// 配置端点全为 https 时,网络下发的端点列表/制品 URL 一律拒绝明文 http:
+// @ohos.net.http 内部跟随重定向且不暴露最终 URL,这是鸿蒙侧唯一能做的
+// https→http 降级防线(SR-1);其余依赖宿主 network_config.json 的
+// cleartextTrafficPermitted:false(见 harmony/pushy/src/README.md)。
+function isHttpsOnly(config: NativeConfig): boolean {
+  const endpoints = config.endpoints ?? [];
+  return (
+    endpoints.length > 0 &&
+    endpoints.every(endpoint => isHttpsUrl(endpoint))
+  );
+}
+
+function isHttpsUrl(url: string): boolean {
+  return typeof url === 'string' && url.toLowerCase().startsWith('https://');
+}
+
+function isCleartextUrl(url: string): boolean {
+  return typeof url === 'string' && url.toLowerCase().startsWith('http://');
 }
 
 async function runConfiguredRound(
@@ -222,9 +270,10 @@ async function runConfiguredRound(
     return;
   }
 
-  const responseText = await runCheckRequest(config, appKey, body);
+  const httpsOnly = isHttpsOnly(config);
+  const responseText = await runCheckRequest(config, appKey, body, httpsOnly);
   if (!responseText) {
-    logger.debug(TAG, 'no endpoint reachable, giving up until next launch');
+    logger.warn(TAG, 'no endpoint reachable, giving up until next launch');
     return;
   }
   // Anchor cache freshness to response arrival, before download/patch work.
@@ -240,32 +289,38 @@ async function runConfiguredRound(
   }
   const decision = JSON.parse(decisionJson) as Decision;
   if (decision.action !== 'download') {
-    context.commitNativeCheckResult(
+    await context.commitNativeCheckResult(
       resetGeneration,
       '',
       '',
       false,
       buildResponseCacheJson(configJson, body, responseText, responseAtSeconds),
     );
-    logger.debug(TAG, `nothing to do (${decision.reason ?? ''})`);
+    logger.info(TAG, `nothing to do (${decision.reason ?? ''})`);
     return;
   }
   const hash = decision.hash ?? '';
   if (!isSafePathComponent(hash)) {
+    logger.warn(TAG, 'decision carries an unsafe hash, ignoring');
     return;
   }
 
   let downloaded = context.hasDownloadedVersion(hash);
-  if (!downloaded) {
+  if (downloaded) {
+    logger.info(TAG, `${hash} already installed, skipping download`);
+  } else {
+    logger.info(TAG, `downloading ${hash}`);
     downloaded = await performAttempts(
       context,
       decision.attempts ?? [],
       hash,
       currentVersion,
+      httpsOnly,
     );
   }
   if (!downloaded) {
-    context.commitNativeCheckResult(
+    logger.warn(TAG, `all download attempts for ${hash} failed`);
+    await context.commitNativeCheckResult(
       resetGeneration,
       '',
       '',
@@ -289,6 +344,12 @@ async function runConfiguredRound(
     if (typeof info.metaInfo === 'string') {
       hashInfo.metaInfo = info.metaInfo;
     }
+    // forceBoot 激活就是救砖路径:记进持久化元信息,这个版本活到 markSuccess
+    // 时 JS 上报 forceBootRescue。只认服务端下发的指令——静默策略的激活是
+    // 普通投递(Android/iOS 同一规则)。
+    if (info.config && info.config.forceBoot) {
+      hashInfo.forceBootRescue = true;
+    }
     hashInfoJson = JSON.stringify(hashInfo);
   }
 
@@ -298,7 +359,7 @@ async function runConfiguredRound(
   const activate = decision.activate === true;
   let committed = false;
   try {
-    committed = context.commitNativeCheckResult(
+    committed = await context.commitNativeCheckResult(
       resetGeneration,
       hash,
       hashInfoJson,
@@ -306,15 +367,15 @@ async function runConfiguredRound(
       buildResponseCacheJson(configJson, body, responseText, responseAtSeconds),
     );
   } catch (e) {
-    logger.error(TAG, `commit failed: ${e}`);
+    logger.error(TAG, `commit failed: ${getErrorMessage(e)}`);
     return;
   }
   if (!committed) {
-    logger.debug(TAG, 'reset during round, dropping result');
+    logger.warn(TAG, 'reset during round, dropping result');
   } else if (activate) {
-    logger.debug(TAG, `downloaded ${hash} and set for next launch`);
+    logger.info(TAG, `downloaded ${hash} and set for next launch`);
   } else {
-    logger.debug(TAG, `downloaded ${hash}, activation left to JS`);
+    logger.info(TAG, `downloaded ${hash}, activation left to JS`);
   }
 }
 
@@ -396,6 +457,7 @@ async function runCheckRequest(
   config: NativeConfig,
   appKey: string,
   body: string,
+  httpsOnly: boolean,
 ): Promise<string | undefined> {
   const orderedJson = NativePatchCore.orderEndpointCandidates(
     JSON.stringify(config.endpoints ?? []),
@@ -450,6 +512,11 @@ async function runCheckRequest(
       if (!base || tried.has(base)) {
         continue;
       }
+      if (httpsOnly && !isHttpsUrl(base)) {
+        // 远程注入的端点不得把 https 配置降级成明文。
+        logger.warn(TAG, `ignoring non-https remote endpoint ${base}`);
+        continue;
+      }
       if (httpAttempts++ >= MAX_CHECK_HTTP_ATTEMPTS) {
         return undefined;
       }
@@ -475,12 +542,20 @@ async function runWithinDeadline(
 ): Promise<void> {
   const remainingMs = deadlineUptimeMs - monotonicNowMs();
   if (remainingMs <= 0) {
-    throw Error('Download phase deadline expired before start');
+    throw createUpdateError(
+      ERROR_DOWNLOAD_FAILED,
+      'Download phase deadline expired before start',
+    );
   }
   let deadlineTimer = 0;
   const deadlinePromise = new Promise<void>((_, reject) => {
     deadlineTimer = setTimeout(() => {
-      reject(Error('Download phase deadline exceeded'));
+      reject(
+        createUpdateError(
+          ERROR_DOWNLOAD_FAILED,
+          'Download phase deadline exceeded',
+        ),
+      );
     }, remainingMs);
   });
   try {
@@ -498,6 +573,7 @@ async function performAttempts(
   attempts: DecisionAttempt[],
   hash: string,
   originHash: string,
+  httpsOnly: boolean,
 ): Promise<boolean> {
   const incrementalDeadline = monotonicNowMs() + DOWNLOAD_PHASE_TIMEOUT_MS;
   let fullDeadline = 0;
@@ -517,6 +593,11 @@ async function performAttempts(
     const deadline = isFullAttempt ? fullDeadline : incrementalDeadline;
     for (const url of attempt.urls ?? []) {
       if (!url) {
+        continue;
+      }
+      if (httpsOnly && isCleartextUrl(url)) {
+        // 决策里的明文制品 URL 不得把 https 配置降级(SR-1)。
+        logger.warn(TAG, `ignoring cleartext ${type} url ${url}`);
         continue;
       }
       if (monotonicNowMs() >= deadline) {
@@ -544,7 +625,7 @@ async function performAttempts(
         }
         return true;
       } catch (e) {
-        logger.debug(TAG, `${type} attempt failed: ${e}`);
+        logger.warn(TAG, `${type} attempt failed: ${getErrorMessage(e)}`);
       }
     }
   }
