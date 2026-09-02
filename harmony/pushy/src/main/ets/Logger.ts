@@ -1,5 +1,4 @@
 import hilog from '@ohos.hilog';
-import { readBuildProfileDebug } from './BuildFlags';
 
 class Logger {
   private domain: number;
@@ -17,9 +16,10 @@ class Logger {
     this.isDebug = isDebug;
   }
 
-  // debug 级别默认跟随本 HAR 的构建模式(BuildProfile.DEBUG,见 BuildFlags);
-  // 宿主处于 RN 调试模式(RNOH isDebugModeEnabled)时由 TurboModule 在启动时
-  // 打开,方便接入调试。info/warn/error 永远输出。
+  // debug 级别默认关闭;宿主处于 RN 调试模式(RNOH isDebugModeEnabled)时由
+  // TurboModule 在启动时打开,方便接入调试。info/warn/error 永远输出。
+  // (HAR 自身没有可靠的构建期 DEBUG 信号:hvigor 只为宿主模块生成
+  // BuildProfile,在 HAR 里 import 'BuildProfile' 无法解析。)
   setDebug(enabled: boolean): void {
     this.isDebug = enabled;
   }
@@ -75,4 +75,4 @@ class Logger {
   }
 }
 
-export default new Logger('pushy', 0xff00, readBuildProfileDebug() ?? false);
+export default new Logger('pushy', 0xff00, false);

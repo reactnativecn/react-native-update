@@ -25,7 +25,6 @@ import NativePatchCore, {
   StateCoreResult,
 } from './NativePatchCore';
 import { assertSafePathComponent } from './PathUtils';
-import { readBuildProfileDebug } from './BuildFlags';
 import {
   ERROR_SWITCH_VERSION_FAILED,
   createUpdateError,
@@ -57,8 +56,9 @@ export class UpdateContext {
   private context: common.UIAbilityContext;
   private rootDir: string;
   private preferences!: preferences.Preferences;
-  // 本 HAR 的构建模式(BuildFlags),取不到时用宿主传入的调试标志。debug 下
-  // markSuccess 空转、不算内嵌 bundle 摘要,与 Android 的 debug 库对齐。
+  // 宿主传入的调试标志(RNOH isDebugModeEnabled)。debug 下 markSuccess 空转、
+  // 不算内嵌 bundle 摘要,与 Android 的 debug 库对齐。HAR 自身没有构建期
+  // DEBUG 信号(hvigor 不为 HAR 生成 BuildProfile),所以只看宿主。
   private static DEBUG: boolean = false;
   private static isUsingBundleUrl: boolean = false;
   private static ignoreRollback: boolean = false;
@@ -80,16 +80,16 @@ export class UpdateContext {
   private readonly instanceId: string;
 
   /**
-   * @param isDebugHost 宿主的调试标志(RNOH isDebugModeEnabled);仅在
-   *   BuildProfile.DEBUG 不可用时生效。bundle provider 先于 TurboModule 构造,
-   *   不传该参数;TurboModule 随后显式传入时会重新解析。
+   * @param isDebugHost 宿主的调试标志(RNOH isDebugModeEnabled)。bundle
+   *   provider 先于 TurboModule 构造,不传该参数;TurboModule 随后显式传入时
+   *   会重新解析。
    */
   public static getInstance(
     context: common.UIAbilityContext,
     isDebugHost?: boolean,
   ): UpdateContext {
-    if (!UpdateContext.instance || isDebugHost !== undefined) {
-      UpdateContext.DEBUG = readBuildProfileDebug() ?? isDebugHost ?? false;
+    if (isDebugHost !== undefined) {
+      UpdateContext.DEBUG = isDebugHost;
     }
     if (!UpdateContext.instance) {
       UpdateContext.instance = new UpdateContext(context);
