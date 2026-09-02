@@ -12,9 +12,11 @@ import NativePatchCore, {
   CopyGroupResult,
 } from './NativePatchCore';
 import { monotonicNowMs } from './MonotonicClock';
+import logger from './Logger';
 import {
   MAX_ARCHIVE_BYTES,
   MAX_MANIFEST_BYTES,
+  checkUncompressedSize,
   ensureFreeSpace,
   measureExtractedDirectory,
 } from './ArchiveLimits';
@@ -24,8 +26,17 @@ import {
   stagingDirectoryFor,
   writeInstallRecord,
 } from './InstallRecord';
+import {
+  ERROR_DOWNLOAD_FAILED,
+  ERROR_FILE_OPERATION_FAILED,
+  ERROR_INVALID_OPTIONS,
+  ERROR_PATCH_FAILED,
+  createUpdateError,
+  getErrorMessage,
+  toUpdateError,
+} from './ErrorCodes';
 
-export const VERSION_COMPLETE_FILE_NAME = '.pushy-complete';
+const TAG = 'DownloadTask';
 
 export interface PatchManifestArrays {
   copyFroms: string[];
@@ -60,7 +71,8 @@ export function parseManifestToArrays(
     copiesCrcValue && typeof copiesCrcValue === 'object'
       ? (copiesCrcValue as Record<string, number>)
       : ({} as Record<string, number>);
-  for (const [to, rawFrom] of Object.entries(copies)) {
+  for (const to of Object.keys(copies)) {
+    const rawFrom = copies[to];
     let from = String(rawFrom || '');
     if (normalizeResourceCopies) {
       from = from.replace('resources/rawfile/', '');
@@ -93,6 +105,11 @@ export function parseManifestToArrays(
     deletes,
     hbcTransformMeta,
   };
+}
+
+interface PatchInputs {
+  entryNames: string[];
+  manifestArrays: PatchManifestArrays;
 }
 
 function toArrayBufferSlice(
@@ -170,9 +187,13 @@ export class DownloadTask {
     const work = this.stagingDirectory(params);
     const bundlePath = `${work}/${HARMONY_BUNDLE_FILE_NAME}`;
     if (!fileIo.accessSync(bundlePath)) {
-      throw Error(`bundle missing after install: ${bundlePath}`);
+      throw createUpdateError(
+        ERROR_PATCH_FAILED,
+        `bundle missing after install: ${bundlePath}`,
+      );
     }
-    const bundleSha256 = NativePatchCore.sha256HexFile(bundlePath);
+    // 整 bundle 几十 MB:摘要在 native 工作线程算,不冻结 UI 线程。
+    const bundleSha256 = await NativePatchCore.sha256HexFileAsync(bundlePath);
     await writeInstallRecord(
       work,
       buildInstallRecord(params.hash, bundleSha256, this.artifactSha256),
@@ -222,7 +243,7 @@ export class DownloadTask {
       await this.writeFileContent(this.resumeSidecarPath(targetFile), encoded);
     } catch (e) {
       // 非致命:没有 sidecar,下次从零开始。
-      console.error('Failed to persist resume sidecar:', e);
+      logger.error(TAG, `Failed to persist resume sidecar: ${getErrorMessage(e)}`);
     }
   }
 
@@ -233,7 +254,7 @@ export class DownloadTask {
         await fileIo.unlink(sidecar);
       }
     } catch (e) {
-      console.error('Failed to delete resume sidecar:', e);
+      logger.error(TAG, `Failed to delete resume sidecar: ${getErrorMessage(e)}`);
     }
   }
 
@@ -244,35 +265,26 @@ export class DownloadTask {
         await fileIo.unlink(targetFile);
       }
     } catch (e) {
-      console.error('Failed to delete archive:', e);
+      logger.error(TAG, `Failed to delete archive: ${getErrorMessage(e)}`);
     }
     await this.deleteResumeSidecar(targetFile);
   }
 
+  // fileIo.rmdir 本身递归删除整个目录树;文件走 unlink。
   private async removeDirectory(path: string): Promise<void> {
     try {
-      const res = fileIo.accessSync(path);
-      if (res) {
-        const stat = await fileIo.stat(path);
-        if (stat.isDirectory()) {
-          const files = await fileIo.listFile(path);
-
-          const entries = files.filter(file => file !== '.' && file !== '..');
-          const DELETE_CONCURRENCY = 32;
-          for (let i = 0; i < entries.length; i += DELETE_CONCURRENCY) {
-            const batch = entries.slice(i, i + DELETE_CONCURRENCY);
-            await Promise.all(
-              batch.map(file => this.removeDirectory(`${path}/${file}`)),
-            );
-          }
-          await fileIo.rmdir(path);
-        } else {
-          await fileIo.unlink(path);
-        }
+      if (!fileIo.accessSync(path)) {
+        return;
+      }
+      const stat = await fileIo.stat(path);
+      if (stat.isDirectory()) {
+        await fileIo.rmdir(path);
+      } else {
+        await fileIo.unlink(path);
       }
     } catch (error) {
-      console.error('Failed to delete directory:', error);
-      throw error;
+      logger.error(TAG, `Failed to delete ${path}: ${getErrorMessage(error)}`);
+      throw toUpdateError(error, ERROR_FILE_OPERATION_FAILED);
     }
   }
 
@@ -306,33 +318,28 @@ export class DownloadTask {
   }
 
   /**
-   * The completion marker is written by this SDK only, after the whole
-   * install succeeded. zlib.decompressFile offers no per-entry filter, so an
-   * archive that ships its own marker is detected right after extraction:
-   * the marker is removed (so the failure cleanup below cannot mistake the
-   * directory for a finished install) and the package is rejected.
+   * 解压前读取归档解压后的总字节数(zlib.getOriginalSize,API 12)。老 API /
+   * 读取失败返回 -1,回退到解压后统计。
    */
-  private async rejectReservedEntries(unzipDirectory: string): Promise<void> {
-    const marker = `${unzipDirectory}/${VERSION_COMPLETE_FILE_NAME}`;
-    if (!fileIo.accessSync(marker)) {
-      return;
-    }
+  private async readOriginalSize(archiveFile: string): Promise<number> {
     try {
-      await fileIo.unlink(marker);
+      const size = await zlib.getOriginalSize(archiveFile);
+      return typeof size === 'number' && Number.isFinite(size) ? size : -1;
     } catch (e) {
-      // The directory is removed by the failure cleanup either way.
+      logger.warn(
+        TAG,
+        `zlib.getOriginalSize unavailable, measuring after extraction: ${getErrorMessage(e)}`,
+      );
+      return -1;
     }
-    const error: Error & { code?: string } = Error(
-      `archive contains reserved entry ${VERSION_COMPLETE_FILE_NAME}`,
-    );
-    error.code = 'PATCH_FAILED';
-    throw error;
   }
 
   /**
    * 解压 + 资源上限(cpp/patch_core/archive_limits.h)。zlib.decompressFile
-   * 没有逐条钩子:解压前按归档大小与 2 倍启发式查磁盘,解压后统计条目数与
-   * 总字节数(超限即失败,目录由失败清理删除),再拒绝保留条目。
+   * 没有逐条钩子:解压前用 getOriginalSize 把总解压量与整包压缩比挡在
+   * 上限内(20MB 归档 100:1 的 2GB 载荷不会先解出来再量),按已知解压量查
+   * 磁盘;解压后再统计条目数/单条大小/总字节数并拒绝任意深度的 `.pushy-`
+   * 保留条目(超限即失败,staging 目录由失败清理删除)。
    */
   private async extractArchive(
     archiveFile: string,
@@ -340,12 +347,25 @@ export class DownloadTask {
   ): Promise<void> {
     const archiveStat = await fileIo.stat(archiveFile);
     if (archiveStat.size > MAX_ARCHIVE_BYTES) {
-      throw Error(`archive too large: ${archiveStat.size} bytes`);
+      throw createUpdateError(
+        ERROR_PATCH_FAILED,
+        `archive too large: ${archiveStat.size} bytes`,
+      );
     }
-    await ensureFreeSpace(unzipDirectory, archiveStat.size * 2);
-    await zlib.decompressFile(archiveFile, unzipDirectory);
+    const originalSize = await this.readOriginalSize(archiveFile);
+    if (originalSize >= 0) {
+      checkUncompressedSize(archiveStat.size, originalSize);
+    }
+    await ensureFreeSpace(
+      unzipDirectory,
+      originalSize > 0 ? originalSize : archiveStat.size * 2,
+    );
+    try {
+      await zlib.decompressFile(archiveFile, unzipDirectory);
+    } catch (e) {
+      throw toUpdateError(e, ERROR_PATCH_FAILED);
+    }
     await measureExtractedDirectory(unzipDirectory);
-    await this.rejectReservedEntries(unzipDirectory);
   }
 
   private async recreateDirectory(path: string): Promise<void> {
@@ -436,7 +456,10 @@ export class DownloadTask {
 
     const manifestStat = await fileIo.stat(manifestPath);
     if (manifestStat.size > MAX_MANIFEST_BYTES) {
-      throw Error(`patch manifest too large: ${manifestStat.size} bytes`);
+      throw createUpdateError(
+        ERROR_PATCH_FAILED,
+        `patch manifest too large: ${manifestStat.size} bytes`,
+      );
     }
     return parseManifestToArrays(
       this.parseJsonEntry(await this.readFileContent(manifestPath)),
@@ -467,9 +490,11 @@ export class DownloadTask {
         enableMerge: false,
         bundleHbcTransformMeta: hbcTransformMeta,
       });
-    } catch (error: any) {
-      error.message = `Failed to process bundle patch: ${error.message}`;
-      throw error;
+    } catch (error) {
+      throw createUpdateError(
+        ERROR_PATCH_FAILED,
+        `Failed to process bundle patch: ${getErrorMessage(error)}`,
+      );
     } finally {
       if (fileIo.accessSync(originBundlePath)) {
         await fileIo.unlink(originBundlePath);
@@ -533,7 +558,10 @@ export class DownloadTask {
       await this.deleteArchiveAndSidecar(params.targetFile);
       const retry = await this.transferArchive(params, false);
       if (retry !== 'done') {
-        throw Error(`Server rejected the download range for ${params.url}`);
+        throw createUpdateError(
+          ERROR_DOWNLOAD_FAILED,
+          `Server rejected the download range for ${params.url}`,
+        );
       }
     }
     this.downloadPhaseCompleted = true;
@@ -567,7 +595,10 @@ export class DownloadTask {
       ? params.deadlineUptimeMs
       : monotonicNowMs() + DOWNLOAD_CALL_TIMEOUT_MS;
     if (deadlineUptimeMs <= monotonicNowMs()) {
-      throw Error('Download deadline expired before start');
+      throw createUpdateError(
+        ERROR_DOWNLOAD_FAILED,
+        'Download deadline expired before start',
+      );
     }
 
     // 续传状态盘点:有匹配的 sidecar 且 partial 未收齐才发 Range。
@@ -640,7 +671,10 @@ export class DownloadTask {
       received += data.byteLength;
       if (!writeError && baseOffset + received > MAX_ARCHIVE_BYTES) {
         // 未知长度/分块传输的兜底:超过上限即停写,请求在下面结算时失败。
-        writeError = Error(`archive too large: exceeded ${MAX_ARCHIVE_BYTES}`);
+        writeError = createUpdateError(
+          ERROR_PATCH_FAILED,
+          `archive too large: exceeded ${MAX_ARCHIVE_BYTES}`,
+        );
       }
       writeQueue = writeQueue.then(async () => {
         if (!writer || writeError) {
@@ -672,7 +706,8 @@ export class DownloadTask {
       watchdogTimer = setTimeout(() => {
         if (inactivityReject) {
           inactivityReject(
-            Error(
+            createUpdateError(
+              ERROR_DOWNLOAD_FAILED,
               `Download stalled: no data received for ${INACTIVITY_TIMEOUT_MS}ms`,
             ),
           );
@@ -704,12 +739,19 @@ export class DownloadTask {
             reject(error);
             try {
               await closeWriter();
-            } catch (closeErr: any) {
-              console.error('closeWriter failed after write error:', closeErr);
+            } catch (closeErr) {
+              logger.error(
+                TAG,
+                `closeWriter failed after write error: ${getErrorMessage(closeErr)}`,
+              );
             }
           });
       });
     });
+    // 下面的 race 可能在 dataEnd 到来之前就以 deadline/inactivity 结束,此时
+    // dataEndPromise 的 reject 没有订阅者——标记为已处理,避免 unhandled
+    // rejection;真正的错误已经由 race 抛出。
+    dataEndPromise.catch(() => {});
 
     try {
       httpRequest.on('headersReceive', (header: Object) => {
@@ -780,16 +822,26 @@ export class DownloadTask {
         }
       }
 
+      const remainingMs = Math.max(1, deadlineUptimeMs - monotonicNowMs());
       const deadlinePromise = new Promise<never>((_, reject) => {
         deadlineTimer = setTimeout(() => {
-          reject(Error('Download exceeded its whole-call deadline'));
-        }, Math.max(1, deadlineUptimeMs - monotonicNowMs()));
+          reject(
+            createUpdateError(
+              ERROR_DOWNLOAD_FAILED,
+              'Download exceeded its whole-call deadline',
+            ),
+          );
+        }, remainingMs);
       });
+      // netstack 把 readTimeout 交给 libcurl 的 CURLOPT_TIMEOUT_MS(整次传输
+      // 总时长)而非空闲超时:固定 60s 会让慢网上的大全量包次次失败。两个
+      // 超时都取剩余 deadline;卡死由下面的 60s 不活动看门狗负责——两种
+      // 语义下都正确。
       const responseCode = await Promise.race([
         httpRequest.requestInStream(params.url, {
           method: http.RequestMethod.GET,
-          readTimeout: 60000,
-          connectTimeout: 60000,
+          readTimeout: remainingMs,
+          connectTimeout: remainingMs,
           header: requestHeader,
         }),
         deadlinePromise,
@@ -813,7 +865,10 @@ export class DownloadTask {
         // 响应体从未落盘,partial + sidecar 原样保留——那就是续传状态。
         discardBody = true;
         pendingChunks = null;
-        throw Error(`Server error: ${responseCode}`);
+        throw createUpdateError(
+          ERROR_DOWNLOAD_FAILED,
+          `Server error: ${responseCode}`,
+        );
       }
 
       let encodedBody = false;
@@ -861,7 +916,10 @@ export class DownloadTask {
         );
       }
       if (totalAll > MAX_ARCHIVE_BYTES) {
-        writeError = Error(`archive too large: ${totalAll} bytes`);
+        writeError = createUpdateError(
+          ERROR_PATCH_FAILED,
+          `archive too large: ${totalAll} bytes`,
+        );
         throw writeError;
       }
       await ensureFreeSpace(
@@ -910,12 +968,14 @@ export class DownloadTask {
       const stats = await fileIo.stat(params.targetFile);
       if (!finalEncoded) {
         if (contentLength > 0 && received !== contentLength) {
-          throw Error(
+          throw createUpdateError(
+            ERROR_DOWNLOAD_FAILED,
             `Download incomplete: expected ${contentLength} bytes but got ${received} bytes`,
           );
         }
         if (totalAll > 0 && stats.size !== totalAll) {
-          throw Error(
+          throw createUpdateError(
+            ERROR_DOWNLOAD_FAILED,
             `Download incomplete: expected ${totalAll} total bytes but got ${stats.size} bytes`,
           );
         }
@@ -936,8 +996,8 @@ export class DownloadTask {
       }
       return 'done';
     } catch (error) {
-      console.error('Download failed:', error);
-      throw error;
+      logger.error(TAG, `Download failed: ${getErrorMessage(error)}`);
+      throw toUpdateError(error, ERROR_DOWNLOAD_FAILED);
     } finally {
       clearWatchdog();
       if (deadlineTimer !== null) {
@@ -951,7 +1011,7 @@ export class DownloadTask {
       try {
         await closeWriter();
       } catch (closeError) {
-        console.error('Failed to close file:', closeError);
+        logger.error(TAG, `Failed to close file: ${getErrorMessage(closeError)}`);
       }
       httpRequest.off('headersReceive');
       httpRequest.off('dataReceive');
@@ -969,44 +1029,47 @@ export class DownloadTask {
     });
   }
 
-  private async doFullPatch(params: DownloadTaskParams): Promise<void> {
+  /**
+   * 三种安装共用的脚手架:下载 → 重建 staging → 归档摘要(工作线程)→ 解压
+   * (含上限校验)。返回 staging 目录。下载完成后的失败一律是 patch 应用
+   * 失败(见 execute 的归码)。
+   */
+  private async downloadAndExtract(params: DownloadTaskParams): Promise<string> {
     await this.downloadFile(params);
     const work = this.stagingDirectory(params);
     await this.recreateDirectory(work);
-    this.artifactSha256 = NativePatchCore.sha256HexFile(params.targetFile);
+    this.artifactSha256 = await NativePatchCore.sha256HexFileAsync(
+      params.targetFile,
+    );
     await this.extractArchive(params.targetFile, work);
+    return work;
+  }
+
+  /** 解压目录里的条目名 + __diff.json 解析结果,供 patch plan 使用。 */
+  private async readPatchInputs(
+    work: string,
+    normalizeResourceCopies: boolean,
+  ): Promise<PatchInputs> {
+    const results = await Promise.all([
+      this.listEntryNames(work),
+      this.readManifestArrays(work, normalizeResourceCopies),
+    ]);
+    return { entryNames: results[0], manifestArrays: results[1] };
+  }
+
+  private async doFullPatch(params: DownloadTaskParams): Promise<void> {
+    await this.downloadAndExtract(params);
     await this.deleteArchiveAndSidecar(params.targetFile);
   }
 
   private async doPatchFromApp(params: DownloadTaskParams): Promise<void> {
-    await this.downloadFile(params);
-    try {
-      await this.doPatchFromAppAfterDownload(params);
-    } catch (error: any) {
-      // 下载已完成,之后的失败都是 patch 应用失败(解压/hpatch/资源拷贝,
-      // 含 copiesCrc 校验)。打上稳定码,JS 层遥测按 patch_fail 归类,
-      // 而不是混进网络失败。
-      error.code = 'PATCH_FAILED';
-      throw error;
-    }
-  }
-
-  private async doPatchFromAppAfterDownload(
-    params: DownloadTaskParams,
-  ): Promise<void> {
-    const work = this.stagingDirectory(params);
-    await this.recreateDirectory(work);
-    this.artifactSha256 = NativePatchCore.sha256HexFile(params.targetFile);
-
-    await this.extractArchive(params.targetFile, work);
-    const [entryNames, manifestArrays] = await Promise.all([
-      this.listEntryNames(work),
-      this.readManifestArrays(work, true),
-    ]);
+    const work = await this.downloadAndExtract(params);
+    const inputs = await this.readPatchInputs(work, true);
+    const manifestArrays = inputs.manifestArrays;
 
     NativePatchCore.buildArchivePatchPlan(
       ARCHIVE_PATCH_TYPE_FROM_PACKAGE,
-      entryNames,
+      inputs.entryNames,
       manifestArrays.copyFroms,
       manifestArrays.copyTos,
       manifestArrays.deletes,
@@ -1015,7 +1078,7 @@ export class DownloadTask {
 
     const bundlePatchPath = `${work}/${HARMONY_BUNDLE_PATCH_ENTRY}`;
     if (!fileIo.accessSync(bundlePatchPath)) {
-      throw Error('bundle patch not found');
+      throw createUpdateError(ERROR_PATCH_FAILED, 'bundle patch not found');
     }
     const resourceManager = this.context.resourceManager;
     const originContent = await resourceManager.getRawFileContent(
@@ -1049,32 +1112,13 @@ export class DownloadTask {
   }
 
   private async doPatchFromPpk(params: DownloadTaskParams): Promise<void> {
-    await this.downloadFile(params);
-    try {
-      await this.doPatchFromPpkAfterDownload(params);
-    } catch (error: any) {
-      // 同 doPatchFromApp:下载完成后的失败按 patch 失败归类。
-      error.code = 'PATCH_FAILED';
-      throw error;
-    }
-  }
-
-  private async doPatchFromPpkAfterDownload(
-    params: DownloadTaskParams,
-  ): Promise<void> {
-    const work = this.stagingDirectory(params);
-    await this.recreateDirectory(work);
-    this.artifactSha256 = NativePatchCore.sha256HexFile(params.targetFile);
-
-    await this.extractArchive(params.targetFile, work);
-    const [entryNames, manifestArrays] = await Promise.all([
-      this.listEntryNames(work),
-      this.readManifestArrays(work, false),
-    ]);
+    const work = await this.downloadAndExtract(params);
+    const inputs = await this.readPatchInputs(work, false);
+    const manifestArrays = inputs.manifestArrays;
 
     const plan = NativePatchCore.buildArchivePatchPlan(
       ARCHIVE_PATCH_TYPE_FROM_PPK,
-      entryNames,
+      inputs.entryNames,
       manifestArrays.copyFroms,
       manifestArrays.copyTos,
       manifestArrays.deletes,
@@ -1093,7 +1137,7 @@ export class DownloadTask {
       enableMerge: plan.enableMerge,
       bundleHbcTransformMeta: manifestArrays.hbcTransformMeta,
     });
-    console.info('Patch from PPK completed');
+    logger.info(TAG, 'Patch from PPK completed');
     await this.deleteArchiveAndSidecar(params.targetFile);
   }
 
@@ -1122,14 +1166,7 @@ export class DownloadTask {
             .replace(/\.[^.]+$/, '');
           const mediaBuffer = await resourceManager.getMediaByName(mediaName);
           this.verifyCopySourceCrc(mediaBuffer, expectedCrc, currentFrom);
-          const parentDirs = [
-            ...new Set(
-              targets.map(t => t.substring(0, t.lastIndexOf('/'))).filter(Boolean),
-            ),
-          ];
-          await Promise.all(
-            parentDirs.map(dir => this.ensureDirectory(dir)),
-          );
+          await this.ensureParentDirectories(targets);
           await Promise.all(
             targets.map(target => this.writeFileContent(target, mediaBuffer)),
           );
@@ -1143,7 +1180,8 @@ export class DownloadTask {
           const rawContent =
             await resourceManager.getRawFileContent(currentFrom);
           this.verifyCopySourceCrc(rawContent, expectedCrc, currentFrom);
-          const [firstTarget, ...restTargets] = targets;
+          const firstTarget = targets[0];
+          const restTargets = targets.slice(1);
           await this.writeFileContent(firstTarget, rawContent);
           await Promise.all(
             restTargets.map(target => this.copySandboxFile(firstTarget, target)),
@@ -1153,15 +1191,9 @@ export class DownloadTask {
 
         const fromContent = await resourceManager.getRawFd(currentFrom);
         try {
-          const [firstTarget, ...restTargets] = targets;
-          const parentDirs = [
-            ...new Set(
-              targets.map(t => t.substring(0, t.lastIndexOf('/'))).filter(Boolean),
-            ),
-          ];
-          await Promise.all(
-            parentDirs.map(dir => this.ensureDirectory(dir))
-          );
+          const firstTarget = targets[0];
+          const restTargets = targets.slice(1);
+          await this.ensureParentDirectories(targets);
           if (fileIo.accessSync(firstTarget)) {
             await fileIo.unlink(firstTarget);
           }
@@ -1173,21 +1205,33 @@ export class DownloadTask {
           try {
             await resourceManager.closeRawFd(currentFrom);
           } catch (closeError) {
-            console.error(`Failed to close raw fd for ${currentFrom}:`, closeError);
+            logger.error(
+              TAG,
+              `Failed to close raw fd for ${currentFrom}: ${getErrorMessage(closeError)}`,
+            );
           }
         }
       }
-    } catch (error: any) {
-      error.message =
-        'Copy from resource failed:' +
-        currentFrom +
-        ',' +
-        error.code +
-        ',' +
-        error.message;
-      console.error(error);
-      throw error;
+    } catch (error) {
+      const coded = toUpdateError(error, ERROR_PATCH_FAILED);
+      const message = `Copy from resource failed: ${currentFrom}, ${getErrorMessage(error)}`;
+      logger.error(TAG, message);
+      throw createUpdateError(coded.code, message);
     }
+  }
+
+  /** 去重后并行创建所有目标文件的父目录。 */
+  private async ensureParentDirectories(targets: string[]): Promise<void> {
+    const parentDirs = new Set<string>();
+    for (const target of targets) {
+      const parent = target.substring(0, target.lastIndexOf('/'));
+      if (parent) {
+        parentDirs.add(parent);
+      }
+    }
+    await Promise.all(
+      Array.from(parentDirs).map(dir => this.ensureDirectory(dir)),
+    );
   }
 
   // pdiff 拷贝源内容校验(__diff.json copiesCrc):不符即抛错,整次 patch
@@ -1202,7 +1246,10 @@ export class DownloadTask {
     }
     const actualCrc = NativePatchCore.crc32(content);
     if (actualCrc !== expectedCrc) {
-      throw new Error(`resource content mismatch (crc32): ${from}`);
+      throw createUpdateError(
+        ERROR_PATCH_FAILED,
+        `resource content mismatch (crc32): ${from}`,
+      );
     }
   }
 
@@ -1210,14 +1257,13 @@ export class DownloadTask {
     try {
       await NativePatchCore.cleanupOldEntries(
         params.unzipDirectory,
-        params.hash || '',
-        params.originHash || '',
+        [params.hash, params.originHash].filter(name => !!name),
         3,
       );
-    } catch (error: any) {
-      error.message = 'Cleanup failed:' + error.message;
-      console.error(error);
-      throw error;
+    } catch (error) {
+      const message = `Cleanup failed: ${getErrorMessage(error)}`;
+      logger.error(TAG, message);
+      throw createUpdateError(ERROR_FILE_OPERATION_FAILED, message);
     }
   }
 
@@ -1247,13 +1293,24 @@ export class DownloadTask {
           await this.deleteResumeSidecar(params.targetFile);
           break;
         default:
-          throw Error(`Unknown task type: ${params.type}`);
+          throw createUpdateError(
+            ERROR_INVALID_OPTIONS,
+            `Unknown task type: ${params.type}`,
+          );
       }
       if (isPatchTask) {
         await this.promoteStaging(params);
       }
-    } catch (error: any) {
-      console.error('Task execution failed:', error.message);
+    } catch (rawError) {
+      // 稳定错误码:下载阶段的失败是 DOWNLOAD_FAILED;归档收齐之后的失败
+      // (解压/hpatch/资源拷贝含 copiesCrc 校验/完成记录)一律 PATCH_FAILED,
+      // JS 层 patch-health 遥测据此区分网络失败与补丁失败。已带码的错误
+      // (磁盘空间、参数)原样保留。
+      const error = toUpdateError(
+        rawError,
+        this.downloadPhaseCompleted ? ERROR_PATCH_FAILED : ERROR_DOWNLOAD_FAILED,
+      );
+      logger.error(TAG, `Task execution failed: ${error.message}`);
       if (params.type !== DownloadTaskParams.TASK_TYPE_CLEANUP) {
         try {
           if (params.type === DownloadTaskParams.TASK_TYPE_PLAIN_DOWNLOAD) {
@@ -1271,8 +1328,11 @@ export class DownloadTask {
               await this.deleteArchiveAndSidecar(params.targetFile);
             }
           }
-        } catch (cleanupError: any) {
-          console.error('Cleanup after error failed:', cleanupError.message);
+        } catch (cleanupError) {
+          logger.error(
+            TAG,
+            `Cleanup after error failed: ${getErrorMessage(cleanupError)}`,
+          );
         }
       }
       throw error;

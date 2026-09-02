@@ -45,15 +45,21 @@ jsi::Value CallAsync(
     return CallAsync(rt, turboModule, #method_name, args, count);        \
   }
 
+// Only the constants and the RN event plumbing are synchronous. Every
+// Promise-returning spec method (src/NativePushy.ts) MUST be registered
+// with PUSHY_ASYNC_METHOD: a sync registration converts the ArkTS Promise
+// into an empty jsi object and its rejection becomes an unhandled ArkTS
+// rejection, so JS would report e.g. setNeedUpdate as successful while
+// nothing was switched. scripts/check-native-spec-parity.js enforces this.
 PUSHY_SYNC_METHOD(getConstants)
-PUSHY_SYNC_METHOD(setLocalHashInfo)
-PUSHY_SYNC_METHOD(getLocalHashInfo)
-PUSHY_SYNC_METHOD(setUuid)
-PUSHY_SYNC_METHOD(setNeedUpdate)
-PUSHY_SYNC_METHOD(markSuccess)
 PUSHY_SYNC_METHOD(addListener)
 PUSHY_SYNC_METHOD(removeListeners)
 
+PUSHY_ASYNC_METHOD(setLocalHashInfo)
+PUSHY_ASYNC_METHOD(getLocalHashInfo)
+PUSHY_ASYNC_METHOD(setUuid)
+PUSHY_ASYNC_METHOD(setNeedUpdate)
+PUSHY_ASYNC_METHOD(markSuccess)
 PUSHY_ASYNC_METHOD(reloadUpdate)
 PUSHY_ASYNC_METHOD(restartApp)
 PUSHY_ASYNC_METHOD(downloadPatchFromPpk)

@@ -1,14 +1,19 @@
 import fileIo from '@ohos.file.fs';
 import { util } from '@kit.ArkTS';
 import NativePatchCore from './NativePatchCore';
+import { ERROR_SWITCH_VERSION_FAILED, createUpdateError } from './ErrorCodes';
 
-// ArkTS mirror of cpp/patch_core/install_record.h — keep in sync by hand.
+// ArkTS mirror of cpp/patch_core/install_record.h — keep in sync by hand
+// (harmony/pushy/src/test/check-constant-parity.js asserts the values match).
 // 两阶段安装的完成记录:作为安装最后一步写进 staging 目录,随后 staging
 // 原子 rename 成版本目录;激活前重新校验 bundle 摘要。空文件 = 旧版 SDK
 // 写的历史标记,仍视为完整安装(无摘要可验)。
 export const INSTALL_RECORD_SCHEMA = 1;
 export const INSTALL_RECORD_FILE_NAME = '.pushy-complete';
 export const STAGING_SUFFIX = '.staging';
+// 归档不得携带任何 `.pushy-` 前缀的条目(任意深度):这些名字保留给 SDK 自己
+// 写的记录,与 Android 的规则一致。
+export const RESERVED_ENTRY_PREFIX = '.pushy-';
 export const HARMONY_BUNDLE_FILE_NAME = 'bundle.harmony.js';
 
 export interface InstallRecordData {
@@ -20,6 +25,10 @@ export interface InstallRecordData {
 
 export function stagingDirectoryFor(versionDir: string): string {
   return `${versionDir}${STAGING_SUFFIX}`;
+}
+
+export function isReservedEntryName(name: string): boolean {
+  return name.startsWith(RESERVED_ENTRY_PREFIX);
 }
 
 export function buildInstallRecord(
@@ -63,7 +72,25 @@ export async function writeInstallRecord(
 }
 
 /**
- * 解析记录:文件缺失/畸形返回 null;空文件(历史标记)返回 {}。
+ * 解析记录文本:空串(历史标记)返回 {};畸形/非对象返回 null。纯函数,
+ * 供 readInstallRecord 与单测共用。
+ */
+export function parseInstallRecord(text: string): InstallRecordData | null {
+  if (text.length === 0) {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(text) as InstallRecordData | null;
+    return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed
+      : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * 读取记录:文件缺失/畸形返回 null;空文件(历史标记)返回 {}。
  */
 export function readInstallRecord(versionDir: string): InstallRecordData | null {
   const path = `${versionDir}/${INSTALL_RECORD_FILE_NAME}`;
@@ -78,17 +105,17 @@ export function readInstallRecord(versionDir: string): InstallRecordData | null 
     if (stat.size > 64 * 1024) {
       return null;
     }
-    const text = fileIo.readTextSync(path);
-    const parsed = JSON.parse(text) as InstallRecordData | null;
-    return parsed !== null && typeof parsed === 'object' ? parsed : null;
+    return parseInstallRecord(fileIo.readTextSync(path));
   } catch (e) {
     return null;
   }
 }
 
-/** 存在性判定(启动/去重路径,不算摘要):记录存在且(非历史空文件时)指向本版本。 */
-export function isInstallComplete(versionDir: string, versionHash: string): boolean {
-  const record = readInstallRecord(versionDir);
+/** 记录是否宣告本版本完整安装(历史空记录视为是)。纯函数。 */
+export function isRecordForVersion(
+  record: InstallRecordData | null,
+  versionHash: string,
+): boolean {
   if (record === null) {
     return false;
   }
@@ -100,30 +127,61 @@ export function isInstallComplete(versionDir: string, versionHash: string): bool
   );
 }
 
-/** 激活前校验:记录带摘要时重新计算 bundle 摘要;不通过则抛错说明原因。 */
-export function verifyInstallForActivation(
-  versionDir: string,
+/** 存在性判定(启动/去重路径,不算摘要):记录存在且(非历史空文件时)指向本版本。 */
+export function isInstallComplete(versionDir: string, versionHash: string): boolean {
+  return isRecordForVersion(readInstallRecord(versionDir), versionHash);
+}
+
+/**
+ * 激活前的记录校验(不含摘要):返回需要复核的 bundle 摘要,历史空记录或
+ * 无摘要记录返回空串;记录缺失/不符抛 SWITCH_VERSION_FAILED。纯函数。
+ */
+export function expectedBundleSha256ForActivation(
+  record: InstallRecordData | null,
   versionHash: string,
-  bundlePath: string,
-): void {
-  const record = readInstallRecord(versionDir);
+): string {
   if (record === null) {
-    throw Error(`Bundle version ${versionHash} has no valid completion record.`);
+    throw createUpdateError(
+      ERROR_SWITCH_VERSION_FAILED,
+      `Bundle version ${versionHash} has no valid completion record.`,
+    );
   }
   if (Object.keys(record).length === 0) {
-    return;
+    return '';
   }
   if (
     record.schema !== INSTALL_RECORD_SCHEMA ||
     record.versionHash !== versionHash
   ) {
-    throw Error(`Bundle version ${versionHash} completion record mismatch.`);
+    throw createUpdateError(
+      ERROR_SWITCH_VERSION_FAILED,
+      `Bundle version ${versionHash} completion record mismatch.`,
+    );
   }
-  if (!record.bundleSha256) {
+  return record.bundleSha256 ?? '';
+}
+
+/**
+ * 激活前校验:记录带摘要时在 native 工作线程重新计算 bundle 摘要(整包
+ * 几十 MB,不能在 UI 线程同步算);不通过则抛错说明原因。
+ */
+export async function verifyInstallForActivation(
+  versionDir: string,
+  versionHash: string,
+  bundlePath: string,
+): Promise<void> {
+  const expected = expectedBundleSha256ForActivation(
+    readInstallRecord(versionDir),
+    versionHash,
+  );
+  if (!expected) {
     return;
   }
-  const actual = NativePatchCore.sha256HexFile(bundlePath);
-  if (actual.toLowerCase() !== record.bundleSha256.toLowerCase()) {
-    throw Error(`Bundle version ${versionHash} bundle digest mismatch.`);
+  const actual = await NativePatchCore.sha256HexFileAsync(bundlePath);
+  if (actual.toLowerCase() !== expected.toLowerCase()) {
+    throw createUpdateError(
+      ERROR_SWITCH_VERSION_FAILED,
+      `Bundle version ${versionHash} bundle digest mismatch.`,
+    );
   }
 }

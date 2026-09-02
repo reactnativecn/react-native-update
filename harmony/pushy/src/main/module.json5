@@ -1,4 +1,8 @@
 {
+  // The HAR declares no permissions itself: the network is used by the host
+  // app's process, so the CONSUMER must request ohos.permission.INTERNET in
+  // its entry module.json5 (and should keep cleartextTrafficPermitted:false
+  // in network_config.json). See harmony/pushy/src/README.md.
   "module": {
     "name": "pushy",
     "type": "har",

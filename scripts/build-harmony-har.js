@@ -59,6 +59,7 @@ try {
 }
 
 function main() {
+  syncOhPackageVersion();
   syncHarmonyNativeSources();
   let buildError = null;
 
@@ -181,6 +182,38 @@ function buildHar() {
   }
 
   console.log(`HAR package ready: ${finalPath}`);
+}
+
+// The HAR carries its own version in oh-package.json5. Consumers'
+// oh-package-lock.json5 and diagnostics can only tell installs apart when it
+// equals the npm version, so rewrite it from package.json before assembleHar
+// (scripts/check-release-version.js keeps the committed value honest).
+function syncOhPackageVersion() {
+  const packageJsonPath = path.join(projectRoot, 'package.json');
+  const ohPackagePath = path.join(harmonyModuleDir, 'oh-package.json5');
+  const version = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')).version;
+  if (typeof version !== 'string' || !version) {
+    fail('package.json has no version to write into oh-package.json5');
+  }
+  const content = fs.readFileSync(ohPackagePath, 'utf8');
+  const versionLine = /^(\s*version\s*:\s*)(['"])([^'"]*)\2(\s*,?)/m;
+  const match = content.match(versionLine);
+  if (!match) {
+    fail(
+      `Cannot find a version field in ${relativeToProject(ohPackagePath)}`
+    );
+  }
+  if (match[3] === version) {
+    return;
+  }
+  const updated = content.replace(
+    versionLine,
+    (_, prefix, quote, __, suffix) => `${prefix}${quote}${version}${quote}${suffix}`
+  );
+  fs.writeFileSync(ohPackagePath, updated);
+  console.log(
+    `Updated ${relativeToProject(ohPackagePath)} version ${match[3]} -> ${version}`
+  );
 }
 
 function syncHarmonyNativeSources() {
