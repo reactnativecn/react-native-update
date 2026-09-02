@@ -65,3 +65,17 @@ jobs:
       # sync with the TS side by src/__tests__/flowVectors.test.ts (js-test).
       - name: Replay flow golden vectors against the C++ port
         run: SANITIZE=1 ./scripts/test-update-flow-core.sh
+
+      # patch_core consumes the untrusted bytes (archives, manifests, HBC
+      # patches); it must run under ASan/UBSan on every change.
+      - name: Run patch_core unit tests (sanitized)
+        run: SANITIZE=1 ./scripts/test-patch-core.sh
+
+      # Short bounded fuzz pass over the two untrusted-input parsers
+      # (flow_json, hbc_transform_wire). Skips with a notice when clang or
+      # libFuzzer is unavailable on the runner.
+      - name: Fuzz parsers (bounded)
+        run: |
+          sudo apt-get install -y clang
+          FUZZ=1 ./scripts/test-update-flow-core.sh
+          FUZZ=1 ./scripts/test-patch-core.sh

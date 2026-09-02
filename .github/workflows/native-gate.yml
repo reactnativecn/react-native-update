@@ -1,15 +1,16 @@
 name: native-gate
 
 # One status check to make required in branch protection: "native-required".
-# It turns green only when lint, test and every native E2E workflow that ran
-# for the commit succeeded. The E2E workflows are path-filtered, so "no run
-# exists for this commit" means the filter skipped it (runs are created at
-# event time, before any of them completes) and does not block; a run that
-# exists must succeed. e2e-harmony is workflow_dispatch-only (no hosted
-# HarmonyOS runner) and is therefore not part of the gate.
+# It turns green only when lint, test and every native workflow that ran
+# for the commit succeeded. The E2E and harmony-build workflows are
+# path-filtered, so "no run exists for this commit" means the filter skipped
+# it (runs are created at event time, before any of them completes) and does
+# not block; a run that exists must succeed. e2e-harmony is
+# workflow_dispatch-only (no hosted HarmonyOS runner) and is therefore not
+# part of the gate; harmony-build (HAR compile in the pinned container) is.
 on:
   workflow_run:
-    workflows: [lint, test, e2e-android, e2e-ios]
+    workflows: [lint, test, e2e-android, e2e-ios, harmony-build]
     types: [completed]
 
 permissions:
@@ -27,7 +28,7 @@ jobs:
             const sha = context.payload.workflow_run.head_sha;
             const { owner, repo } = context.repo;
             const alwaysRequired = ['lint', 'test'];
-            const requiredWhenPresent = ['e2e-android', 'e2e-ios'];
+            const requiredWhenPresent = ['e2e-android', 'e2e-ios', 'harmony-build'];
             const runs = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, {
               owner, repo, head_sha: sha, per_page: 100,
             });

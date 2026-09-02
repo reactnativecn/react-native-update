@@ -68,6 +68,17 @@ Status ApplyPatchFromFileSource(
     const FileSourcePatchOptions& options,
     const BundlePatcher& bundle_patcher = DefaultBundlePatcher());
 
+// Removes every non-dot entry under root_dir older than max_age_days whose
+// name is not in keep_names. Callers must include every version that may
+// still be in use: the persisted current/last versions AND the version this
+// process booted from (two switches without a restart otherwise evict the
+// running bundle while its on-demand assets are still being served).
+Status CleanupOldEntries(
+    const std::string& root_dir,
+    const std::vector<std::string>& keep_names,
+    int max_age_days,
+    std::time_t now = 0);
+
 Status CleanupOldEntries(
     const std::string& root_dir,
     const std::string& keep_current,

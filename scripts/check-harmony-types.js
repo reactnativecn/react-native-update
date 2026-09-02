@@ -49,20 +49,27 @@ function findSdkEtsDir() {
   return null;
 }
 
+// On developer machines without DevEco the check skips; in the HarmonyOS CI
+// container (HARMONY_TYPECHECK_REQUIRED=1) a missing SDK or oh_modules is a
+// misconfiguration and must fail instead of silently passing.
+const required = process.env.HARMONY_TYPECHECK_REQUIRED === '1';
+const skipOrFail = (reason) => {
+  if (required) {
+    console.error(`check-harmony-types: ${reason} (required in CI).`);
+    process.exit(1);
+  }
+  console.log(`check-harmony-types: ${reason}, skipping harmony type check.`);
+  process.exit(0);
+};
+
 const sdkEts = findSdkEtsDir();
 if (!sdkEts) {
-  console.log(
-    'check-harmony-types: no DevEco/OpenHarmony SDK found ' +
-      '(set DEVECO_SDK_HOME to enable), skipping harmony type check.'
+  skipOrFail(
+    'no DevEco/OpenHarmony SDK found (set DEVECO_SDK_HOME to enable)'
   );
-  process.exit(0);
 }
 if (!fs.existsSync(ohModules)) {
-  console.log(
-    'check-harmony-types: harmony/pushy/oh_modules not installed, ' +
-      'skipping harmony type check.'
-  );
-  process.exit(0);
+  skipOrFail('harmony/pushy/oh_modules not installed');
 }
 
 const config = {

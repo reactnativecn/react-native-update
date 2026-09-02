@@ -15,6 +15,23 @@ if (tag !== expected && tag !== pkg.version) {
   );
   process.exit(1);
 }
+
+// The Harmony HAR carries its own version (oh-package.json5); consumers'
+// oh-package-lock.json5 and diagnostics can only tell installs apart when it
+// tracks package.json. scripts/build-harmony-har.js rewrites it before
+// assembleHar, and this check keeps the committed value from drifting.
+const fs = require('fs');
+const path = require('path');
+const ohPackagePath = path.join(__dirname, '..', 'harmony/pushy/oh-package.json5');
+const ohPackage = fs.readFileSync(ohPackagePath, 'utf8');
+const ohVersion = (ohPackage.match(/^\s*version\s*:\s*['"]([^'"]+)['"]/m) ||
+  [])[1];
+if (ohVersion !== pkg.version) {
+  console.error(
+    `check-release-version: harmony/pushy/oh-package.json5 version ${ohVersion} does not match package.json version ${pkg.version}`
+  );
+  process.exit(1);
+}
 console.log(
-  `check-release-version: ${tag} matches package.json ${pkg.version}`
+  `check-release-version: ${tag} matches package.json and oh-package.json5 ${pkg.version}`
 );

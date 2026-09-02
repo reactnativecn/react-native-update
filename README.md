@@ -14,6 +14,43 @@ See the docs:
 
 - English docs: <https://cresc.dev/docs/getting-started>
 
+## Options reference
+
+Every option below is declared on `ClientOptions` (exported from the package
+root) and documented in full at <https://cresc.dev/docs/api>. Runtime changes go
+through `client.setOptions(...)`.
+
+| Option | Default | What it controls |
+| --- | --- | --- |
+| `appKey` | required | App identity on the update platform |
+| `server` | Pushy/Cresc preset | `main` endpoints and `queryUrls` for remote endpoint discovery (https only) |
+| `updateStrategy` | `alertUpdateAndIgnoreError` (`alwaysAlert` in dev) | `alwaysAlert` / `alertUpdateAndIgnoreError` / `silentAndNow` / `silentAndLater` / `null` |
+| `checkStrategy` | `both` | `onAppStart` / `onAppResume` / `both` / `null` (no automatic check; the native cold-start check still downloads but never activates) |
+| `autoMarkSuccess` | `true` | Mark the running update healthy from the Provider |
+| `autoMarkSuccessDelayMs` | `1000` | Delay before the automatic mark; raise it when critical modules load late |
+| `healthCheck` | – | Consulted when the auto-mark timer fires; return `false` to keep crash protection armed |
+| `beforeCheckUpdate` / `afterCheckUpdate` | – | Veto a check / observe its final state |
+| `beforeDownloadUpdate` / `afterDownloadUpdate` | – | Veto a download / veto the activation after it |
+| `beforeReload` | – | Veto a `switchVersion` / `restartApp` reload |
+| `onPackageExpired` | – | Veto the "binary too old" flow (`downloadUrl`) |
+| `maxRetries` | `3` | Download retries with jittered backoff |
+| `overridePackageVersion` | – | Report a different binary version to the server |
+| `dismissErrorAfter` | – | Auto-clear `lastError` after N ms |
+| `locale` | `zh` (Pushy) / `en` (Cresc) | Language of alerts and messages |
+| `debug` | `false` | Enable update operations in development builds and verbose SDK logging |
+| `throwError` | `false` | Rethrow pipeline errors to the caller (they always reach `onError`) |
+| `disableTelemetry` | `false` | Stop lifecycle events (download/patch failure, rollback, mark success) reaching the server |
+| `disableErrorReporting` | `false` | Stop JS exception reporting (see below) |
+| `disableNativeCheck` | `false` | Turn off the native cold-start check that rescues bricked devices |
+| `testChannel` | `true` | Honour `__rnPushyVersionHash` deep links / QR codes; set `false` in production builds |
+| `logger` | – | Receives every SDK event (`type`, `data`) for your own logging |
+
+Beyond the Provider hooks, the client exposes `onError(listener)`,
+`captureException(error, context)`, `resetToPackagedBundle({ restart })`,
+`getUpdateMetadata()` / `attachToSentry()` / `attachToCrashlytics()` for crash
+reporters, and `useUpdateProgress()` for progress bars that must not re-render
+the whole tree.
+
 ## JS error reporting
 
 The SDK reports uncaught and manually captured JavaScript errors against the

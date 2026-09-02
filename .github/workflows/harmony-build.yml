@@ -1,0 +1,90 @@
+name: harmony-build
+
+# Compiles the HarmonyOS HAR on pull requests that touch its inputs, in the
+# same pinned container publish.yml uses. Until this job existed the HAR was
+# only compiled at release time, so an ArkTS type error, a broken NAPI export
+# or a stale C++ method table (NATIVE_CHECK_FOLLOWUPS.md, 2026-08-13) was
+# first seen when publishing. assembleHar runs the ArkTS compiler over the
+# .ets/.ts sources, which is the real type check; check-harmony-types.js
+# adds a strict tsc pass over the .ts sources and must not skip here.
+on:
+  pull_request:
+    branches:
+      - master
+    paths:
+      - '.github/workflows/harmony-build.yml'
+      - '.gitmodules'
+      - 'package.json'
+      - 'bun.lock'
+      - 'harmony/**'
+      - 'cpp/**'
+      - 'android/jni/**'
+      - 'scripts/build-harmony-har.js'
+      - 'scripts/check-harmony-types.js'
+      - 'scripts/check-native-spec-parity.js'
+      - 'src/NativePushy.ts'
+  push:
+    branches:
+      - master
+    paths:
+      - '.github/workflows/harmony-build.yml'
+      - '.gitmodules'
+      - 'package.json'
+      - 'bun.lock'
+      - 'harmony/**'
+      - 'cpp/**'
+      - 'android/jni/**'
+      - 'scripts/build-harmony-har.js'
+      - 'scripts/check-harmony-types.js'
+      - 'scripts/check-native-spec-parity.js'
+      - 'src/NativePushy.ts'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  harmony-build:
+    runs-on: ubuntu-latest
+    # Keep the digest in sync with publish.yml; bump both deliberately.
+    container: ghcr.io/sanchuanhehe/harmony-next-pipeline-docker/harmonyos-ci-image:latest@sha256:2836142b7b6ae8837ad0e36cacc650f00e8c88f55b4e9f34be66cc98a731c5da
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - name: Configure git safe.directory
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git submodule foreach --recursive 'git config --global --add safe.directory "$toplevel/$sm_path"'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+
+      - name: Verify JS <-> native method parity
+        run: node scripts/check-native-spec-parity.js
+
+      - name: Verify constant mirrors match the C++ headers
+        run: node harmony/pushy/src/test/check-constant-parity.js
+
+      - name: Build Harmony HAR (release)
+        run: npm run build:harmony-har -- --build-mode release
+
+      - name: Verify Harmony HAR artifact
+        run: test -f harmony/pushy.har
+
+      - name: Type-check Harmony TS sources (required)
+        shell: bash
+        run: |
+          # build-harmony-har.js derives DEVECO_SDK_HOME from the DevEco
+          # install when unset; mirror that so the strict tsc pass finds
+          # the @ohos/@kit declarations instead of skipping.
+          if [ -z "${DEVECO_SDK_HOME:-}" ]; then
+            hv="$(command -v hvigorw || true)"
+            if [ -n "$hv" ]; then
+              export DEVECO_SDK_HOME="$(cd "$(dirname "$hv")/../../.." && pwd)/sdk"
+            fi
+          fi
+          echo "DEVECO_SDK_HOME=${DEVECO_SDK_HOME:-<unset>}"
+          HARMONY_TYPECHECK_REQUIRED=1 node scripts/check-harmony-types.js

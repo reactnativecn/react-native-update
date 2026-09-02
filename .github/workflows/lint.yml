@@ -33,3 +33,8 @@ jobs:
 
       - name: Verify publish file list
         run: node scripts/check-packlist.js
+
+      # Every src/NativePushy.ts method must be exported by all four native
+      # bindings, with the right sync/async kind on Harmony.
+      - name: Verify JS <-> native method parity
+        run: node scripts/check-native-spec-parity.js

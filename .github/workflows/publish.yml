@@ -45,11 +45,17 @@ jobs:
             exit 0
           fi
           echo "Previous tag is $PREV_TAG"
-          if git diff --name-only "$PREV_TAG" HEAD | grep -q '^harmony/'; then
-            echo "harmony directory changed."
+          # The HAR embeds librnupdate.so compiled from cpp/patch_core,
+          # cpp/update_flow_core, android/jni/hpatch.c and the HDiffPatch/lzma
+          # submodules (harmony/pushy/src/main/cpp/CMakeLists.txt), so any of
+          # those changing must rebuild it too — reusing the previous HAR
+          # would ship Harmony with an older native core than Android/iOS.
+          if git diff --name-only "$PREV_TAG" HEAD \
+              | grep -qE '^(harmony|cpp|android/jni)/|^scripts/build-harmony-har\.js$|^\.gitmodules$'; then
+            echo "harmony HAR inputs changed."
             echo "changed=true" >> $GITHUB_OUTPUT
           else
-            echo "harmony directory has NO changes."
+            echo "harmony HAR inputs have NO changes."
             echo "changed=false" >> $GITHUB_OUTPUT
           fi
 
