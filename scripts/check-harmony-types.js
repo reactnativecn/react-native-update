@@ -19,6 +19,18 @@ const ohModules = path.join(harmonyDir, 'pushy', 'oh_modules');
 const generatedConfigPath = path.join(harmonyDir, '.tsconfig.harmony.json');
 
 function findSdkEtsDir() {
+  // CI containers lay the SDK out differently from DevEco; let them point
+  // straight at the `ets` directory (the one containing `api/` and `kits/`).
+  const explicit = process.env.HARMONY_SDK_ETS_DIR;
+  if (explicit) {
+    if (fs.existsSync(path.join(explicit, 'api'))) {
+      return explicit;
+    }
+    console.error(
+      `check-harmony-types: HARMONY_SDK_ETS_DIR=${explicit} has no api/ dir.`
+    );
+    return null;
+  }
   const bases = [];
   if (process.env.DEVECO_SDK_HOME) {
     bases.push(process.env.DEVECO_SDK_HOME);
