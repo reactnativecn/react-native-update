@@ -306,7 +306,7 @@ NATIVE_CHECK_FOLLOWUPS 中两项已在代码里修复、可关闭："iOS 合流�
 | Android | 2.1–2.13 与 P4 全部；新增 25 项纯 JVM JUnit | 无法在本环境跑 Gradle/R8：`build.gradle` 与 `proguard.pro` 需在一次 `minifyEnabled true` 的 release 构建里确认 diff/pdiff 仍可应用 |
 | iOS | 3.1–3.12 与 P4 全部；`PrivacyInfo.xcprivacy` 随 pod 发布 | 3.13 文件拆分、3.14 逻辑下沉 C++ 未做（无 Xcode 无法验证大重构）；两处改动需真机/模拟器回归：defaults key 迁移、`use_frameworks!` 下 `buildTime` 回退 |
 | C++ | 4.1–4.14 与 P4 全部；`.so` 已用 NDK 28.2.13676358 重建 | `buildCheckFingerprint` 未移植到 C++（原生各端未复用它） |
-| 鸿蒙 | 5.2–5.15 与 P4 全部；`oh-package.json5` 版本对齐 | 5.7 的 RCP 重定向控制（HMS-only）未做；`BuildFlags.ts` 依赖 hvigor 生成的 `BuildProfile` 别名，首次真实编译在 `harmony-build` CI；`transferArchive` 大函数未拆 |
+| 鸿蒙 | 5.2–5.15 与 P4 全部；`oh-package.json5` 版本对齐 | 5.7 的 RCP 重定向控制（HMS-only）未做；HAR 内无法引用 hvigor 生成的 `BuildProfile`（首次 CI 编译已证实），DEBUG 只取宿主 `isDebugModeEnabled`；`transferArchive` 大函数未拆 |
 | CI/发布 | 4.3、5.1、5.8、6.1、6.2、6.5、6.7 全部；新增 `check-native-spec-parity.js`、`harmony-build.yml`、`FUZZ=1` 步骤 | 6.4（不再提交 `.so` / 迁 LFS）与 6.6（设计文档搬家）未做，属流程决策；`harmony-build` 首次运行时若容器未暴露 `DEVECO_SDK_HOME`，type-check 步骤会失败并提示 |
 
 发版前提醒：鸿蒙 HAR 由 publish 在容器内重建；Android `.so` 已随本分支提交。iOS 的 `PrivacyInfo.xcprivacy` 与 defaults key 迁移、Android 的 old-arch Promise 签名属于行为变化，发版说明需提及。
