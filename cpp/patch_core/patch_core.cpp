@@ -10,6 +10,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <vector>
 
 #include "hbc_transform.h"
@@ -591,6 +592,16 @@ Status CleanupOldEntries(
     const std::string& keep_previous,
     int max_age_days,
     std::time_t now) {
+  return CleanupOldEntries(
+      root_dir, std::vector<std::string>{keep_current, keep_previous},
+      max_age_days, now);
+}
+
+Status CleanupOldEntries(
+    const std::string& root_dir,
+    const std::vector<std::string>& keep_names,
+    int max_age_days,
+    std::time_t now) {
   DIR* dir = opendir(root_dir.c_str());
   if (!dir) {
     if (errno == ENOENT) {
@@ -609,7 +620,8 @@ Status CleanupOldEntries(
     if (name == "." || name == ".." || (!name.empty() && name[0] == '.')) {
       continue;
     }
-    if (name == keep_current || name == keep_previous) {
+    if (std::find(keep_names.begin(), keep_names.end(), name) !=
+        keep_names.end()) {
       continue;
     }
 

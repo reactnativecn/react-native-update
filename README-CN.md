@@ -16,6 +16,41 @@
 
 请查看[文档](https://pushy.reactnative.cn/docs/getting-started.html)
 
+### 配置项速查
+
+下表中的每一项都声明在包根导出的 `ClientOptions` 上，完整说明见
+<https://pushy.reactnative.cn/docs/api>。运行时修改统一走 `client.setOptions(...)`。
+
+| 配置项 | 默认值 | 作用 |
+| --- | --- | --- |
+| `appKey` | 必填 | 应用在热更新平台上的身份 |
+| `server` | Pushy/Cresc 预设 | `main` 检查端点与 `queryUrls` 远程端点发现（仅接受 https） |
+| `updateStrategy` | `alertUpdateAndIgnoreError`（开发环境 `alwaysAlert`） | `alwaysAlert` / `alertUpdateAndIgnoreError` / `silentAndNow` / `silentAndLater` / `null` |
+| `checkStrategy` | `both` | `onAppStart` / `onAppResume` / `both` / `null`（不自动检查；原生冷启动检测仍会下载但不会自行激活） |
+| `autoMarkSuccess` | `true` | 由 Provider 自动标记当前热更版本健康 |
+| `autoMarkSuccessDelayMs` | `1000` | 自动标记前的延迟；关键模块加载较晚时应调大 |
+| `healthCheck` | – | 自动标记计时器触发时调用，返回 `false` 则保持崩溃保护 |
+| `beforeCheckUpdate` / `afterCheckUpdate` | – | 否决一次检查 / 观察检查的最终状态 |
+| `beforeDownloadUpdate` / `afterDownloadUpdate` | – | 否决下载 / 否决下载后的激活 |
+| `beforeReload` | – | 否决 `switchVersion` / `restartApp` 的重载 |
+| `onPackageExpired` | – | 否决"原生包过旧"流程（`downloadUrl`） |
+| `maxRetries` | `3` | 下载重试次数（带抖动退避） |
+| `overridePackageVersion` | – | 向服务端上报另一个原生包版本 |
+| `dismissErrorAfter` | – | N 毫秒后自动清除 `lastError` |
+| `locale` | `zh`（Pushy）/ `en`（Cresc） | 弹窗与提示语言 |
+| `debug` | `false` | 允许在开发构建中执行更新操作，并开启 SDK 详细日志 |
+| `throwError` | `false` | 把流程错误抛给调用方（错误总会到达 `onError`） |
+| `disableTelemetry` | `false` | 不向服务端上报生命周期事件（下载/补丁失败、回滚、标记成功） |
+| `disableErrorReporting` | `false` | 关闭 JS 错误上报（见下节） |
+| `disableNativeCheck` | `false` | 关闭原生冷启动检测（救砖通道） |
+| `testChannel` | `true` | 是否响应 `__rnPushyVersionHash` 深链/二维码；生产构建建议设为 `false` |
+| `logger` | – | 接收 SDK 全部事件（`type`、`data`）用于自定义日志 |
+
+除 Provider 钩子外，client 还提供 `onError(listener)`、
+`captureException(error, context)`、`resetToPackagedBundle({ restart })`、
+面向崩溃上报的 `getUpdateMetadata()` / `attachToSentry()` / `attachToCrashlytics()`，
+以及供进度条单独订阅、避免整棵树重渲染的 `useUpdateProgress()`。
+
 ### JS 错误上报
 
 SDK 可以把未捕获错误和手动捕获的 JavaScript 错误关联到当前实际运行的热更版本。
