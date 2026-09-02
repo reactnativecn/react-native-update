@@ -20,7 +20,7 @@ import {
 } from './core';
 import { dedupeEndpoints, executeEndpointFallback } from './endpoint';
 import {
-  asUpdateErrorCode,
+  readErrorCode,
   toUpdateError,
   UpdateError,
   type UpdateErrorCode,
@@ -65,6 +65,7 @@ import {
   log,
   noop,
   promiseAny,
+  setDebugLogging,
   testUrls,
   warn,
 } from './utils';
@@ -105,10 +106,13 @@ const cloneServerConfig = (server: UpdateServerConfig): UpdateServerConfig => ({
   queryUrls: server.queryUrls ? [...server.queryUrls] : undefined,
 });
 
-// Persist an object (rather than an empty string) so every native bridge keeps
-// accepting the payload while the orchestrators read `disabled` and skip the
-// cold-start check entirely.
-const NATIVE_CONFIG_DISABLED_JSON = '{"disabled":true}';
+// How long after a resolved reloadUpdate the process may still be alive before
+// the switch is considered not to have restarted the app (see switchVersion).
+const RELOAD_WATCHDOG_MS = 5000;
+
+// Non-2xx check responses are usually HTML error pages; keep only the head
+// for the error message (it can end up in an alert) and the logger.
+const MAX_HTTP_ERROR_TEXT = 200;
 
 const excludeConfiguredEndpoints = (
   endpoints: string[],
@@ -226,13 +230,11 @@ export class Pushy {
       options.locale ?? (this.clientType === 'Pushy' ? 'zh' : 'en')
     );
 
-    if (Platform.OS === 'ios' || Platform.OS === 'android') {
-      if (!options.appKey) {
-        throw new UpdateError(
-          i18n.t('error_appkey_required'),
-          'APPKEY_REQUIRED'
-        );
-      }
+    // Every native platform (Harmony included) needs the appKey; without it
+    // the check URL is `/checkUpdate/` and the failure would surface as an
+    // opaque 404 instead of this explicit code.
+    if (Platform.OS !== 'web' && !options.appKey) {
+      throw new UpdateError(i18n.t('error_appkey_required'), 'APPKEY_REQUIRED');
     }
 
     this.setOptions(options);
@@ -276,8 +278,15 @@ export class Pushy {
         if (key === 'logger') {
           this.loggerPromise.resolve();
         }
+        if (key === 'locale') {
+          // The constructor applies the initial locale; a runtime switch (or
+          // the fast-refresh re-creation path, which only goes through here)
+          // must apply just the same.
+          i18n.setLocale(value as 'zh' | 'en');
+        }
       }
     }
+    setDebugLogging(!!this.options.debug);
     this.optionsVersion++;
     for (const listener of this.optionsListeners) {
       try {
@@ -424,8 +433,16 @@ export class Pushy {
     ) {
       return;
     }
-    const configJson =
-      this.getNativeConfigJson() ?? NATIVE_CONFIG_DISABLED_JSON;
+    const configJson = this.getNativeConfigJson();
+    if (!configJson) {
+      // No usable config (empty appKey / no endpoints) is almost always a
+      // transient state while options are being assembled. Persisting a
+      // disabled config over the last good one would switch off the
+      // cold-start rescue for every later launch, so keep what native has.
+      // (Web and older natives never reach this point — no method.)
+      log('native check config unusable, keeping the last synced config');
+      return;
+    }
     // Always record the latest desired value, even when it matches the last
     // completed write. Example: A synced -> B in flight -> options revert to
     // A. Comparing only with synced(A) would drop the revert and leave native
@@ -661,10 +678,14 @@ export class Pushy {
       // report fires in the constructor before the user configures one), but
       // give up after a bound instead of retaining the closure forever when
       // no logger is ever provided.
+      let timer: ReturnType<typeof setTimeout> | undefined;
       await Promise.race([
         this.loggerPromise.promise,
-        new Promise((resolve) => setTimeout(resolve, 10 * 1000)),
+        new Promise((resolve) => {
+          timer = setTimeout(resolve, 10 * 1000);
+        }),
       ]);
+      clearTimeout(timer);
     }
     const { logger = noop, appKey } = this.options;
     const overridePackageVersion = this.options.overridePackageVersion;
@@ -850,23 +871,39 @@ export class Pushy {
       return [];
     }
     try {
-      const resp = await promiseAny(
-        server.queryUrls.map((queryUrl) =>
-          fetchWithTimeout(queryUrl, {}, DEFAULT_FETCH_TIMEOUT_MS)
-        )
+      // Race the parsed lists, not the raw responses: fetch resolves for
+      // 404/403/5xx and anti-bot HTML too, and this path only runs once the
+      // main endpoints are already failing — a mirror that answers first
+      // with an error page must not beat the healthy one.
+      const remoteEndpoints = await promiseAny(
+        server.queryUrls.map(async (queryUrl) => {
+          const resp = await fetchWithTimeout(
+            queryUrl,
+            {},
+            DEFAULT_FETCH_TIMEOUT_MS
+          );
+          if (!resp.ok) {
+            throw Error(`${queryUrl}: ${resp.status}`);
+          }
+          const list: unknown = await resp.json();
+          if (!Array.isArray(list)) {
+            throw Error(`${queryUrl}: not an endpoint list`);
+          }
+          return list;
+        })
       );
-      const remoteEndpoints = await resp.json();
       log('fetch endpoints:', remoteEndpoints);
-      if (Array.isArray(remoteEndpoints)) {
-        return excludeConfiguredEndpoints(
-          dedupeEndpoints(
-            remoteEndpoints.filter(
-              (endpoint): endpoint is string => typeof endpoint === 'string'
-            )
-          ),
-          this.getConfiguredCheckEndpoints()
-        );
-      }
+      return excludeConfiguredEndpoints(
+        dedupeEndpoints(
+          remoteEndpoints.filter(
+            // The list is fetched from a public mirror; it may add
+            // endpoints but never move the check outside TLS.
+            (endpoint): endpoint is string =>
+              typeof endpoint === 'string' && /^https:\/\//i.test(endpoint)
+          )
+        ),
+        this.getConfiguredCheckEndpoints()
+      );
     } catch (e) {
       log('failed to fetch endpoints from: ', server.queryUrls, e);
     }
@@ -884,7 +921,7 @@ export class Pushy {
     );
 
     if (!resp.ok) {
-      const respText = await resp.text();
+      const respText = (await resp.text()).slice(0, MAX_HTTP_ERROR_TEXT);
       throw new UpdateError(
         this.t('error_http_status', {
           status: resp.status,
@@ -977,12 +1014,14 @@ export class Pushy {
       if (ageSeconds < 0 || ageSeconds > 120) {
         return undefined;
       }
-      const result = JSON.parse(entry.body);
-      if (!result || typeof result !== 'object') {
+      const result: unknown = JSON.parse(entry.body);
+      // Same schema gate as the network path: a native old enough to have
+      // cached a 200 `{"error": ...}` must not turn it into "no update".
+      if (!isValidCheckResult(result)) {
         return undefined;
       }
       log('reusing native check response cache');
-      return result as CheckResult;
+      return result;
     } catch {
       return undefined;
     }
@@ -1017,42 +1056,70 @@ export class Pushy {
       this.report({ type: 'crashRescue' });
     }
   };
-  switchVersion = async (hash: string) => {
+  /**
+   * Reload into a downloaded version. Resolves true once the native reload
+   * was requested, false when the call was ignored (not the downloaded hash,
+   * a switch already in progress, beforeReload declined, dev without debug).
+   */
+  switchVersion = async (hash: string): Promise<boolean> => {
     if (!this.assertDebug('switchVersion()')) {
-      return;
+      return false;
     }
-    if (assertHash(hash) && !sharedState.applyingUpdate) {
-      log(`switchVersion: ${hash}`);
-      sharedState.applyingUpdate = true;
-      try {
-        if (!(await this.runBeforeReload({ type: 'switchVersion', hash }))) {
-          sharedState.applyingUpdate = false;
-          return;
-        }
-      } catch (e) {
-        sharedState.applyingUpdate = false;
-        // A throw from the user's beforeReload hook is business-code failure,
-        // not an update-pipeline one: give it a distinct code so telemetry
-        // excludes it from the server-side patch-health stats.
-        const err = toUpdateError(e, 'USER_HOOK_ERROR');
-        this.emitError(err, 'errorSwitchVersion', {
-          data: { newVersion: hash },
-        });
-        throw err;
-      }
-      try {
-        return await PushyModule.reloadUpdate({ hash });
-      } catch (e) {
-        // reloadUpdate can reject (e.g. bundle missing); reset the flag so a
-        // later retry is not permanently blocked by a stuck applyingUpdate.
-        sharedState.applyingUpdate = false;
-        const err = toUpdateError(e, 'SWITCH_VERSION_FAILED');
-        this.emitError(err, 'errorSwitchVersion', {
-          data: { newVersion: hash },
-        });
-        throw err;
-      }
+    if (!assertHash(hash)) {
+      return false;
     }
+    if (sharedState.applyingUpdate) {
+      log(`switchVersion: ${hash} ignored, a switch is already in progress`);
+      return false;
+    }
+    log(`switchVersion: ${hash}`);
+    sharedState.applyingUpdate = true;
+    try {
+      if (!(await this.runBeforeReload({ type: 'switchVersion', hash }))) {
+        sharedState.applyingUpdate = false;
+        return false;
+      }
+    } catch (e) {
+      sharedState.applyingUpdate = false;
+      // A throw from the user's beforeReload hook is business-code failure,
+      // not an update-pipeline one: give it a distinct code so telemetry
+      // excludes it from the server-side patch-health stats.
+      const err = toUpdateError(e, 'USER_HOOK_ERROR');
+      this.emitError(err, 'errorSwitchVersion', {
+        data: { newVersion: hash },
+      });
+      throw err;
+    }
+    try {
+      await PushyModule.reloadUpdate({ hash });
+    } catch (e) {
+      // reloadUpdate can reject (e.g. bundle missing); reset the flag so a
+      // later retry is not permanently blocked by a stuck applyingUpdate.
+      sharedState.applyingUpdate = false;
+      const err = toUpdateError(e, 'SWITCH_VERSION_FAILED');
+      this.emitError(err, 'errorSwitchVersion', {
+        data: { newVersion: hash },
+      });
+      throw err;
+    }
+    // A resolved reloadUpdate normally tears this JS context down right away.
+    // iOS has been seen resolving without restarting (89c638e); a stuck
+    // applyingUpdate would then silently swallow every later switchVersion,
+    // so release it once the process has outlived the reload and tell the
+    // logger (RESTART_FAILED: restart mechanics, not patch health).
+    setTimeout(() => {
+      if (!sharedState.applyingUpdate) {
+        return;
+      }
+      sharedState.applyingUpdate = false;
+      this.report({
+        type: 'errorSwitchVersion',
+        code: 'RESTART_FAILED',
+        message: 'reloadUpdate resolved but the app did not restart',
+        data: { newVersion: hash },
+      });
+    }, RELOAD_WATCHDOG_MS);
+    return true;
   };
 
   switchVersionLater = async (hash: string) => {
@@ -1153,6 +1220,7 @@ export class Pushy {
       },
       body,
     };
+    let respJsonPromise: Promise<CheckResult> | undefined;
     try {
       this.report({
         type: 'checking',
@@ -1162,7 +1230,7 @@ export class Pushy {
       // (§10.3); reuse it instead of re-checking. The read happens INSIDE
       // the promise so no await lands between the dedup window above and the
       // lastRespJson assignment below (the JS2-1 double-send lesson).
-      const respJsonPromise = (async (): Promise<CheckResult> => {
+      respJsonPromise = (async (): Promise<CheckResult> => {
         // While bundleHash prefetch is still pending, the JS request omits
         // that key whereas the native request always includes its synchronously
         // computed value. That narrow first-launch window intentionally misses
@@ -1190,9 +1258,12 @@ export class Pushy {
       return result;
     } catch (e: any) {
       // A failed check must not keep vouching for an older response: clear
-      // the dedup slot so the next call re-asks the server.
-      this.lastRespJson = undefined;
-      this.lastCheckFingerprint = undefined;
+      // the dedup slot so the next call re-asks the server — unless a newer
+      // check already owns the slot, which this failure says nothing about.
+      if (this.lastRespJson === respJsonPromise) {
+        this.lastRespJson = undefined;
+        this.lastCheckFingerprint = undefined;
+      }
       const err = toUpdateError(e, 'CHECK_FAILED');
       this.emitError(err, 'errorChecking', {
         message: err.message || this.t('error_cannot_connect_server'),
@@ -1350,8 +1421,17 @@ export class Pushy {
     }
     const maxRetries = Math.max(0, Math.floor(this.options.maxRetries ?? 3));
     let succeeded = '';
-    let lastError: any;
+    let lastError: UpdateError | undefined;
     const errorMessages: string[] = [];
+    // A strategy whose bytes arrived but could not be applied fails the same
+    // way on every retry (same artifact, same base): remember it — with its
+    // message, so the final report still names it — and skip it on later
+    // attempts instead of downloading and patching it again.
+    const exhaustedStrategies = new Map<DownloadStrategyType, string>();
+    // Whether any strategy, in any attempt, failed at the patch stage. The
+    // downloadFallback report carries that as its code even when a later,
+    // unrelated transport failure happened to be the last error seen.
+    let patchFailed = false;
 
     // The ordered attempts come from decideDownload (the pure decision layer);
     // this side only executes them: probe candidate URLs, run the matching
@@ -1394,6 +1474,7 @@ export class Pushy {
         log(`retry attempt ${attempt}/${maxRetries}, waiting ${backoffMs}ms`);
         await new Promise((r) => setTimeout(r, backoffMs));
         errorMessages.length = 0;
+        errorMessages.push(...exhaustedStrategies.values());
         lastError = undefined;
         succeeded = '';
       }
@@ -1408,6 +1489,9 @@ export class Pushy {
         if (succeeded) {
           break;
         }
+        if (exhaustedStrategies.has(type)) {
+          continue;
+        }
         // The HEAD race only ranks mirrors; it is not proof that a mirror can
         // serve the whole artifact (CDNs answer HEAD and GET differently, and
         // a transfer can die mid-stream). Every mirror of the same artifact
@@ -1420,30 +1504,43 @@ export class Pushy {
             await runners[type](url);
             succeeded = type;
             break;
-          } catch (e: any) {
+          } catch (e: unknown) {
+            // The native rejection's stable code (e.g. PATCH_FAILED vs
+            // DOWNLOAD_FAILED — telemetry classifies on it) may sit on the
+            // `code` property or, from bridges that cannot set it, as a
+            // `[CODE] ` message prefix. Either way it survives into the
+            // i18n-wrapped error together with the original as cause.
+            const { code, message } = readErrorCode(e);
             const errorMessage = this.t(errorKeys[type], {
-              message: e.message,
+              message: message || String(e ?? ''),
             });
             errorMessages.push(errorMessage);
-            // Keep the i18n message for display, but preserve the native
-            // rejection's stable code (e.g. PATCH_FAILED vs DOWNLOAD_FAILED —
-            // telemetry classifies on it) and the original error as cause.
             lastError = new UpdateError(
               errorMessage,
-              asUpdateErrorCode(e?.code) ?? 'DOWNLOAD_FAILED',
-              { cause: e }
+              code ?? 'DOWNLOAD_FAILED',
+              {
+                cause: e,
+              }
             );
             log(errorMessage);
+            if (lastError.code === 'PATCH_FAILED') {
+              patchFailed = true;
+            }
             if (!isMirrorRetryableCode(lastError.code)) {
               // The bytes arrived but could not be applied (patch/manifest
               // mismatch): every mirror serves the same artifact, so move
               // on to the next strategy instead of re-downloading it.
+              exhaustedStrategies.set(type, errorMessage);
               break;
             }
           }
         }
       }
-      if (succeeded) {
+      if (
+        succeeded ||
+        attempts.every(({ type }) => exhaustedStrategies.has(type))
+      ) {
+        // Nothing left that a retry could change.
         break;
       }
     }
@@ -1459,9 +1556,10 @@ export class Pushy {
       // platform that incremental delivery is failing for this binary.
       this.report({
         type: 'downloadFallback',
-        // UpdateError.code already carries the classified native rejection
-        // code (PATCH_FAILED vs DOWNLOAD_FAILED).
-        code: lastError?.code,
+        // The patch-health signal wins over whatever transport failure
+        // happened to come last (diff PATCH_FAILED, then pdiff network
+        // error, then full succeeded is still a patch_fail server-side).
+        code: patchFailed ? 'PATCH_FAILED' : lastError?.code,
         data: {
           newVersion: hash,
           succeeded,
@@ -1647,6 +1745,10 @@ export class Pushy {
     sharedState.downloadedHash = undefined;
     sharedState.toHash = undefined;
     sharedState.marked = false;
+    // A switch or APK install that was in flight targets state that no
+    // longer exists; do not let its flag block the next attempt.
+    sharedState.applyingUpdate = false;
+    sharedState.apkStatus = null;
     this.report({ type: 'reset' });
     if (options?.restart) {
       try {

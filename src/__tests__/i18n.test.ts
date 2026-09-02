@@ -63,9 +63,9 @@ describe('I18n', () => {
     );
 
     // Multiple interpolations
-    expect(i18n.t('retry_count', { count: 1, max: 3 })).toBe(
-      'Retry attempt: 1/3'
-    );
+    expect(
+      i18n.t('error_http_status', { status: 502, statusText: 'Bad' })
+    ).toBe('502 Bad');
 
     // Interpolation with missing values (should leave placeholder as is)
     expect(i18n.t('download_progress')).toBe(

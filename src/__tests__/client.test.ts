@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, describe, expect, mock, spyOn, test } from 'bun:test';
 
 const importFreshClient = (cacheKey: string) => import(`../client?${cacheKey}`);
 
@@ -918,7 +918,6 @@ describe('downloadUpdate fallback chain', () => {
           ? Math.min(100, Math.max(0, Math.floor((received / total) * 100)))
           : 0,
       DEFAULT_FETCH_TIMEOUT_MS: 5000,
-      emptyObj: {},
       fetchWithTimeout: mock(() => Promise.resolve()),
       info: mock(() => {}),
       joinUrls: (paths: string[], fileName?: string) =>
@@ -1356,6 +1355,123 @@ describe('downloadUpdate fallback chain', () => {
     expect(secondHash).toBe('new-hash');
     expect(downloadFullUpdate).toHaveBeenCalledTimes(1);
   });
+
+  test('a strategy that failed to apply is not downloaded again on later retries (1.6)', async () => {
+    const patchError: any = Error('hpatch failed');
+    patchError.code = 'PATCH_FAILED';
+    const {
+      downloadPatchFromPpk,
+      downloadPatchFromPackage,
+      downloadFullUpdate,
+    } = setupDownloadMocks({
+      downloadPatchFromPpk: mock(() => Promise.reject(patchError)),
+      downloadPatchFromPackage: mock(() =>
+        Promise.reject(Error('pdiff offline'))
+      ),
+      downloadFullUpdate: mock(() => Promise.reject(Error('full offline'))),
+    });
+    const { Pushy, sharedState } = await importFreshClient(
+      'dl-exhausted-strategy'
+    );
+    sharedState.downloadedHash = undefined;
+    const client = new Pushy({ appKey: 'demo-app', maxRetries: 2 });
+
+    await expect(client.downloadUpdate(updateInfo)).rejects.toThrow();
+
+    // Same artifact, same base: the diff can only fail the same way again.
+    expect(downloadPatchFromPpk).toHaveBeenCalledTimes(1);
+    // Transport failures are still retried (3 attempts).
+    expect(downloadPatchFromPackage).toHaveBeenCalledTimes(3);
+    expect(downloadFullUpdate).toHaveBeenCalledTimes(3);
+  });
+
+  test('retries stop once every strategy has failed deterministically', async () => {
+    const reject = () => {
+      const err: any = Error('cannot apply');
+      err.code = 'PATCH_FAILED';
+      return Promise.reject(err);
+    };
+    const {
+      downloadPatchFromPpk,
+      downloadPatchFromPackage,
+      downloadFullUpdate,
+    } = setupDownloadMocks({
+      downloadPatchFromPpk: mock(reject),
+      downloadPatchFromPackage: mock(reject),
+      downloadFullUpdate: mock(reject),
+    });
+    const { Pushy, sharedState } = await importFreshClient('dl-all-exhausted');
+    sharedState.downloadedHash = undefined;
+    const client = new Pushy({ appKey: 'demo-app', maxRetries: 3 });
+
+    const err: any = await client
+      .downloadUpdate(updateInfo)
+      .catch((e: any) => e);
+
+    expect(err.code).toBe('PATCH_FAILED');
+    expect(downloadPatchFromPpk).toHaveBeenCalledTimes(1);
+    expect(downloadPatchFromPackage).toHaveBeenCalledTimes(1);
+    expect(downloadFullUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  test('downloadFallback carries PATCH_FAILED even when a later transport error came last (P4)', async () => {
+    const patchError: any = Error('hpatch failed');
+    patchError.code = 'PATCH_FAILED';
+    setupDownloadMocks({
+      downloadPatchFromPpk: mock(() => Promise.reject(patchError)),
+      downloadPatchFromPackage: mock(() =>
+        Promise.reject(Error('pdiff offline'))
+      ),
+    });
+    const logger = mock(() => {});
+    const { Pushy, sharedState } = await importFreshClient(
+      'dl-fallback-patch-code'
+    );
+    sharedState.downloadedHash = undefined;
+    const client = new Pushy({ appKey: 'demo-app', maxRetries: 0, logger });
+
+    expect(await client.downloadUpdate(updateInfo)).toBe('new-hash');
+
+    expect(logger).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'downloadFallback',
+        data: expect.objectContaining({
+          code: 'PATCH_FAILED',
+          succeeded: 'full',
+          newVersion: 'new-hash',
+        }),
+      })
+    );
+  });
+
+  test('a `[PATCH_FAILED] ` message prefix classifies like a code property (bridge contract)', async () => {
+    // Harmony's bridge cannot set `code` on a rejection and prefixes the
+    // message instead; the strategy loop must treat it as the same
+    // deterministic failure: no second mirror, straight to the next strategy.
+    const downloadPatchFromPpk = mock(() =>
+      Promise.reject(new Error('[PATCH_FAILED] copiesCrc mismatch'))
+    );
+    const { downloadPatchFromPackage } = setupDownloadMocks({
+      downloadPatchFromPpk,
+    });
+    const logger = mock(() => {});
+    const { Pushy, sharedState } = await importFreshClient(
+      'dl-prefixed-patch-code'
+    );
+    sharedState.downloadedHash = undefined;
+    const client = new Pushy({ appKey: 'demo-app', maxRetries: 0, logger });
+
+    expect(await client.downloadUpdate(twoMirrors)).toBe('new-hash');
+
+    expect(downloadPatchFromPpk).toHaveBeenCalledTimes(1);
+    expect(downloadPatchFromPackage).toHaveBeenCalledTimes(1);
+    expect(logger).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'downloadFallback',
+        data: expect.objectContaining({ code: 'PATCH_FAILED' }),
+      })
+    );
+  });
 });
 
 describe('Cresc class', () => {
@@ -1728,21 +1844,44 @@ describe('syncNativeConfig', () => {
     expect(config.afterDownload).toBe('setNeedUpdate');
   });
 
-  test('persists an explicit disabled state when the config becomes invalid', async () => {
+  test('keeps the last synced config while the options are transiently unusable', async () => {
+    // An empty appKey / endpoint list mid-configuration used to be persisted
+    // as `{"disabled":true}`, overwriting the last good config and switching
+    // off the cold-start rescue for every later launch. Only an explicit
+    // disableNativeCheck writes the disabled state.
     const syncNativeConfig = mock(() => Promise.resolve());
     setupClientMocks({ syncNativeConfig });
-    const { Pushy } = await importFreshClient('sync-config-disabled');
+    const { Pushy } = await importFreshClient('sync-config-transient');
     const client = new Pushy({ appKey: 'demo-app' });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
 
     client.setOptions({ appKey: '' });
+    client.setOptions({ server: { main: [] } });
     await Promise.resolve();
     await Promise.resolve();
     await Promise.resolve();
 
+    expect(syncNativeConfig).toHaveBeenCalledTimes(1);
+    expect(
+      JSON.parse((syncNativeConfig.mock.calls.at(-1) as unknown as string[])[0])
+        .appKey
+    ).toBe('demo-app');
+
+    // Once the options are usable again the new config is written.
+    client.setOptions({
+      appKey: 'demo-app',
+      server: { main: ['https://a.example.com'] },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
     expect(syncNativeConfig).toHaveBeenCalledTimes(2);
     expect(
       JSON.parse((syncNativeConfig.mock.calls.at(-1) as unknown as string[])[0])
-    ).toEqual({ disabled: true });
+        .endpoints
+    ).toEqual(['https://a.example.com']);
   });
 
   test('persists and exposes the effective overridden package version', async () => {
@@ -2264,5 +2403,322 @@ describe('check response schema gate', () => {
     expect(seen).toHaveLength(1);
     // The schema-gate code survives the endpoint fallback aggregation.
     expect(seen[0].code).toBe('INVALID_RESPONSE');
+  });
+});
+
+describe('setOptions (1.3 / 1.11)', () => {
+  test('applies a locale change at runtime', async () => {
+    const setLocale = mock(() => {});
+    setupClientMocks();
+    mock.module('../i18n', () => ({
+      default: { t: (key: string) => key, setLocale },
+    }));
+    const { Pushy } = await importFreshClient('set-options-locale');
+    const client = new Pushy({ appKey: 'demo-app', locale: 'en' });
+    expect(setLocale).toHaveBeenLastCalledWith('en');
+
+    client.setOptions({ locale: 'zh' });
+    expect(setLocale).toHaveBeenLastCalledWith('zh');
+  });
+
+  test('debug gates the verbose log output in release builds', async () => {
+    setupClientMocks();
+    const { Pushy } = await importFreshClient('set-options-debug');
+    const { log } = await import('../utils');
+    const logSpy = spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const client = new Pushy({ appKey: 'demo-app' });
+      log('hidden');
+      expect(logSpy).not.toHaveBeenCalled();
+
+      client.setOptions({ debug: true });
+      log('shown');
+      expect(logSpy).toHaveBeenCalledTimes(1);
+
+      client.setOptions({ debug: false });
+      log('hidden again');
+      expect(logSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+});
+
+describe('getRemoteEndpoints (1.4 / 6.8)', () => {
+  test('a mirror answering first with an error page does not beat the healthy one', async () => {
+    setupClientMocks();
+    (globalThis as any).fetch = mock(async (url: string): Promise<any> => {
+      if (url.includes('gitee')) {
+        // Fast anti-bot / 404 page: resolves, but is not a list.
+        return {
+          ok: false,
+          status: 404,
+          text: async () => '<html>blocked</html>',
+          json: async () => {
+            throw new Error('not json');
+          },
+        };
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return createJsonResponse(['https://edge.example.com']);
+    });
+    const { Pushy } = await importFreshClient('remote-endpoints-ok-gate');
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    expect(await client.getRemoteEndpoints()).toEqual([
+      'https://edge.example.com',
+    ]);
+  });
+
+  test('only https endpoints are accepted from a remote list', async () => {
+    setupClientMocks();
+    (globalThis as any).fetch = mock(async () =>
+      createJsonResponse([
+        'http://plain.example.com',
+        'https://edge.example.com',
+        'ftp://files.example.com',
+        'HTTPS://upper.example.com',
+        42,
+        null,
+      ])
+    );
+    const { Pushy } = await importFreshClient('remote-endpoints-https-only');
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    expect(await client.getRemoteEndpoints()).toEqual([
+      'https://edge.example.com',
+      'HTTPS://upper.example.com',
+    ]);
+  });
+
+  test('a response that is not a list yields no endpoints', async () => {
+    setupClientMocks();
+    (globalThis as any).fetch = mock(async () =>
+      createJsonResponse({ endpoints: ['https://edge.example.com'] })
+    );
+    const { Pushy } = await importFreshClient('remote-endpoints-not-list');
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    expect(await client.getRemoteEndpoints()).toEqual([]);
+  });
+});
+
+describe('native check cache schema gate (1.5)', () => {
+  test('a cached non-verdict body never becomes "no update"', async () => {
+    let configJson = '';
+    const syncNativeConfig = mock((value: string) => {
+      configJson = value;
+      return Promise.resolve();
+    });
+    // A native old enough to have cached a 200 `{"error": ...}` verbatim.
+    const getNativeCheckCache = mock(() =>
+      Promise.resolve(
+        JSON.stringify({
+          ts: Math.floor(Date.now() / 1000) - 30,
+          body: JSON.stringify({ error: 'app not found' }),
+          request: JSON.stringify({
+            packageVersion: '1.0.0',
+            hash: 'hash',
+            buildTime: '2023-01-01',
+            cInfo: { rnu: '10.0.0', rn: '0.73.0', os: 'ios', uuid: 'uuid' },
+            diffV: 2,
+          }),
+          config: configJson,
+        })
+      )
+    );
+    setupClientMocks({ getNativeCheckCache, syncNativeConfig });
+    const fetchMock = mock(async () => createJsonResponse({ upToDate: true }));
+    (globalThis as any).fetch = fetchMock;
+    const { Pushy } = await importFreshClient('native-cache-schema-gate');
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    expect(await client.checkUpdate()).toEqual({ upToDate: true });
+    expect(getNativeCheckCache).toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalled();
+  });
+});
+
+describe('switchVersion result and reload watchdog (1.7)', () => {
+  const realSetTimeout = globalThis.setTimeout;
+
+  afterEach(() => {
+    globalThis.setTimeout = realSetTimeout;
+  });
+
+  test('resolves true and releases applyingUpdate once the process has outlived the reload', async () => {
+    setupClientMocks();
+    // Collapse the watchdog delay.
+    globalThis.setTimeout = ((fn: (...args: any[]) => void) =>
+      realSetTimeout(fn, 0)) as unknown as typeof setTimeout;
+    const logger = mock(() => {});
+    const { Pushy, sharedState } = await importFreshClient('switch-watchdog');
+    sharedState.downloadedHash = 'next-hash';
+    sharedState.applyingUpdate = false;
+    const client = new Pushy({ appKey: 'demo-app', logger });
+
+    expect(await client.switchVersion('next-hash')).toBe(true);
+    expect(sharedState.applyingUpdate).toBe(true);
+    // A concurrent second switch is ignored — visibly (false), not silently.
+    expect(await client.switchVersion('next-hash')).toBe(false);
+
+    await new Promise((resolve) => realSetTimeout(resolve, 5));
+    expect(sharedState.applyingUpdate).toBe(false);
+    expect(logger).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'errorSwitchVersion',
+        data: expect.objectContaining({
+          code: 'RESTART_FAILED',
+          newVersion: 'next-hash',
+        }),
+      })
+    );
+    // Later switches are not blocked by the earlier one.
+    expect(await client.switchVersion('next-hash')).toBe(true);
+  });
+
+  test('resolves false when there is nothing to switch to', async () => {
+    setupClientMocks();
+    const { Pushy, sharedState } = await importFreshClient('switch-nothing');
+    sharedState.downloadedHash = undefined;
+    sharedState.applyingUpdate = false;
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    expect(await client.switchVersion('next-hash')).toBe(false);
+    expect(sharedState.applyingUpdate).toBe(false);
+  });
+
+  test('a `[CODE] ` message prefix from a bridge without code support is classified like a code', async () => {
+    const reloadUpdate = mock(() =>
+      Promise.reject(new Error('[INVALID_OPTIONS] empty hash'))
+    );
+    setupClientMocks({ reloadUpdate });
+    const { Pushy, sharedState } = await importFreshClient(
+      'switch-prefixed-code'
+    );
+    sharedState.downloadedHash = 'next-hash';
+    sharedState.applyingUpdate = false;
+    const client = new Pushy({ appKey: 'demo-app' });
+    const seen: any[] = [];
+    client.onError((e: any) => {
+      seen.push(e);
+    });
+
+    await expect(client.switchVersion('next-hash')).rejects.toThrow(
+      'empty hash'
+    );
+    expect(seen[0].code).toBe('INVALID_OPTIONS');
+    expect(seen[0].message).toBe('empty hash');
+    expect(sharedState.applyingUpdate).toBe(false);
+  });
+});
+
+describe('check dedup slot ownership (P4)', () => {
+  test("a failing older check does not clear a newer check's slot", async () => {
+    setupClientMocks();
+    let checkRequests = 0;
+    (globalThis as any).fetch = mock(async (url: string, params: any) => {
+      if (!url.includes('/checkUpdate/')) {
+        throw new Error('no mirrors');
+      }
+      checkRequests++;
+      const body = params?.body ? JSON.parse(params.body) : {};
+      if (body.toHash === 'slow-fail') {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        throw new Error('offline');
+      }
+      return createJsonResponse({ upToDate: true });
+    });
+    const { Pushy } = await importFreshClient('dedup-slot');
+    const client = new Pushy({ appKey: 'demo-app' });
+
+    const first = client.checkUpdate({ toHash: 'slow-fail' });
+    const second = client.checkUpdate({ toHash: 'fast-ok' });
+    expect(await second).toEqual({ upToDate: true });
+    expect(await first).toBeUndefined();
+    const requestsSoFar = checkRequests;
+
+    // Same question as the second check, inside its window: answered from
+    // the slot the failed first check must not have cleared.
+    expect(await client.checkUpdate({ toHash: 'fast-ok' })).toEqual({
+      upToDate: true,
+    });
+    expect(checkRequests).toBe(requestsSoFar);
+  });
+});
+
+describe('non-2xx check responses (P4)', () => {
+  test('the error text is truncated to 200 characters', async () => {
+    setupClientMocks();
+    mock.module('../i18n', () => ({
+      default: {
+        t: (key: string, params?: Record<string, unknown>) =>
+          params ? `${key}${JSON.stringify(params)}` : key,
+        setLocale: mock(() => {}),
+      },
+    }));
+    (globalThis as any).fetch = mock(async (url: string) => {
+      if (!url.includes('/checkUpdate/')) {
+        throw new Error('no mirrors');
+      }
+      return {
+        ok: false,
+        status: 502,
+        text: async () => 'x'.repeat(1000),
+        json: async () => ({}),
+      };
+    });
+    const { Pushy } = await importFreshClient('http-error-truncated');
+    const client = new Pushy({ appKey: 'demo-app' });
+    const seen: any[] = [];
+    client.onError((e: any) => {
+      seen.push(e);
+    });
+
+    await client.checkUpdate();
+
+    expect(seen[0].code).toBe('HTTP_STATUS');
+    expect(seen[0].message).toContain(`"statusText":"${'x'.repeat(200)}"`);
+    expect(seen[0].message).not.toContain('x'.repeat(201));
+  });
+});
+
+describe('appKey requirement (P4)', () => {
+  const setupPlatform = (os: string) => {
+    setupClientMocks();
+    mock.module('react-native', () => ({
+      Platform: { OS: os, Version: 1 },
+      DeviceEventEmitter: {
+        addListener: mock(() => ({ remove: mock(() => {}) })),
+      },
+      NativeEventEmitter: class {
+        addListener = mock(() => ({ remove: mock(() => {}) }));
+        removeAllListeners = mock(() => {});
+      },
+    }));
+  };
+
+  test('harmony without an appKey fails fast with APPKEY_REQUIRED', async () => {
+    setupPlatform('harmony');
+    const { Pushy } = await importFreshClient('appkey-harmony');
+
+    let error: any;
+    try {
+      new Pushy({ appKey: '' });
+    } catch (e) {
+      error = e;
+    }
+    expect(error?.code).toBe('APPKEY_REQUIRED');
+  });
+
+  test('web tolerates a missing appKey (nothing runs there)', async () => {
+    setupPlatform('web');
+    const consoleWarn = spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const { Pushy } = await importFreshClient('appkey-web');
+      expect(() => new Pushy({ appKey: '' })).not.toThrow();
+    } finally {
+      consoleWarn.mockRestore();
+    }
   });
 });

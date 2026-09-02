@@ -1,12 +1,28 @@
 import { Platform } from 'react-native';
 import i18n from './i18n';
 
+// log/info are developer diagnostics (they include full check request bodies
+// and responses); release builds only print them when the client's `debug`
+// option is on. warn/error always print.
+let debugLogging = false;
+export const setDebugLogging = (enabled: boolean) => {
+  debugLogging = !!enabled;
+};
+const isVerbose = () =>
+  // Metro always defines __DEV__; guard anyway so a bundler that does not
+  // cannot break the whole module at import time.
+  (typeof __DEV__ === 'boolean' && __DEV__) || debugLogging;
+
 export function log(...args: any[]) {
-  console.log(i18n.t('dev_log_prefix'), ...args);
+  if (isVerbose()) {
+    console.log(i18n.t('dev_log_prefix'), ...args);
+  }
 }
 
 export function info(...args: any[]) {
-  console.info(i18n.t('dev_log_prefix'), ...args);
+  if (isVerbose()) {
+    console.info(i18n.t('dev_log_prefix'), ...args);
+  }
 }
 
 export function warn(...args: any[]) {
@@ -41,7 +57,6 @@ export function promiseAny<T>(promises: Promise<T>[]) {
   });
 }
 
-export const emptyObj = {};
 export const noop = () => {};
 const emptyModuleTarget: Record<string, typeof noop> = {};
 export const emptyModule = new Proxy(emptyModuleTarget, {
@@ -147,10 +162,11 @@ export const fetchWithTimeout = (
   // caller-provided signal (e.g. the hedged endpoint race cancelling losers)
   // must be chained onto it manually.
   const externalSignal = (params as any)?.signal as AbortSignal | undefined;
+  const onExternalAbort = () => controller.abort();
   if (externalSignal?.aborted) {
     controller.abort();
   } else if (externalSignal) {
-    externalSignal.addEventListener('abort', () => controller.abort());
+    externalSignal.addEventListener('abort', onExternalAbort);
   }
   const timeoutId = setTimeout(() => {
     log('fetch timeout', url);
@@ -170,7 +186,48 @@ export const fetchWithTimeout = (
     })
     .finally(() => {
       clearTimeout(timeoutId);
+      // A long-lived caller signal (one per endpoint race) would otherwise
+      // keep every finished request's listener — and its controller — alive.
+      externalSignal?.removeEventListener('abort', onExternalAbort);
     });
+};
+
+/**
+ * Query parameters of a URL as a plain object, without a URL polyfill: the
+ * only consumer is the test-channel deep link (`?type=...&data=...`). Handles
+ * a missing `?`, a `#fragment`, `+` as space and percent-encoding; a value
+ * that fails to decode is kept verbatim rather than throwing. Later
+ * duplicates win.
+ */
+export const parseQueryParams = (url: string): Record<string, string> => {
+  const params: Record<string, string> = {};
+  const hashStart = url.indexOf('#');
+  const withoutFragment = hashStart < 0 ? url : url.slice(0, hashStart);
+  const queryStart = withoutFragment.indexOf('?');
+  if (queryStart < 0) {
+    return params;
+  }
+  const query = withoutFragment.slice(queryStart + 1);
+  const decode = (value: string) => {
+    const spaced = value.replace(/\+/g, ' ');
+    try {
+      return decodeURIComponent(spaced);
+    } catch {
+      return spaced;
+    }
+  };
+  for (const pair of query.split('&')) {
+    if (!pair) {
+      continue;
+    }
+    const separator = pair.indexOf('=');
+    const key = decode(separator < 0 ? pair : pair.slice(0, separator));
+    if (!key) {
+      continue;
+    }
+    params[key] = separator < 0 ? '' : decode(pair.slice(separator + 1));
+  }
+  return params;
 };
 
 /**

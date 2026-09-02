@@ -1,31 +1,10 @@
 export default {
   // Common messages
   checking_update: 'Checking for updates...',
-  downloading_update: 'Downloading update package...',
-  installing_update: 'Installing update...',
-  update_available: 'Update available',
-  update_downloaded: 'Update downloaded successfully',
-  update_installed: 'Update installed successfully',
-  no_update_available: 'You are up to date',
   update_failed: 'Update failed',
-  network_error: 'Network connection error',
-  download_failed: 'Download failed',
-  install_failed: 'Installation failed',
 
   // Progress messages with interpolation
   download_progress: 'Download progress: {{progress}}%',
-  download_speed: 'Download speed: {{speed}}/s',
-  file_size: 'File size: {{size}}',
-  time_remaining: 'Time remaining: {{time}}',
-
-  // Error messages
-  error_message: 'Error message: {{message}}',
-  retry_count: 'Retry attempt: {{count}}/{{max}}',
-
-  // Update info
-  version_info: 'Version {{version}} ({{build}})',
-  release_notes: 'Release notes: {{notes}}',
-  update_size: 'Update size: {{size}}MB',
 
   // Alert messages
   alert_title: 'Notice',
@@ -43,6 +22,7 @@ export default {
 
   // Error messages
   error_appkey_required: 'appKey is required',
+  error_no_endpoints: 'No update server endpoints configured',
   error_client_singleton:
     'A second update client was created: the SDK is a process-level singleton — create one client and reuse it everywhere (use client.setOptions to change options at runtime)',
   error_provider_singleton:
@@ -67,8 +47,6 @@ export default {
   error_http_status: '{{status}} {{statusText}}',
   error_apk_pending_install:
     'The APK has been downloaded, please complete the installation in the system installer',
-  error_storage_permission_rejected:
-    'Storage permission denied, unable to download the APK',
   error_apk_download_failed: 'Failed to download or install the APK',
   error_reset_not_supported:
     'resetToPackagedBundle is not available in the installed native module. Please rebuild the app with the latest react-native-update.',

@@ -29,12 +29,39 @@ const createClient = (options: Record<string, any> = {}) => {
   let progressCallback: ((data: ProgressData) => void) | undefined;
   const errorListeners = new Set<(e: Error, eventType?: string) => void>();
   const emittedErrors = new WeakSet<Error>();
+  const optionsListeners = new Set<() => void>();
+  let providerMounted = false;
   const client = {
     options: {
       updateStrategy: 'alwaysAlert',
       checkStrategy: 'onAppStart',
       autoMarkSuccess: false,
       ...options,
+    },
+    // The provider's option-change contract (see Pushy.setOptions): options
+    // are mutated in place, a version is bumped and subscribers notified.
+    optionsVersion: 0,
+    onOptionsChange: (listener: () => void) => {
+      optionsListeners.add(listener);
+      return () => {
+        optionsListeners.delete(listener);
+      };
+    },
+    setOptions: (next: Record<string, any>) => {
+      Object.assign(client.options, next);
+      client.optionsVersion++;
+      optionsListeners.forEach((listener) => {
+        listener();
+      });
+    },
+    claimProviderMount: () => {
+      if (providerMounted) {
+        throw new Error('error_provider_singleton');
+      }
+      providerMounted = true;
+      return () => {
+        providerMounted = false;
+      };
     },
     getEffectivePackageVersion: () => options.overridePackageVersion || '1.0.0',
     assertDebug: () => true,
@@ -55,7 +82,8 @@ const createClient = (options: Record<string, any> = {}) => {
     ),
     downloadAndInstallApk: mock(async () => {}),
     restartApp: mock(async () => {}),
-    t: (key: string) => key,
+    t: (key: string, params?: Record<string, unknown>) =>
+      params ? `${key}${JSON.stringify(params)}` : key,
     onError: mock((listener: (e: Error, eventType?: string) => void) => {
       errorListeners.add(listener);
       return () => {
@@ -469,5 +497,167 @@ describe('UpdateProvider rendering', () => {
 
     expect(progressSeen.map((p) => p.received)).toEqual([1, 5]);
     expect(staticRenders).toBe(staticRendersBefore);
+  });
+
+  test('setOptions on a mounted provider re-runs neither the start check nor the auto-mark timer (1.2)', async () => {
+    const client = createClient({
+      updateStrategy: 'silentAndLater',
+      autoMarkSuccess: true,
+      autoMarkSuccessDelayMs: 40,
+    });
+    await renderProvider(client);
+    expect(client.checkUpdate).toHaveBeenCalledTimes(1);
+
+    // Two unrelated option changes inside the timer window: a timer reset on
+    // each of them would still be pending at 60ms.
+    await TestRenderer.act(async () => {
+      client.setOptions({ logger: () => {} });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+    await TestRenderer.act(async () => {
+      client.setOptions({ disableErrorReporting: true });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+    expect(client.checkUpdate).toHaveBeenCalledTimes(1);
+    expect(client.markSuccess).toHaveBeenCalledTimes(1);
+  });
+
+  test('enabling automatic checks after mount runs the start check once', async () => {
+    const client = createClient({
+      updateStrategy: 'silentAndLater',
+      checkStrategy: null,
+    });
+    await renderProvider(client);
+    expect(client.checkUpdate).not.toHaveBeenCalled();
+
+    await TestRenderer.act(async () => {
+      client.setOptions({ checkStrategy: 'onAppStart' });
+      await flush();
+    });
+    expect(client.checkUpdate).toHaveBeenCalledTimes(1);
+
+    await TestRenderer.act(async () => {
+      client.setOptions({ logger: () => {} });
+      await flush();
+    });
+    expect(client.checkUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  test('a strategy change re-subscribes AppState without another start check', async () => {
+    const client = createClient({
+      updateStrategy: 'silentAndLater',
+      checkStrategy: 'onAppStart',
+    });
+    await renderProvider(client);
+    expect(client.checkUpdate).toHaveBeenCalledTimes(1);
+
+    // onAppStart: no resume listener.
+    await TestRenderer.act(async () => {
+      emitAppStateChange('active');
+      await flush();
+    });
+    expect(client.checkUpdate).toHaveBeenCalledTimes(1);
+
+    await TestRenderer.act(async () => {
+      client.setOptions({ checkStrategy: 'both' });
+      await flush();
+    });
+    expect(client.checkUpdate).toHaveBeenCalledTimes(1);
+    await TestRenderer.act(async () => {
+      emitAppStateChange('active');
+      await flush();
+    });
+    expect(client.checkUpdate).toHaveBeenCalledTimes(2);
+  });
+
+  test('an expired response with a stray hash-less update is presented as expired-only', async () => {
+    const client = createClient({ updateStrategy: 'alwaysAlert' });
+    client.checkUpdate.mockImplementation(async () => ({
+      expired: true,
+      update: true,
+      downloadUrl: 'https://cdn.example.com/app-release.apk',
+    }));
+    const captured: { current?: any } = {};
+    const Probe = () => {
+      captured.current = useUpdate();
+      return null;
+    };
+    await renderProvider(client, <Probe />);
+
+    expect(captured.current.updateInfo.expired).toBe(true);
+    expect(captured.current.updateInfo.update).toBeFalsy();
+    expect(client.reportInvalidUpdateOnce).not.toHaveBeenCalled();
+    expect(client.downloadUpdate).not.toHaveBeenCalled();
+    // The expired alert with its download action is still shown.
+    expect(mockAlert).toHaveBeenCalledTimes(1);
+    expect((mockAlert.mock.calls[0] as any[])[1]).toBe('alert_app_updated');
+  });
+
+  test('a silent strategy hands an artifact-less release to the client, which reports it (once)', async () => {
+    const client = createClient({ updateStrategy: 'silentAndLater' });
+    client.checkUpdate.mockImplementation(async () => ({
+      update: true,
+      hash: 'broken-artifact-hash',
+      name: 'broken release',
+      paths: [],
+    }));
+    // The real client reports noArtifact from its download attempt and
+    // delivers nothing.
+    client.downloadUpdate.mockImplementation(async () => undefined as any);
+    const captured: { current?: any } = {};
+    const Probe = () => {
+      captured.current = useUpdate();
+      return null;
+    };
+    await renderProvider(client, <Probe />);
+
+    expect(client.reportInvalidUpdateOnce).not.toHaveBeenCalled();
+    expect(client.downloadUpdate).toHaveBeenCalledTimes(1);
+    expect((client.downloadUpdate.mock.calls[0] as any[])[0]).toMatchObject({
+      hash: 'broken-artifact-hash',
+    });
+    expect(captured.current.updateInfo).toEqual({ upToDate: true });
+    expect(client.switchVersionLater).not.toHaveBeenCalled();
+    expect(mockAlert).not.toHaveBeenCalled();
+  });
+
+  test('a release without a name leaves no {{name}} placeholder in the alert', async () => {
+    const client = createClient({ updateStrategy: 'alwaysAlert' });
+    client.checkUpdate.mockImplementation(async () => ({
+      update: true,
+      hash: 'next-hash',
+      full: 'next.ppk',
+      paths: ['https://cdn.example.com'],
+    }));
+    await renderProvider(client);
+
+    expect(mockAlert).toHaveBeenCalledTimes(1);
+    expect((mockAlert.mock.calls[0] as any[])[1]).toBe(
+      'alert_new_version_found{"name":"","description":""}'
+    );
+  });
+
+  test('an expired download url the system cannot open becomes lastError, not an unhandled rejection (1.8)', async () => {
+    const client = createClient({ updateStrategy: 'silentAndNow' });
+    client.checkUpdate.mockImplementation(async () => ({
+      expired: true,
+      downloadUrl: 'market://details?id=app',
+    }));
+    const { Linking } = await import('react-native');
+    (Linking.openURL as any).mockImplementation(() =>
+      Promise.reject(new Error('no handler for market://'))
+    );
+    const captured: { current?: any } = {};
+    const Probe = () => {
+      captured.current = useUpdate();
+      return null;
+    };
+    await renderProvider(client, <Probe />);
+
+    expect(Linking.openURL).toHaveBeenCalledWith('market://details?id=app');
+    expect(captured.current.lastError?.message).toBe(
+      'no handler for market://'
+    );
+    expect(mockAlert).not.toHaveBeenCalled();
   });
 });

@@ -1,5 +1,6 @@
 export type { UpdateErrorListener } from './client';
 export { Cresc, Pushy } from './client';
+export type { UpdateContextValue } from './context';
 export {
   ProgressContext,
   UpdateContext,
@@ -25,3 +26,16 @@ export {
   updateMetadataTags,
 } from './metadata';
 export { PushyProvider, UpdateProvider } from './provider';
+export type {
+  BeforeReloadContext,
+  CheckResult,
+  ClientOptions,
+  EventData,
+  EventType,
+  ProgressData,
+  UpdateCheckState,
+  UpdateEventsLogger,
+  UpdateServerConfig,
+  UpdateTestPayload,
+  VersionInfo,
+} from './type';

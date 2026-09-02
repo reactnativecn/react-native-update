@@ -1,31 +1,10 @@
 export default {
   // Common messages
   checking_update: '正在检查更新...',
-  downloading_update: '正在下载更新包...',
-  installing_update: '正在安装更新...',
-  update_available: '发现新版本',
-  update_downloaded: '更新包下载完成',
-  update_installed: '更新安装完成',
-  no_update_available: '已是最新版本',
   update_failed: '更新失败',
-  network_error: '网络连接错误',
-  download_failed: '下载失败',
-  install_failed: '安装失败',
 
   // Progress messages with interpolation
   download_progress: '下载进度: {{progress}}%',
-  download_speed: '下载速度: {{speed}}/s',
-  file_size: '文件大小: {{size}}',
-  time_remaining: '剩余时间: {{time}}',
-
-  // Error messages
-  error_message: '错误信息: {{message}}',
-  retry_count: '重试次数: {{count}}/{{max}}',
-
-  // Update info
-  version_info: '版本 {{version}} ({{build}})',
-  release_notes: '更新说明: {{notes}}',
-  update_size: '更新包大小: {{size}}MB',
 
   // Alert messages
   alert_title: '提示',
@@ -41,6 +20,7 @@ export default {
 
   // Error messages
   error_appkey_required: '需要提供 appKey',
+  error_no_endpoints: '未配置更新服务器端点',
   error_client_singleton:
     '检测到重复创建热更新 client：SDK 是进程级单例，请只创建一个 client 并在全局复用（运行期改配置请调用 client.setOptions）',
   error_provider_singleton:
@@ -62,7 +42,6 @@ export default {
   error_invalid_check_response: '更新检查响应不是有效结果',
   error_http_status: '{{status}} {{statusText}}',
   error_apk_pending_install: '安装包已下载完成，请在系统安装界面完成安装',
-  error_storage_permission_rejected: '存储权限被拒绝，无法下载安装包',
   error_apk_download_failed: '安装包下载或安装失败',
   error_reset_not_supported:
     '当前安装的原生模块不支持 resetToPackagedBundle，请使用最新版 react-native-update 重新打包后再试。',

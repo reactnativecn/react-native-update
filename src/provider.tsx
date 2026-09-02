@@ -7,14 +7,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import {
-  Alert,
-  AppState,
-  Linking,
-  type NativeEventSubscription,
-  Platform,
-} from 'react-native';
-import { URL } from 'react-native-url-polyfill';
+import { Alert, AppState, Linking, Platform } from 'react-native';
 import { type Cresc, type Pushy, sharedState } from './client';
 import { ProgressContext, UpdateContext } from './context';
 import {
@@ -27,7 +20,7 @@ import {
 } from './core';
 import type { CheckResult, ProgressData, UpdateTestPayload } from './type';
 import { decideDownload, resolveCheckResult } from './updateFlowCore';
-import { assertWeb, log, noop } from './utils';
+import { assertWeb, isWeb, log, noop, parseQueryParams } from './utils';
 
 export const UpdateProvider = ({
   client,
@@ -42,24 +35,22 @@ export const UpdateProvider = ({
   // A second concurrently mounted provider is a hard integration error (the
   // client is a process-level singleton); the client throws on the second
   // claim. Also releases the claim on unmount.
-  useEffect(() => client.claimProviderMount?.(), [client]);
+  useEffect(() => client.claimProviderMount(), [client]);
 
   // options is mutated in place by client.setOptions (its identity never
   // changes), so effects keyed on it would never re-run. The client bumps a
   // version on every setOptions; mirroring it into state re-renders this
-  // provider and re-runs the effects that list it as a dependency.
-  const [optionsVersion, setOptionsVersion] = useState(
-    client.optionsVersion ?? 0
-  );
+  // provider, which re-reads the option fields its effects key on (see the
+  // lifecycle effects below).
+  const [, setOptionsVersion] = useState(client.optionsVersion);
   useEffect(
     () =>
-      client.onOptionsChange?.(() => {
-        setOptionsVersion((version) => version + 1);
+      client.onOptionsChange(() => {
+        setOptionsVersion(client.optionsVersion);
       }),
     [client]
   );
 
-  const stateListener = useRef<NativeEventSubscription>(undefined);
   const [updateInfo, setUpdateInfo] = useState<CheckResult>();
   const updateInfoRef = useRef(updateInfo);
   const [progress, setProgress] = useState<ProgressData>();
@@ -198,6 +189,27 @@ export const UpdateProvider = ({
     [client]
   );
 
+  // The action behind an expired package: install the APK in place on
+  // Android, hand every other URL to the system. The URL is server-controlled,
+  // so a scheme without a handler (or a malformed value) rejects — from an
+  // alert button or the silent branch that must not become an unhandled
+  // rejection.
+  const openExpiredDownload = useCallback(
+    (downloadUrl: string) => {
+      if (Platform.OS === 'android' && downloadUrl.endsWith('.apk')) {
+        downloadAndInstallApk(downloadUrl).catch(noop);
+        return;
+      }
+      Promise.resolve()
+        .then(() => Linking.openURL(downloadUrl))
+        .catch((e: any) => {
+          log('openURL failed:', downloadUrl, e?.message || e);
+          setLastError(e instanceof Error ? e : new Error(String(e)));
+        });
+    },
+    [downloadAndInstallApk]
+  );
+
   const checkUpdate = useCallback(
     async ({ extra }: { extra?: Partial<{ toHash: string }> } = {}) => {
       // No throttle here: the client already dedupes checks via its 5s
@@ -234,16 +246,27 @@ export const UpdateProvider = ({
         log
       );
       if (
-        !info.expired &&
         info.update &&
         (typeof info.hash !== 'string' || info.hash.length === 0)
       ) {
-        // A malformed rollout/root entry must not produce an alert whose
-        // confirm button can never download anything. Surface it to the
-        // developer telemetry/logger and present it to the app as no update.
-        client.reportInvalidUpdateOnce('missingHash');
-        info = { upToDate: true };
+        if (info.expired) {
+          // An expired package carries its own action (downloadUrl); a stray
+          // `update: true` without a hash is nothing the app could act on, so
+          // present the response as expired-only instead of also advertising
+          // an update.
+          info = { ...info, update: false };
+        } else {
+          // A malformed rollout/root entry must not produce an alert whose
+          // confirm button can never download anything. Surface it to the
+          // developer telemetry/logger and present it to the app as no update.
+          client.reportInvalidUpdateOnce('missingHash');
+          info = { upToDate: true };
+        }
       }
+      const silentStrategy =
+        options.updateStrategy === 'silentAndNow' ||
+        options.updateStrategy === 'silentAndLater';
+      let unusableRelease: CheckResult | undefined;
       if (info.update && !info.expired) {
         const decision = decideDownload(
           info,
@@ -252,9 +275,17 @@ export const UpdateProvider = ({
         );
         if (decision.action === 'none') {
           if (decision.reason === 'noArtifact') {
-            // Invalid server data is worth reporting; local rollout guards are
-            // expected no-ops and stay silent.
-            client.reportInvalidUpdateOnce('noArtifact', info.hash || '');
+            // Invalid server data is worth reporting (local rollout guards are
+            // expected no-ops and stay silent) — once per bad release. The
+            // client reports it from the download attempt, which the silent
+            // strategies make below; the alert strategies never get there
+            // (no confirm button is shown for an update that cannot
+            // download), so only they report from here.
+            if (silentStrategy) {
+              unusableRelease = info;
+            } else {
+              client.reportInvalidUpdateOnce('noArtifact', info.hash || '');
+            }
           }
           info = { upToDate: true };
         }
@@ -264,6 +295,11 @@ export const UpdateProvider = ({
       }
       updateInfoRef.current = info;
       setUpdateInfo(info);
+      if (unusableRelease) {
+        // Resolves false once the client has reported the bad release.
+        downloadUpdate(unusableRelease).catch(noop);
+        return info;
+      }
       if (info.expired) {
         if (
           options.onPackageExpired &&
@@ -275,39 +311,30 @@ export const UpdateProvider = ({
         const { downloadUrl } = info;
         if (downloadUrl && sharedState.apkStatus === null) {
           if (options.updateStrategy === 'silentAndNow') {
-            if (Platform.OS === 'android' && downloadUrl.endsWith('.apk')) {
-              downloadAndInstallApk(downloadUrl).catch(noop);
-            } else {
-              Linking.openURL(downloadUrl);
-            }
+            openExpiredDownload(downloadUrl);
             return info;
           }
           alertUpdate(client.t('alert_title'), client.t('alert_app_updated'), [
             {
               text: client.t('alert_update_button'),
               onPress: () => {
-                if (Platform.OS === 'android' && downloadUrl.endsWith('.apk')) {
-                  downloadAndInstallApk(downloadUrl).catch(noop);
-                } else {
-                  Linking.openURL(downloadUrl);
-                }
+                openExpiredDownload(downloadUrl);
               },
             },
           ]);
         }
       } else if (info.update) {
-        if (
-          options.updateStrategy === 'silentAndNow' ||
-          options.updateStrategy === 'silentAndLater'
-        ) {
+        if (silentStrategy) {
           downloadUpdate(info).catch(noop);
           return info;
         }
         alertUpdate(
           client.t('alert_title'),
           client.t('alert_new_version_found', {
-            name: info.name!,
-            description: info.description!,
+            // A server that omits the name must not leave a literal
+            // `{{name}}` in the alert.
+            name: info.name || '',
+            description: info.description || '',
           }),
           [
             { text: client.t('alert_cancel'), style: 'cancel' },
@@ -328,78 +355,105 @@ export const UpdateProvider = ({
       options,
       alertUpdate,
       alertError,
-      downloadAndInstallApk,
+      openExpiredDownload,
       downloadUpdate,
     ]
   );
 
   const markSuccess = client.markSuccess;
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: optionsVersion re-runs this when setOptions mutates options in place
+  // The lifecycle effects below key on the primitive option values they read
+  // (re-read on every render, i.e. after every setOptions), so a setOptions
+  // that touches something else — a logger, disableErrorReporting — no longer
+  // re-runs a start check, resets the auto-mark timer or re-subscribes
+  // AppState. checkUpdate's identity follows the strategy options; the
+  // listener and the start check reach it through this ref instead of
+  // depending on it.
+  const { checkStrategy, autoMarkSuccess, autoMarkSuccessDelayMs } = options;
+  const latestCheckUpdate = useRef(checkUpdate);
   useEffect(() => {
-    if (!client.assertDebug('checkUpdate()')) {
+    latestCheckUpdate.current = checkUpdate;
+  }, [checkUpdate]);
+
+  // (a) Foreground checks: one AppState subscription for as long as the
+  // strategy asks for it.
+  useEffect(() => {
+    if (
+      isWeb ||
+      (checkStrategy !== 'both' && checkStrategy !== 'onAppResume') ||
+      !client.assertDebug('checkUpdate()')
+    ) {
       return;
     }
-    if (!assertWeb()) {
+    const subscription = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active') {
+        latestCheckUpdate.current().catch(noop);
+      }
+    });
+    return () => {
+      subscription.remove();
+    };
+  }, [client, checkStrategy]);
+
+  // (b) Automatic markSuccess: armed once per (autoMarkSuccess, delay); an
+  // unrelated setOptions must not push the health confirmation out again.
+  useEffect(() => {
+    if (isWeb || !autoMarkSuccess || !client.assertDebug('markSuccess()')) {
       return;
     }
-    const { checkStrategy, autoMarkSuccess, autoMarkSuccessDelayMs } = options;
-    let markSuccessTimer: ReturnType<typeof setTimeout> | undefined;
-    if (autoMarkSuccess) {
-      const delay =
-        typeof autoMarkSuccessDelayMs === 'number' &&
-        autoMarkSuccessDelayMs >= 0
-          ? autoMarkSuccessDelayMs
-          : 1000;
-      markSuccessTimer = setTimeout(() => {
-        // The health check is read when the timer fires, not when it was
-        // armed, so a late setOptions still applies.
-        const { healthCheck } = options;
-        (async () => {
-          if (healthCheck) {
-            let healthy = false;
-            try {
-              healthy = (await healthCheck()) !== false;
-            } catch (e: any) {
-              log('healthCheck threw, not marking success:', e?.message || e);
-              return;
-            }
-            if (!healthy) {
-              log('healthCheck returned false, not marking success');
-              return;
-            }
+    const delay =
+      typeof autoMarkSuccessDelayMs === 'number' && autoMarkSuccessDelayMs >= 0
+        ? autoMarkSuccessDelayMs
+        : 1000;
+    const markSuccessTimer = setTimeout(() => {
+      // The health check is read when the timer fires, not when it was
+      // armed, so a late setOptions still applies.
+      const { healthCheck } = client.options;
+      (async () => {
+        if (healthCheck) {
+          let healthy = false;
+          try {
+            healthy = (await healthCheck()) !== false;
+          } catch (e: any) {
+            log('healthCheck threw, not marking success:', e?.message || e);
+            return;
           }
-          // Failures are reported and surfaced via the onError subscription.
-          await markSuccess();
-        })().catch(noop);
-      }, delay);
-    }
-    if (checkStrategy === 'both' || checkStrategy === 'onAppResume') {
-      stateListener.current = AppState.addEventListener(
-        'change',
-        (nextAppState) => {
-          if (nextAppState === 'active') {
-            checkUpdate().catch(noop);
+          if (!healthy) {
+            log('healthCheck returned false, not marking success');
+            return;
           }
         }
-      );
-    }
-    if (checkStrategy === 'both' || checkStrategy === 'onAppStart') {
-      checkUpdate().catch(noop);
-    }
+        // Failures are reported and surfaced via the onError subscription.
+        await client.markSuccess();
+      })().catch(noop);
+    }, delay);
     return () => {
-      if (markSuccessTimer) {
-        clearTimeout(markSuccessTimer);
-      }
-      stateListener.current?.remove();
+      clearTimeout(markSuccessTimer);
     };
-    // optionsVersion: checkStrategy/autoMarkSuccess are read from the
-    // in-place-mutated options object, so option changes must re-run this.
-  }, [checkUpdate, options, markSuccess, client, optionsVersion]);
+  }, [client, autoMarkSuccess, autoMarkSuccessDelayMs]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: optionsVersion re-runs this when setOptions mutates options in place
+  // (c) The start-of-life check runs once per mount, never again because of a
+  // setOptions. It still respects the strategy in force at mount: an app that
+  // mounts without automatic checks and enables them later gets its one
+  // start check at that point.
+  const startCheckDone = useRef(false);
   useEffect(() => {
-    const { dismissErrorAfter } = options;
+    if (
+      startCheckDone.current ||
+      (checkStrategy !== 'both' && checkStrategy !== 'onAppStart') ||
+      !client.assertDebug('checkUpdate()') ||
+      !assertWeb()
+    ) {
+      return;
+    }
+    startCheckDone.current = true;
+    latestCheckUpdate.current().catch(noop);
+  }, [client, checkStrategy]);
+
+  // A dismissErrorAfter change reschedules a running timer, not only the next
+  // error's.
+  const { dismissErrorAfter } = options;
+  useEffect(() => {
     if (
       lastError &&
       typeof dismissErrorAfter === 'number' &&
@@ -412,9 +466,7 @@ export const UpdateProvider = ({
         clearTimeout(dismissErrorTimer);
       };
     }
-    // optionsVersion: dismissErrorAfter changes must reschedule a running
-    // timer, not only apply to the next error.
-  }, [lastError, options, dismissError, optionsVersion]);
+  }, [lastError, dismissErrorAfter, dismissError]);
 
   const parseTestPayload = useCallback(
     (payload: UpdateTestPayload) => {
@@ -496,18 +548,14 @@ export const UpdateProvider = ({
       if (!url) {
         return;
       }
-      try {
-        const params = new URL(url).searchParams;
-        const payload = {
-          type: params.get('type'),
-          data: params.get('data'),
-        };
-        parseTestPayload(payload);
-      } catch (e: any) {
-        // A malformed deep link (new URL throws) must not become an
-        // unhandled rejection / a throw inside the 'url' event handler.
-        log('parseLinking: invalid url', e?.message || e);
-      }
+      // A plain query-string parse (never throws, see parseQueryParams): a
+      // malformed deep link must not become an unhandled rejection / a throw
+      // inside the 'url' event handler.
+      const params = parseQueryParams(url);
+      parseTestPayload({
+        type: params.type ?? null,
+        data: params.data ?? null,
+      });
     };
 
     Linking.getInitialURL().then(parseLinking).catch(noop);

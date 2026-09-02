@@ -1,35 +1,27 @@
 import { createContext, useContext, useMemo } from 'react';
 import type { Cresc, Pushy } from './client';
 import i18n from './i18n';
-import type { CheckResult, ProgressData } from './type';
+import type { CheckResult, ProgressData, UpdateTestPayload } from './type';
 
 const noop = () => {};
 const asyncNoop = () => Promise.resolve(undefined);
 
-export const defaultContext = {
-  checkUpdate: asyncNoop,
-  switchVersion: asyncNoop,
-  switchVersionLater: asyncNoop,
-  markSuccess: noop,
-  dismissError: noop,
-  downloadUpdate: asyncNoop,
-  downloadAndInstallApk: asyncNoop,
-  restartApp: asyncNoop,
-  resetToPackagedBundle: asyncNoop,
-  getCurrentVersionInfo: () => Promise.resolve({}),
-  parseTestQrCode: () => false,
-  currentHash: '',
-  packageVersion: '',
-  currentVersionInfo: {},
-};
-
-export const UpdateContext = createContext<{
-  checkUpdate: () => Promise<undefined | CheckResult>;
-  switchVersion: () => Promise<void>;
-  switchVersionLater: () => Promise<void>;
-  markSuccess: () => void;
+/**
+ * What UpdateProvider puts into UpdateContext (and useUpdate() returns, plus
+ * `progress`). The signatures mirror the provider's callbacks: the `info`
+ * parameters default to the last check result, `checkUpdate` accepts request
+ * extras, and the mutations resolve once the client is done.
+ */
+export interface UpdateContextValue {
+  checkUpdate: (params?: {
+    extra?: Partial<{ toHash: string }>;
+  }) => Promise<undefined | CheckResult>;
+  /** Resolves true once the native reload was requested; false when skipped. */
+  switchVersion: (info?: CheckResult) => Promise<boolean | undefined>;
+  switchVersionLater: (info?: CheckResult) => Promise<void>;
+  markSuccess: () => Promise<void>;
   dismissError: () => void;
-  downloadUpdate: () => Promise<boolean | undefined>;
+  downloadUpdate: (info?: CheckResult) => Promise<boolean | undefined>;
   downloadAndInstallApk: (url: string) => Promise<void>;
   // @deprecated use currentVersionInfo instead
   getCurrentVersionInfo: () => Promise<{
@@ -42,7 +34,7 @@ export const UpdateContext = createContext<{
     description?: string;
     metaInfo?: string;
   } | null;
-  parseTestQrCode: (code: string) => boolean;
+  parseTestQrCode: (code: string | UpdateTestPayload) => boolean;
   restartApp: () => Promise<void>;
   resetToPackagedBundle: (options?: {
     restart?: boolean;
@@ -52,7 +44,26 @@ export const UpdateContext = createContext<{
   client?: Pushy | Cresc;
   updateInfo?: CheckResult;
   lastError?: Error;
-}>(defaultContext);
+}
+
+export const defaultContext: UpdateContextValue = {
+  checkUpdate: asyncNoop,
+  switchVersion: asyncNoop,
+  switchVersionLater: asyncNoop,
+  markSuccess: asyncNoop,
+  dismissError: noop,
+  downloadUpdate: asyncNoop,
+  downloadAndInstallApk: asyncNoop,
+  restartApp: asyncNoop,
+  resetToPackagedBundle: asyncNoop,
+  getCurrentVersionInfo: () => Promise.resolve({}),
+  parseTestQrCode: () => false,
+  currentHash: '',
+  packageVersion: '',
+  currentVersionInfo: {},
+};
+
+export const UpdateContext = createContext<UpdateContextValue>(defaultContext);
 
 // Download progress ticks at high frequency, so it lives in its own context;
 // otherwise every tick would re-render all useUpdate() consumers even when
@@ -68,7 +79,9 @@ export const ProgressContext = createContext<ProgressData | undefined>(
  */
 export const useUpdateProgress = () => useContext(ProgressContext);
 
-export const useUpdate = () => {
+export const useUpdate = (): UpdateContextValue & {
+  progress?: ProgressData;
+} => {
   const context = useContext(UpdateContext);
   const progress = useContext(ProgressContext);
 
