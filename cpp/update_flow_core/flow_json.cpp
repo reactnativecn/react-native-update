@@ -1,8 +1,8 @@
 #include "flow_json.h"
 
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
-#include <cstdlib>
 
 namespace flowjson {
 
@@ -127,18 +127,41 @@ void AppendEscaped(const std::string& s, std::string* out) {
 }
 
 void AppendNumber(double n, std::string* out) {
+  // JSON.stringify prints non-finite numbers as null.
+  if (!std::isfinite(n)) {
+    out->append("null");
+    return;
+  }
   // The decision layer only ever emits integral numbers (hashes, counters,
   // rollout percentages); print them the way JSON.stringify does. The %.17g
   // fallback exists so an unexpected fractional value surfaces as a vector
   // mismatch instead of silent truncation.
-  if (std::isfinite(n) && n == std::floor(n) && std::fabs(n) <= 9007199254740992.0) {
+  if (n == std::floor(n) && std::fabs(n) <= 9007199254740992.0) {
     char buf[32];
     std::snprintf(buf, sizeof(buf), "%lld", static_cast<long long>(n));
     out->append(buf);
-  } else {
-    char buf[40];
-    std::snprintf(buf, sizeof(buf), "%.17g", n);
-    out->append(buf);
+    return;
+  }
+  char buf[40];
+  const int len = std::snprintf(buf, sizeof(buf), "%.17g", n);
+  if (len <= 0) {
+    out->append("null");
+    return;
+  }
+  // %g writes the LC_NUMERIC decimal point ("," — or a multibyte sequence in
+  // some locales). Everything else it can produce for a finite value is
+  // [0-9eE+-], so normalize whatever else appears back to '.' instead of
+  // depending on the process locale.
+  bool point_written = false;
+  for (int i = 0; i < len && i < static_cast<int>(sizeof(buf)); i++) {
+    const char c = buf[i];
+    if ((c >= '0' && c <= '9') || c == '-' || c == '+' || c == 'e' ||
+        c == 'E') {
+      out->push_back(c);
+    } else if (!point_written) {
+      out->push_back('.');
+      point_written = true;
+    }
   }
 }
 
@@ -206,8 +229,101 @@ namespace {
 
 // The parser also consumes server checkUpdate responses, so hostile input
 // must fail cleanly: nesting is capped to keep recursive descent off the
-// stack limit. Real responses nest ~4 levels.
+// stack limit (size and node count are capped in flow_json.h). Real
+// responses nest ~4 levels.
 constexpr int kMaxDepth = 64;
+
+// Locale-independent decimal -> double. strtod() honours LC_NUMERIC, so a
+// host process that called setlocale() into a comma-decimal locale would stop
+// at the '.' of every fractional literal and reject the whole response. The
+// token has already been validated against the JSON number grammar.
+// Correctly rounded whenever the significand fits in 53 bits and the decimal
+// exponent is within +-22 (exact double powers of ten) or the value is an
+// integer below 2^53 x 10^15 — which covers everything the decision layer
+// handles (hashes, counters, rollout percentages, timestamps). Anything more
+// exotic is computed as significand x 10^exponent in double arithmetic and
+// may differ from JSON.parse by an ulp; extreme exponents saturate to
+// infinity / zero like JS.
+double DecimalToDouble(const std::string& token) {
+  size_t i = 0;
+  bool negative = false;
+  if (i < token.size() && token[i] == '-') {
+    negative = true;
+    i++;
+  }
+  uint64_t significand = 0;
+  int digits = 0;    // significant digits folded into `significand`
+  int exponent = 0;  // decimal exponent applied to `significand`
+  bool fraction = false;
+  for (; i < token.size(); i++) {
+    const char c = token[i];
+    if (c == '.') {
+      fraction = true;
+      continue;
+    }
+    if (c == 'e' || c == 'E') {
+      break;
+    }
+    const int digit = c - '0';
+    if (significand == 0 && digit == 0) {
+      if (fraction) {
+        exponent--;  // leading zeros after the point only shift the scale
+      }
+      continue;
+    }
+    if (digits < 19) {
+      significand = significand * 10 + static_cast<uint64_t>(digit);
+      digits++;
+      if (fraction) {
+        exponent--;
+      }
+    } else if (!fraction) {
+      exponent++;  // beyond 19 digits: keep the magnitude, drop precision
+    }
+  }
+  if (i < token.size()) {  // exponent part
+    i++;
+    bool exp_negative = false;
+    if (i < token.size() && (token[i] == '+' || token[i] == '-')) {
+      exp_negative = token[i] == '-';
+      i++;
+    }
+    int exp_value = 0;
+    for (; i < token.size(); i++) {
+      if (exp_value < 100000) {  // saturate: the result is inf/0 anyway
+        exp_value = exp_value * 10 + (token[i] - '0');
+      }
+    }
+    exponent += exp_negative ? -exp_value : exp_value;
+  }
+
+  double result = 0.0;
+  if (significand != 0) {
+    static const double kPow10[] = {
+        1e0,  1e1,  1e2,  1e3,  1e4,  1e5,  1e6,  1e7,  1e8,  1e9,  1e10, 1e11,
+        1e12, 1e13, 1e14, 1e15, 1e16, 1e17, 1e18, 1e19, 1e20, 1e21, 1e22};
+    static const uint64_t kPow10Int[] = {
+        1ull,           10ull,           100ull,           1000ull,
+        10000ull,       100000ull,       1000000ull,       10000000ull,
+        100000000ull,   1000000000ull,   10000000000ull,   100000000000ull,
+        1000000000000ull, 10000000000000ull, 100000000000000ull,
+        1000000000000000ull};
+    const uint64_t kExact = 1ull << 53;
+    if (significand <= kExact && exponent >= -22 && exponent <= 22) {
+      result = exponent >= 0
+                   ? static_cast<double>(significand) * kPow10[exponent]
+                   : static_cast<double>(significand) / kPow10[-exponent];
+    } else if (significand <= kExact && exponent > 22 && exponent <= 22 + 15 &&
+               significand <= kExact / kPow10Int[exponent - 22]) {
+      result = static_cast<double>(significand * kPow10Int[exponent - 22]) *
+               kPow10[22];
+    } else {
+      result = static_cast<double>(significand) *
+               std::pow(10.0, static_cast<double>(exponent));
+    }
+  }
+  return negative ? -result : result;
+}
 
 class Parser {
  public:
@@ -257,6 +373,10 @@ class Parser {
   Value ParseValue() {
     SkipWs();
     if (pos_ >= text_.size()) {
+      ok_ = false;
+      return Value::Undefined();
+    }
+    if (++nodes_ > kMaxNodes) {
       ok_ = false;
       return Value::Undefined();
     }
@@ -376,16 +496,31 @@ class Parser {
           break;
         case 'u': {
           unsigned code = ParseHex4();
-          // BMP code point to UTF-8 (surrogate pairs are combined).
+          if (!ok_) {
+            return out;
+          }
+          // A high surrogate combines with an immediately following low
+          // surrogate escape into one supplementary code point.
           if (code >= 0xd800 && code <= 0xdbff &&
               text_.compare(pos_, 2, "\\u") == 0) {
+            const size_t escape_start = pos_;
             pos_ += 2;
             unsigned low = ParseHex4();
+            if (!ok_) {
+              return out;
+            }
             if (low >= 0xdc00 && low <= 0xdfff) {
               code = 0x10000 + ((code - 0xd800) << 10) + (low - 0xdc00);
             } else {
-              ok_ = false;
+              pos_ = escape_start;  // the loop re-reads that escape on its own
             }
+          }
+          // JSON.parse accepts a lone surrogate, but it has no UTF-8 form:
+          // emitting one byte-encoded (ED A0 80..) would push invalid UTF-8
+          // into napi_create_string_utf8 / NewString. Decode it to U+FFFD,
+          // the way TextEncoder serializes such a JS string.
+          if (code >= 0xd800 && code <= 0xdfff) {
+            code = 0xfffd;
           }
           AppendUtf8(code, &out);
           break;
@@ -496,25 +631,23 @@ class Parser {
       }
     }
 
-    char* end = nullptr;
-    std::string token = text_.substr(start, pos_ - start);
-    double n = std::strtod(token.c_str(), &end);
-    if (end == nullptr || *end != '\0') {
-      ok_ = false;
-      return Value::Undefined();
-    }
-    return Value::Number(n);
+    return Value::Number(DecimalToDouble(text_.substr(start, pos_ - start)));
   }
 
   const std::string& text_;
   size_t pos_ = 0;
   int depth_ = 0;
+  size_t nodes_ = 0;
   bool ok_ = true;
 };
 
 }  // namespace
 
 Value Parse(const std::string& text, bool* ok) {
+  if (text.size() > kMaxInputBytes) {
+    *ok = false;
+    return Value::Undefined();
+  }
   Parser parser(text);
   return parser.Run(ok);
 }

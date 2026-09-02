@@ -1,10 +1,13 @@
 // JNI surface of the update-flow decision layer for the Android orchestrator
 // (NativeCheckOrchestrator.java). Pure string-in/string-out: every payload is
 // JSON, matching the decision layer's own boundary. A null return means
-// "input did not parse" and the caller skips the check round.
+// "input did not parse" and the caller skips the check round; a C++ exception
+// (bad_alloc/length_error from an oversized body) maps onto that same path —
+// it must never unwind through the JNI boundary.
 #include <jni.h>
 
 #include <cstdint>
+#include <exception>
 #include <limits>
 #include <string>
 #include <vector>
@@ -81,27 +84,35 @@ jstring ToJString(JNIEnv* env, const std::string& value) {
 extern "C" JNIEXPORT jstring JNICALL
 Java_cn_reactnative_modules_update_NativeUpdateFlow_buildCheckRequestBody(
     JNIEnv* env, jclass, jstring inputJson) {
-  bool ok = false;
-  flowjson::Value input = flowjson::Parse(
-      pushy::jni_util::JStringToString(env, inputJson), &ok);
-  if (!ok || !input.IsObject()) {
+  try {
+    bool ok = false;
+    flowjson::Value input = flowjson::Parse(
+        pushy::jni_util::JStringToString(env, inputJson), &ok);
+    if (!ok || !input.IsObject()) {
+      return nullptr;
+    }
+    return ToJString(
+        env, flowjson::Stringify(updateflow::BuildCheckRequestBody(input)));
+  } catch (...) {
     return nullptr;
   }
-  return ToJString(
-      env, flowjson::Stringify(updateflow::BuildCheckRequestBody(input)));
 }
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_cn_reactnative_modules_update_NativeUpdateFlow_orderEndpointCandidates(
     JNIEnv* env, jclass, jstring endpointsJson, jdouble randomSample) {
-  bool ok = false;
-  flowjson::Value endpoints = flowjson::Parse(
-      pushy::jni_util::JStringToString(env, endpointsJson), &ok);
-  if (!ok || !endpoints.IsArray()) {
+  try {
+    bool ok = false;
+    flowjson::Value endpoints = flowjson::Parse(
+        pushy::jni_util::JStringToString(env, endpointsJson), &ok);
+    if (!ok || !endpoints.IsArray()) {
+      return nullptr;
+    }
+    return ToJString(env, flowjson::Stringify(updateflow::OrderEndpointCandidates(
+                              endpoints, randomSample)));
+  } catch (...) {
     return nullptr;
   }
-  return ToJString(env, flowjson::Stringify(updateflow::OrderEndpointCandidates(
-                            endpoints, randomSample)));
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -110,24 +121,32 @@ Java_cn_reactnative_modules_update_NativeUpdateFlow_isValidCheckResponse(
   if (responseText == nullptr) {
     return JNI_FALSE;
   }
-  return updateflow::IsValidCheckResponse(
-             pushy::jni_util::JStringToString(env, responseText))
-             ? JNI_TRUE
-             : JNI_FALSE;
+  try {
+    return updateflow::IsValidCheckResponse(
+               pushy::jni_util::JStringToString(env, responseText))
+               ? JNI_TRUE
+               : JNI_FALSE;
+  } catch (...) {
+    return JNI_FALSE;
+  }
 }
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_cn_reactnative_modules_update_NativeUpdateFlow_handleCheckResponse(
     JNIEnv* env, jclass, jstring responseText, jstring identityJson,
     jstring afterDownload) {
-  bool ok = false;
-  flowjson::Value identity = flowjson::Parse(
-      pushy::jni_util::JStringToString(env, identityJson), &ok);
-  if (!ok || !identity.IsObject()) {
+  try {
+    bool ok = false;
+    flowjson::Value identity = flowjson::Parse(
+        pushy::jni_util::JStringToString(env, identityJson), &ok);
+    if (!ok || !identity.IsObject()) {
+      return nullptr;
+    }
+    return ToJString(env, flowjson::Stringify(updateflow::HandleCheckResponse(
+                              pushy::jni_util::JStringToString(env, responseText),
+                              identity, false,
+                              pushy::jni_util::JStringToString(env, afterDownload))));
+  } catch (...) {
     return nullptr;
   }
-  return ToJString(env, flowjson::Stringify(updateflow::HandleCheckResponse(
-                            pushy::jni_util::JStringToString(env, responseText),
-                            identity, false,
-                            pushy::jni_util::JStringToString(env, afterDownload))));
 }

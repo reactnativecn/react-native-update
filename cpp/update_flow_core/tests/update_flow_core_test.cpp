@@ -2,7 +2,11 @@
 // against the C++ port and compares canonical serializations. A mismatch
 // means the two implementations of the decision layer disagree — fix the C++
 // side (the TS side is the reference) or regenerate stale vectors.
+#include <clocale>
+#include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -24,6 +28,10 @@ Value Dispatch(const std::string& fn, const Value& args, bool* known) {
   if (fn == "isInRollout") {
     return Value::Bool(
         updateflow::IsInRollout(args.At(0).AsNumber(), args.At(1).AsString()));
+  }
+  if (fn == "isMirrorRetryableCode") {
+    return Value::Bool(
+        updateflow::IsMirrorRetryableCode(args.At(0).AsString()));
   }
   if (fn == "joinUrls") {
     return updateflow::JoinUrls(args.At(0), args.At(1));
@@ -83,7 +91,7 @@ int RunParserRobustness() {
       "1e+",
       "\"\\q\"",
       "\"\\u12\"",
-      "\"\\ud800\\u0041\"",  // high surrogate followed by a non-low escape
+      "\"\\ud800\\u12\"",  // malformed escape after a high surrogate
       "{\"a\":1}garbage",
       "[}",
       "{]",
@@ -135,9 +143,23 @@ int RunParserRobustness() {
       {"{\"a\":1,\"b\":2,\"a\":3}", "{\"a\":3,\"b\":2}"},
       {"\"\\u00e9\"", "\"\xc3\xa9\""},                    // BMP escape -> UTF-8
       {"\"\\ud83d\\ude00\"", "\"\xf0\x9f\x98\x80\""},     // surrogate pair
+      // Lone surrogates parse (JSON.parse accepts them) but never produce
+      // invalid UTF-8: each becomes U+FFFD.
+      {"\"\\ud800\"", "\"\xef\xbf\xbd\""},
+      {"\"\\udc00\"", "\"\xef\xbf\xbd\""},
+      {"\"\\ud800x\"", "\"\xef\xbf\xbdx\""},
+      {"\"\\ud800\\u0041\"", "\"\xef\xbf\xbd" "A\""},  // high + non-low escape
+      {"\"\\ud800\\ud83d\\ude00\"", "\"\xef\xbf\xbd\xf0\x9f\x98\x80\""},
       {"  {  \"a\" : [ 1 , true , null ] }  ", "{\"a\":[1,true,null]}"},
       {"-0.5", "-0.5"},
       {"1e2", "100"},
+      {"1E2", "100"},
+      {"-0", "0"},
+      {"0.125", "0.125"},  // exact binary fractions only: %.17g fallback
+      {"25e-2", "0.25"},
+      {"1e400", "null"},   // Infinity: JSON.stringify prints null
+      {"-1e400", "null"},
+      {"1e-400", "0"},
   };
   for (const auto& t : tricky) {
     bool ok = false;
@@ -151,6 +173,129 @@ int RunParserRobustness() {
     }
   }
 
+  return failures;
+}
+
+// Number conversion is hand-rolled (locale-independent); pin it against the
+// C-locale strtod for the exactly-representable range the decision layer
+// uses, and check the process locale cannot change parse or print.
+int RunNumberConversion() {
+  int failures = 0;
+  const char* tokens[] = {
+      "0", "-0", "1", "-1", "7", "42", "100", "1.5", "-1.5", "0.1", "0.05",
+      "0.125", "123456789", "4294967295", "9007199254740992",
+      "-9007199254740992", "1719999999", "1e2", "1E2", "1e+2", "12e-1",
+      "1e22", "1e-22", "1.7e12", "12345678901234567e10", "2.5e-3",
+      "1e37", "4e37", "9007199254740992e15",
+  };
+  for (const char* token : tokens) {
+    bool ok = false;
+    Value v = Parse(token, &ok);
+    const double expected = std::strtod(token, nullptr);
+    const double actual = v.AsNumber();
+    if (!ok || !v.IsNumber() ||
+        std::memcmp(&expected, &actual, sizeof(double)) != 0) {
+      std::fprintf(stderr, "number: %s -> ok=%d %.17g (expected %.17g)\n",
+                   token, ok, actual, expected);
+      failures++;
+    }
+  }
+  {
+    bool ok = false;
+    Value inf = Parse("1e400", &ok);
+    if (!ok || !std::isinf(inf.AsNumber()) || inf.AsNumber() < 0) {
+      std::fprintf(stderr, "number: 1e400 must saturate to +Infinity\n");
+      failures++;
+    }
+    Value zero = Parse("1e-400", &ok);
+    if (!ok || zero.AsNumber() != 0) {
+      std::fprintf(stderr, "number: 1e-400 must underflow to 0\n");
+      failures++;
+    }
+  }
+
+  // A host process may setlocale() into a comma-decimal locale; neither
+  // parsing nor printing may notice. Skipped when no such locale is installed.
+  const char* comma_locales[] = {"de_DE.UTF-8", "de_DE.utf8", "de_DE",
+                                 "fr_FR.UTF-8", "fr_FR.utf8", "fr_FR"};
+  const char* applied = nullptr;
+  for (const char* name : comma_locales) {
+    if (std::setlocale(LC_NUMERIC, name) != nullptr) {
+      applied = name;
+      break;
+    }
+  }
+  if (applied != nullptr) {
+    char probe[32];
+    std::snprintf(probe, sizeof(probe), "%.1f", 1.5);
+    if (std::strcmp(probe, "1,5") == 0) {
+      bool ok = false;
+      Value v = Parse("{\"r\":1.5,\"n\":-0.25}", &ok);
+      const std::string printed = Stringify(v);
+      if (!ok || v.Get("r").AsNumber() != 1.5 ||
+          printed != "{\"r\":1.5,\"n\":-0.25}") {
+        std::fprintf(stderr, "locale %s: parse ok=%d printed=%s\n", applied,
+                     ok, printed.c_str());
+        failures++;
+      }
+      std::printf("number conversion checked under %s\n", applied);
+    }
+    std::setlocale(LC_NUMERIC, "C");
+  } else {
+    std::printf("no comma-decimal locale installed; locale check skipped\n");
+  }
+  return failures;
+}
+
+// Input caps (flow_json.h): oversized or over-populated documents are
+// rejected before they can balloon the heap.
+int RunInputCaps() {
+  int failures = 0;
+  {
+    std::string exact = "\"" + std::string(flowjson::kMaxInputBytes - 2, 'a') + "\"";
+    bool ok = false;
+    Parse(exact, &ok);
+    if (!ok) {
+      std::fprintf(stderr, "caps: a document of exactly kMaxInputBytes must parse\n");
+      failures++;
+    }
+    std::string over = "\"" + std::string(flowjson::kMaxInputBytes - 1, 'a') + "\"";
+    ok = true;
+    Parse(over, &ok);
+    if (ok) {
+      std::fprintf(stderr, "caps: a document over kMaxInputBytes must be rejected\n");
+      failures++;
+    }
+  }
+  {
+    // The array itself is one node: kMaxNodes - 1 elements fit, kMaxNodes do not.
+    for (size_t elements : {flowjson::kMaxNodes - 1, flowjson::kMaxNodes}) {
+      std::string doc = "[";
+      for (size_t i = 0; i < elements; i++) {
+        doc += i == 0 ? "0" : ",0";
+      }
+      doc += "]";
+      bool ok = false;
+      Parse(doc, &ok);
+      const bool expected = elements < flowjson::kMaxNodes;
+      if (ok != expected) {
+        std::fprintf(stderr, "caps: %zu elements parsed=%d, expected %d\n",
+                     elements, ok, expected);
+        failures++;
+      }
+    }
+  }
+  {
+    // Through the pipeline an oversized body is an invalid response.
+    std::string body = "{\"update\":true,\"hash\":\"h\",\"pad\":\"" +
+                       std::string(flowjson::kMaxInputBytes, 'x') + "\"}";
+    Value decision = updateflow::HandleCheckResponse(body, Value::Object(),
+                                                     false, "none");
+    if (decision.Get("reason").AsString() != "invalidResponse") {
+      std::fprintf(stderr, "caps: oversized body must yield invalidResponse\n");
+      failures++;
+    }
+  }
   return failures;
 }
 
@@ -287,7 +432,8 @@ int main(int argc, char* argv[]) {
     std::fprintf(stderr, "%s must contain a non-empty cases array\n", argv[1]);
     return 2;
   }
-  int failures = RunParserRobustness() + RunHandleCheckResponse();
+  int failures = RunParserRobustness() + RunNumberConversion() +
+                 RunInputCaps() + RunHandleCheckResponse();
   for (size_t i = 0; i < cases.Size(); i++) {
     const Value& testCase = cases.At(i);
     const std::string& fn = testCase.Get("fn").AsString();

@@ -375,7 +375,11 @@ export function decideDownload(
   identity: { currentVersion?: string; rolledBackVersion?: string },
   isDev = false
 ): DownloadDecision {
-  const { hash, diff, pdiff, full, paths = [] } = info;
+  const { hash, diff, pdiff, full } = info;
+  // A server `paths: null` behaves like an absent field (a destructuring
+  // default only covers undefined, and `null.map` would throw). The C++ port
+  // treats null and undefined alike here.
+  const paths = info.paths ?? [];
   if (!info.update || !hash) {
     return { action: 'none', reason: 'noUpdate' };
   }

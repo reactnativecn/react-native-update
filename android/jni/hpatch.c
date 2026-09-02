@@ -15,8 +15,63 @@
 
 #define kMaxLoadMemOldSize ((1<<20)*8)
 
+// LZMA/LZMA2 declare their dictionary size inside the compressed stream, i.e.
+// in attacker-controlled patch bytes, and LzmaDec_Allocate() allocates it
+// verbatim — up to 4 GB. The plugins live in the HDiffPatch submodule, so the
+// cap is applied here by wrapping open(): decode the declared dictionary the
+// way the decoder does and refuse anything above kMaxLzmaDictSize before any
+// allocation happens. hdiffz defaults to an 8 MB dictionary and reduces it to
+// the input size (compress_plugin_demo.h reduceSize), so real patches sit far
+// below the cap; a refused stream fails the patch cleanly (kHPatch_error_patch)
+// and the caller falls back to the full package.
+#define kMaxLzmaDictSize ((hpatch_uint32_t)((1<<20)*128))
+
 #define  _check(v,errorType) do{ \
     if (!(v)){ if (result==kHPatch_ok) result=errorType; if (!_isInClear){ goto _clear; }; } }while(0)
+
+#ifdef  _CompressPlugin_lzma
+static hpatch_decompressHandle _capped_lzma_open(hpatch_TDecompress* decompressPlugin,
+                                                 hpatch_StreamPos_t dataSize,
+                                                 const hpatch_TStreamInput* codeStream,
+                                                 hpatch_StreamPos_t code_begin,
+                                                 hpatch_StreamPos_t code_end){
+    // stream layout (see _lzma_open): propsSize byte, then propsSize bytes of
+    // LZMA props whose bytes 1..4 hold the little-endian dictionary size.
+    unsigned char propsSize=0;
+    unsigned char props[LZMA_PROPS_SIZE];
+    hpatch_uint32_t dicSize;
+    if (code_end-code_begin<1) return 0;
+    if (!codeStream->read(codeStream,code_begin,&propsSize,&propsSize+1)) return 0;
+    if ((propsSize<LZMA_PROPS_SIZE)||(propsSize>code_end-code_begin-1)) return 0;
+    if (!codeStream->read(codeStream,code_begin+1,props,props+LZMA_PROPS_SIZE)) return 0;
+    dicSize=((hpatch_uint32_t)props[1])|(((hpatch_uint32_t)props[2])<<8)
+           |(((hpatch_uint32_t)props[3])<<16)|(((hpatch_uint32_t)props[4])<<24);
+    if (dicSize>kMaxLzmaDictSize) return 0;
+    return lzmaDecompressPlugin.open(decompressPlugin,dataSize,codeStream,code_begin,code_end);
+}
+static hpatch_TDecompress cappedLzmaDecompressPlugin={_lzma_is_can_open,_capped_lzma_open,
+                                                      _lzma_close,_lzma_decompress_part};
+#endif
+#ifdef  _CompressPlugin_lzma2
+static hpatch_decompressHandle _capped_lzma2_open(hpatch_TDecompress* decompressPlugin,
+                                                  hpatch_StreamPos_t dataSize,
+                                                  const hpatch_TStreamInput* codeStream,
+                                                  hpatch_StreamPos_t code_begin,
+                                                  hpatch_StreamPos_t code_end){
+    // stream layout (see _lzma2_open): a single LZMA2 property byte encodes
+    // the dictionary size (Lzma2Dec_GetOldProps): 40 means 4 GB - 1.
+    unsigned char prop=0;
+    hpatch_uint32_t dicSize;
+    if (code_end-code_begin<1) return 0;
+    if (!codeStream->read(codeStream,code_begin,&prop,&prop+1)) return 0;
+    if (prop>40) return 0;
+    dicSize=(prop==40)?0xFFFFFFFF:(((hpatch_uint32_t)2|(prop&1))<<(prop/2+11));
+    if (dicSize>kMaxLzmaDictSize) return 0;
+    return lzma2DecompressPlugin.open(decompressPlugin,dataSize,codeStream,code_begin,code_end);
+}
+static hpatch_TDecompress cappedLzma2DecompressPlugin={_lzma2_is_can_open,_capped_lzma2_open,
+                                                       _lzma2_close,_lzma2_decompress_part};
+#endif
 
 static hpatch_TDecompress* getDecompressPlugin(const char* compressType){
 #ifdef  _CompressPlugin_zlib
@@ -28,12 +83,12 @@ static hpatch_TDecompress* getDecompressPlugin(const char* compressType){
         return &bz2DecompressPlugin;
 #endif
 #ifdef  _CompressPlugin_lzma
-    if (lzmaDecompressPlugin.is_can_open(compressType))
-        return &lzmaDecompressPlugin;
+    if (cappedLzmaDecompressPlugin.is_can_open(compressType))
+        return &cappedLzmaDecompressPlugin;
 #endif
 #ifdef  _CompressPlugin_lzma2
-    if (lzma2DecompressPlugin.is_can_open(compressType))
-        return &lzma2DecompressPlugin;
+    if (cappedLzma2DecompressPlugin.is_can_open(compressType))
+        return &cappedLzma2DecompressPlugin;
 #endif
     return 0;
 }

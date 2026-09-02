@@ -96,9 +96,21 @@ class Value {
 // equal.
 std::string Stringify(const Value& v);
 
+// Hard limits for Parse. The TS reference has none (JSON.parse is unbounded)
+// and the divergence is deliberate: this parser runs inside the native
+// orchestrators on the raw checkUpdate body, and with sizeof(Value) ~ 96 a
+// 1 MB "[0,0,...]" balloons to ~100 MB of heap. A response over either cap is
+// treated as malformed (HandleCheckResponse -> invalidResponse). Real
+// responses are a few KB and a few hundred nodes.
+constexpr size_t kMaxInputBytes = 1024 * 1024;
+constexpr size_t kMaxNodes = 65536;
+
 // Strict JSON parser (the vectors file and checkUpdate responses). Returns
 // Undefined and sets *ok to false on malformed input; nesting beyond 64
-// levels is rejected so hostile server data cannot exhaust the stack.
+// levels, more than kMaxInputBytes of text or more than kMaxNodes values are
+// rejected so hostile server data cannot exhaust the stack or the heap.
+// Number parsing/printing is locale-independent (never strtod/LC_NUMERIC).
+// Lone surrogate escapes decode to U+FFFD so the output is always valid UTF-8.
 Value Parse(const std::string& text, bool* ok);
 
 }  // namespace flowjson

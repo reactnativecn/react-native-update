@@ -45,11 +45,15 @@ inline std::vector<std::string> JArrayToVector(
   return result;
 }
 
-inline void ThrowRuntimeException(JNIEnv* env, const std::string& message) {
+inline void ThrowRuntimeException(JNIEnv* env, const char* message) {
   jclass exception = env->FindClass("java/lang/RuntimeException");
   if (exception != nullptr) {
-    env->ThrowNew(exception, message.c_str());
+    env->ThrowNew(exception, message);
   }
+}
+
+inline void ThrowRuntimeException(JNIEnv* env, const std::string& message) {
+  ThrowRuntimeException(env, message.c_str());
 }
 
 }  // namespace jni_util

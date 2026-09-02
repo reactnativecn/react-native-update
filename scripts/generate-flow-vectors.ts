@@ -18,6 +18,7 @@ import {
   buildCheckRequestBody,
   decideDownload,
   isInRollout,
+  isMirrorRetryableCode,
   isValidCheckResult,
   joinUrls,
   murmurhash3_32_gc,
@@ -29,6 +30,7 @@ import {
 const impls: Record<string, (...args: any[]) => any> = {
   murmurhash3_32_gc,
   isInRollout,
+  isMirrorRetryableCode,
   joinUrls,
   orderEndpointCandidates,
   buildCheckRequestBody,
@@ -73,9 +75,24 @@ export const buildVectors = (): FlowVector[] => {
     'ab',
     'abc',
     'abcd', // every remainder-length path through the tail switch
+    // Non-ASCII keys: the hash reads the low byte of each UTF-16 code unit
+    // (charCodeAt & 0xff), so the C++ port must decode UTF-8 to UTF-16 units
+    // — including surrogate pairs — rather than hash the UTF-8 bytes.
+    'héllo',
+    'ключ',
+    '日本語',
+    '😀',
+    'a😀b',
+    'é',
   ]) {
     add('murmurhash3_32_gc', key);
   }
+
+  // isMirrorRetryableCode — only PATCH_FAILED is not worth another mirror
+  add('isMirrorRetryableCode', 'PATCH_FAILED');
+  add('isMirrorRetryableCode', 'DOWNLOAD_FAILED');
+  add('isMirrorRetryableCode', '');
+  add('isMirrorRetryableCode'); // undefined code
 
   // isInRollout — boundaries around murmur('test1') % 100 === 62
   add('isInRollout', 63, 'test1');
@@ -108,6 +125,10 @@ export const buildVectors = (): FlowVector[] => {
   add('orderEndpointCandidates', ['a', null, 'a', '', 'b'], 0.6);
   add('orderEndpointCandidates', [], 0.5);
   add('orderEndpointCandidates', ['a'], 0.5);
+  // Non-string entries (a misconfigured endpoints list): truthy ones survive
+  // and dedupe by === — 1 and '1' stay distinct, 1 and 1 collapse.
+  add('orderEndpointCandidates', ['a', 1, 'a', 1, 2, true, 'b', '1', 0], 0);
+  add('orderEndpointCandidates', ['a', 1, 'a', 1, 2, true, 'b', '1', 0], 0.5);
 
   // buildCheckRequestBody
   const cInfo = { rnu: '10.50.0', rn: '0.85.2', os: 'ios 17.5', uuid: 'u-1' };
@@ -183,6 +204,12 @@ export const buildVectors = (): FlowVector[] => {
     '{"paused":true}',
     'not json',
     '',
+    // Lone surrogate escapes are accepted by JSON.parse; the C++ parser must
+    // accept them too (decoding each to U+FFFD, never invalid UTF-8).
+    '{"upToDate":true,"s":"\\ud800"}',
+    '{"upToDate":true,"s":"\\udc00x"}',
+    '{"upToDate":true,"s":"\\ud800\\u0041"}',
+    '{"upToDate":true,"s":"\\ud83d\\ude00"}',
   ]) {
     add('isValidCheckResponse', text);
   }
@@ -282,6 +309,9 @@ export const buildVectors = (): FlowVector[] => {
     false
   );
   add('decideDownload', { ...dlInfo, paths: [] }, dlIdentity, false);
+  // a server `paths: null` behaves like an absent field
+  add('decideDownload', { ...dlInfo, paths: null }, dlIdentity, false);
+  add('decideDownload', { ...dlInfo, paths: null }, dlIdentity, true); // devNoop
   add(
     'decideDownload',
     { update: true, hash: 'next-hash', full: 'next.ppk' },
