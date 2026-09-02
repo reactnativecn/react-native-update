@@ -91,16 +91,49 @@ Pod::Spec.new do |s|
   s.source = { :git => 'https://github.com/reactnativecn/react-native-update.git', :tag => "#{s.version}" }
 
   s.libraries = 'bz2', 'z'
+  # No search path into the pod source: every include under ios/ resolves
+  # relative to the including file (the cpp/ core via ../../cpp/...), and the
+  # former absolute "#{podspec_dir}/ios" entry made the generated xcconfig
+  # machine-specific.
   s.pod_target_xcconfig = { 
-    'USER_HEADER_SEARCH_PATHS' => "#{podspec_dir}/ios \"$(PODS_ROOT)/Headers/Public/SSZipArchive\" \"$(PODS_ROOT)/Headers/Public/React-Codegen/RCTPushySpec\"", 
+    'USER_HEADER_SEARCH_PATHS' => "\"$(PODS_ROOT)/Headers/Public/SSZipArchive\" \"$(PODS_ROOT)/Headers/Public/React-Codegen/RCTPushySpec\"", 
     "DEFINES_MODULE" => "YES" 
   }
+  # buildTime for binary-rebuild detection (SyncBinaryVersion) and the check
+  # request. The stamp is refreshed on every build and ships as a resource.
+  # When the pod source is not writable (read-only checkout or cache) the
+  # committed value is kept; +buildTime falls back to the main bundle's
+  # Info.plist mtime when the file is missing or empty, so it is never blank.
   s.resource = 'ios/pushy_build_time.txt'
-  s.script_phase = { :name => 'Generate build time', :script => "set -x;date +%s > \"#{podspec_dir}/ios/pushy_build_time.txt\"", :execution_position => :before_compile }
+  build_time_phase = {
+    :name => 'Generate build time',
+    :script => "set -x; f=\"${PODS_TARGET_SRCROOT:-#{podspec_dir}}/ios/pushy_build_time.txt\"; if [ -w \"$f\" ] || { [ ! -e \"$f\" ] && [ -w \"$(dirname \"$f\")\" ]; }; then date +%s > \"$f\"; else echo \"warning: $f is not writable, keeping the shipped build time\"; fi",
+    :execution_position => :before_compile
+  }
+  # Declaring the output lets Xcode order the resource copy (into the app, or
+  # into this pod's framework under use_frameworks!) after the stamp is
+  # written and stops the output-less-phase warning. A phase with outputs and
+  # no inputs is otherwise skipped once the file exists — and it is committed
+  # — so the phase must also be marked always out of date to keep refreshing
+  # the stamp every build. CocoaPods < 1.11 has no such key; there the phase
+  # stays output-less (runs every build, as before).
+  if defined?(Pod::Specification::DSL::SCRIPT_PHASE_OPTIONAL_KEYS) &&
+     Pod::Specification::DSL::SCRIPT_PHASE_OPTIONAL_KEYS.include?(:always_out_of_date)
+    build_time_phase[:output_files] = ['$(PODS_TARGET_SRCROOT)/ios/pushy_build_time.txt']
+    build_time_phase[:always_out_of_date] = '1'
+  end
+  s.script_phase = build_time_phase
+  # Privacy manifest (required-reason APIs: disk space, file timestamps,
+  # system boot time, user defaults) delivered as its own resource bundle so
+  # static and dynamic integrations both carry it.
+  s.resource_bundles = { 'react-native-update_privacy' => ['ios/PrivacyInfo.xcprivacy'] }
 
   s.dependency 'React'
   s.dependency "React-Core"
-  s.dependency 'SSZipArchive'
+  # The unzip guard relies on the 2.x delegate contract
+  # (zipArchiveShouldUnzipFileAtIndex:... cancels, _sanitizedPath); a future
+  # major could change it silently.
+  s.dependency 'SSZipArchive', '~> 2.4'
 
   # Conditionally add Expo dependency
   if valid_expo_project

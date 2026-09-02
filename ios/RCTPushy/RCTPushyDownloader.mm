@@ -1,16 +1,17 @@
 #import "RCTPushyDownloader.h"
+#include "../../cpp/patch_core/archive_limits.h"
 
 static NSString *const RCTPushyDownloaderErrorDomain = @"cn.reactnative.pushy";
 
-// Cross-launch resumable download (NATIVE_CHECKUPDATE_DESIGN §11.4): the
-// archive streams straight into savePath (an NSURLSessionDownloadTask's
+// Cross-launch resumable download (NATIVE_CHECKUPDATE_DESIGN §11.4): a data
+// task streams the archive straight into savePath (a download task's
 // temporary file is discarded on failure, which made every partial byte
 // worthless), and a sidecar next to it records what the partial belongs to
 // (url + validators + total). A brick gets a few hundred milliseconds per
 // launch plus a bounded crash-rescue window, so progress must be monotonic
 // across process deaths.
 
-static NSString *RCTPushyResumeSidecarPath(NSString *savePath) {
+NSString *RCTPushyResumeSidecarPath(NSString *savePath) {
     return [savePath stringByAppendingString:@".resume"];
 }
 
@@ -35,11 +36,37 @@ static void RCTPushyDeleteResumeSidecar(NSString *savePath) {
                                                error:nil];
 }
 
-static long long RCTPushyFileSize(NSString *path) {
+long long RCTPushyFileSize(NSString *path) {
     NSDictionary *attributes =
         [[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil];
     NSNumber *size = attributes[NSFileSize];
     return size == nil ? -1 : size.longLongValue;
+}
+
+// Free space on the volume holding `path` (walks up to an existing ancestor);
+// -1 when unknown.
+static long long RCTPushyFreeDiskSpaceForPath(NSString *path) {
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    NSString *probe = path;
+    while (probe.length > 1 && ![fileManager fileExistsAtPath:probe]) {
+        probe = [probe stringByDeletingLastPathComponent];
+    }
+    NSDictionary *attributes = [fileManager attributesOfFileSystemForPath:probe error:nil];
+    NSNumber *free = attributes[NSFileSystemFreeSize];
+    return free == nil ? -1 : free.longLongValue;
+}
+
+NSString *RCTPushyFreeSpaceShortfall(NSString *path, long long bytesToWrite) {
+    long long free = RCTPushyFreeDiskSpaceForPath(path);
+    if (free < 0) {
+        return nil;
+    }
+    long long needed = MAX(0LL, bytesToWrite) + pushy::archive_limits::kFreeDiskMarginBytes;
+    if (free < needed) {
+        return [NSString stringWithFormat:@"insufficient disk space: need %lld bytes, have %lld",
+                needed, free];
+    }
+    return nil;
 }
 
 // "bytes <start>-<end>/<total>". Returns the total (0 when "*"), or -1 when
@@ -90,6 +117,10 @@ static long long RCTPushyParseContentRange(NSString *header, long long expectedS
 // NSURLSession delivers decoded bytes, so length accounting against the
 // encoded Content-Length is meaningless and resume offsets cannot be trusted.
 @property (nonatomic, assign) BOOL encodedBody;
+// The archive was rejected outright (over archive_limits::kMaxArchiveBytes):
+// nothing on disk is worth resuming, so completion drops the partial and its
+// sidecar instead of leaving them as resume state.
+@property (nonatomic, assign) BOOL discardPartial;
 @property (nonatomic, assign) int lastReportedPercentage;
 @property (nonatomic, assign) long long lastReportedBytes;
 @end
@@ -220,6 +251,10 @@ completionHandler:(void (^)(NSString *path, NSError *error))completionHandler
         } @catch (NSException *exception) {
         }
         self.fileHandle = nil;
+    }
+    if (self.discardPartial) {
+        [[NSFileManager defaultManager] removeItemAtPath:self.savePath error:nil];
+        RCTPushyDeleteResumeSidecar(self.savePath);
     }
 
     void (^completionHandler)(NSString *, NSError *) = self.completionHandler;
@@ -375,6 +410,33 @@ didReceiveResponse:(NSURLResponse *)response
         self.expectedTotal = self.contentLength > 0 ? self.contentLength : 0;
     }
 
+    // Caps from archive_limits.h, applied before the first body byte lands
+    // (Android does the same): the announced size up front here, streamed
+    // bytes in didReceiveData as the backstop for unknown/chunked lengths.
+    long long announcedTotal = self.expectedTotal;
+    if (announcedTotal <= 0 && !self.encodedBody && self.contentLength > 0) {
+        // A 206 whose Content-Range total is "*" still announces this body.
+        announcedTotal = self.baseOffset + self.contentLength;
+    }
+    if (announcedTotal > pushy::archive_limits::kMaxArchiveBytes) {
+        [self failWithDescription:[NSString stringWithFormat:@"archive too large: %lld bytes",
+                                   announcedTotal]
+                             code:-1];
+        self.discardPartial = YES;
+        completionHandler(NSURLSessionResponseCancel);
+        [self completeWithError:self.fileError];
+        return;
+    }
+    NSString *shortfall = RCTPushyFreeSpaceShortfall(
+        self.savePath, announcedTotal > 0 ? announcedTotal - self.baseOffset : 0);
+    if (shortfall != nil) {
+        // The partial (if any) stays: a later attempt may find the space.
+        [self failWithDescription:shortfall code:-1];
+        completionHandler(NSURLSessionResponseCancel);
+        [self completeWithError:self.fileError];
+        return;
+    }
+
     NSFileManager *fileManager = [NSFileManager defaultManager];
     if (!append) {
         // The server ignored the range (or none was sent): start over.
@@ -416,6 +478,19 @@ didReceiveResponse:(NSURLResponse *)response
         return;
     }
     if (self.fileHandle == nil || self.fileError != nil) {
+        return;
+    }
+    if (self.baseOffset + self.receivedBytes + (long long)data.length
+        > pushy::archive_limits::kMaxArchiveBytes) {
+        // Unknown/chunked length backstop; an announced size was already
+        // checked in didReceiveResponse. Checked before the write so the
+        // file on disk never exceeds the cap.
+        [self failWithDescription:[NSString stringWithFormat:
+            @"archive too large: exceeded %lld bytes",
+            pushy::archive_limits::kMaxArchiveBytes]
+                             code:-1];
+        self.discardPartial = YES;
+        [dataTask cancel];
         return;
     }
     @try {
@@ -488,7 +563,8 @@ didCompleteWithError:(NSError *)error
         }
     }
     // On failure the partial + sidecar stay on disk — that is the resume
-    // state a later launch (or crash-rescue window) picks up.
+    // state a later launch (or crash-rescue window) picks up — unless the
+    // archive was rejected outright (discardPartial).
     [self completeWithError:finalError];
 }
 
