@@ -1,5 +1,10 @@
 {
   "extends": "@react-native/typescript-config",
   "include": ["**/*.ts", "**/*.tsx"],
-  "exclude": ["**/node_modules", "**/Pods", "**/harmony", "**/Example"]
+  "exclude": ["**/node_modules", "**/Pods", "**/harmony", "**/Example"],
+  "compilerOptions": {
+    // The RN base config lists "jest"; this package tests with bun:test and
+    // no longer installs @types/jest, so a clean install would fail tsc.
+    "types": ["bun"]
+  }
 }
