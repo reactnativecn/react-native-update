@@ -1,5 +1,7 @@
 package cn.reactnative.modules.update;
 
+import android.os.Build;
+import android.util.Log;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -39,13 +41,34 @@ final class InstallRecord {
         return record.toString();
     }
 
-    /** Writes the record and fsyncs it: the rename that follows must find it on disk. */
+    /**
+     * Writes the record and fsyncs it, then the directory holding it: the
+     * rename that follows must find the record on disk, and the new
+     * directory entry is only durable once the directory itself is synced.
+     */
     static void write(File versionDir, String recordJson) throws IOException {
         File file = new File(versionDir, FILE_NAME);
         try (FileOutputStream out = new FileOutputStream(file)) {
             out.write(recordJson.getBytes(StandardCharsets.UTF_8));
             out.flush();
             out.getFD().sync();
+        }
+        syncDirectory(versionDir);
+    }
+
+    // java.nio.file (the only way to open a directory for fsync from Java)
+    // is API 26+ on Android; below that the file fsync above is all there
+    // is. Best-effort by design: a file system that refuses to open a
+    // directory for reading must not fail the install.
+    private static void syncDirectory(File dir) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            return;
+        }
+        try (java.nio.channels.FileChannel channel = java.nio.channels.FileChannel.open(
+                dir.toPath(), java.nio.file.StandardOpenOption.READ)) {
+            channel.force(true);
+        } catch (Throwable e) {
+            Log.w("pushy", "Directory fsync skipped for " + dir + ": " + e);
         }
     }
 

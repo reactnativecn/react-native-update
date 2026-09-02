@@ -55,14 +55,6 @@ final class ApkInstaller {
         ReactApplicationContext reactContext,
         Promise promise
     ) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
-            promise.reject(
-                ErrorCodes.UNSUPPORTED_PLATFORM,
-                "APK installation requires Android 5.0 or newer"
-            );
-            return false;
-        }
-
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             return true;
         }
@@ -129,12 +121,23 @@ final class ApkInstaller {
         return false;
     }
 
+    /**
+     * Stages the downloaded APK in a PackageInstaller session and commits it;
+     * the status receiver settles the promise. The APK file is deleted once
+     * the session has the bytes or the attempt failed, so a leftover can
+     * never be installed by a later call (CODE_AUDIT 2.6).
+     */
     static void install(
         ReactApplicationContext reactContext,
         File apkFile,
         String sourceUrl,
         Promise promise
     ) {
+        // TODO(CODE_AUDIT 2.6): verify a server-provided sha256 of the APK
+        // before staging it. The `hash` JS passes to downloadAndInstallApk is
+        // the progress-event key ("downloadingApk"), not a digest, so there
+        // is nothing to check against yet; until the server sends one, the
+        // https-only rule in UpdateModuleImpl is the integrity boundary.
         PackageInstaller packageInstaller = null;
         int sessionId = -1;
         boolean committed = false;
@@ -216,6 +219,10 @@ final class ApkInstaller {
                 }
             }
             promise.reject(ErrorCodes.APK_INSTALL_FAILED, "Unable to stage APK installation", error);
+        } finally {
+            if (apkFile.exists() && !apkFile.delete()) {
+                Log.w(UpdateContext.TAG, "Unable to delete staged APK " + apkFile);
+            }
         }
     }
 

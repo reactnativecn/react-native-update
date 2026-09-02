@@ -18,18 +18,35 @@ final class ReactReloadManager {
     private ReactReloadManager() {
     }
 
-    static void restartApp(
-        UpdateContext updateContext,
-        ReactApplicationContext reactContext,
-        @Nullable String hash
-    ) throws Throwable {
+    /**
+     * First half of a restart, for the state serial thread: activate the
+     * requested version (bundle digest + commit) and resolve the bundle to
+     * load. Nothing here touches React, so nothing here needs the UI thread
+     * (CODE_AUDIT 2.2). Returns the bundle path, or null for the packaged
+     * bundle.
+     */
+    @Nullable
+    static String prepareRestart(UpdateContext updateContext, @Nullable String hash) {
         if (hash != null) {
             updateContext.switchVersion(hash);
         }
+        return updateContext.getBundleUrl();
+    }
 
+    /**
+     * Second half, for the UI thread: point the running React instance at
+     * {@code updateBundlePath} and reload it. Throws when no supported
+     * injection worked — the caller rejects RESTART_FAILED. There is
+     * deliberately no Activity.recreate() fallback: it would reload the
+     * previous bundle while the promise reported success (CODE_AUDIT 2.9).
+     */
+    static void reload(
+        UpdateContext updateContext,
+        ReactApplicationContext reactContext,
+        @Nullable String updateBundlePath
+    ) throws Throwable {
         Context application = reactContext.getApplicationContext();
         Activity currentActivity = reactContext.getCurrentActivity();
-        String updateBundlePath = updateContext.getBundleUrl();
 
         boolean newArchitectureEnabled = isNewArchitectureEnabled(application);
         Object reactHost = newArchitectureEnabled ? getReactHost(currentActivity, application) : null;
@@ -38,53 +55,28 @@ final class ReactReloadManager {
                 reloadReactHost(reactHost, createBundleLoader(application, updateBundlePath, true));
                 return;
             } catch (Throwable err) {
-                Log.e(UpdateContext.TAG, "Failed to reload via ReactHost", err);
+                Log.e(UpdateContext.TAG,
+                    "Failed to reload via ReactHost, trying ReactInstanceManager", err);
             }
         }
 
         JSBundleLoader loader = createBundleLoader(application, updateBundlePath, false);
+        ReactInstanceManager instanceManager =
+            resolveReactInstanceManager(updateContext, application);
+
+        // Java (mBundleLoader / mJSBundleFile) and Kotlin (bundleLoader /
+        // jsBundleFile) spellings of the private fields are both tried.
         try {
-            ReactInstanceManager instanceManager =
-                resolveReactInstanceManager(updateContext, application);
-
-            try {
-                Field loadField = instanceManager.getClass().getDeclaredField("mBundleLoader");
-                loadField.setAccessible(true);
-                loadField.set(instanceManager, loader);
-            } catch (Throwable err) {
-                Field jsBundleField = instanceManager.getClass().getDeclaredField("mJSBundleFile");
-                jsBundleField.setAccessible(true);
-                jsBundleField.set(instanceManager, updateContext.getBundleUrl());
-            }
-
-            instanceManager.recreateReactContextInBackground();
+            Field loadField = getCompatibleField(instanceManager.getClass(), "bundleLoader");
+            loadField.setAccessible(true);
+            loadField.set(instanceManager, loader);
         } catch (Throwable err) {
-            if (currentActivity == null) {
-                throw err;
-            }
-
-            try {
-                if (!newArchitectureEnabled) {
-                    throw err;
-                }
-                Object currentReactHost = getReactHost(currentActivity, application);
-                if (currentReactHost == null) {
-                    throw err;
-                }
-                reloadReactHost(
-                    currentReactHost,
-                    createBundleLoader(application, updateBundlePath, true)
-                );
-            } catch (Throwable reloadError) {
-                Log.e(
-                    UpdateContext.TAG,
-                    "Failed to reload via ReactHost, falling back to Activity.recreate() "
-                        + "(this may load the previous bundle until next cold start)",
-                    reloadError
-                );
-                currentActivity.recreate();
-            }
+            Field jsBundleField = getCompatibleField(instanceManager.getClass(), "jsBundleFile");
+            jsBundleField.setAccessible(true);
+            jsBundleField.set(instanceManager, updateBundlePath);
         }
+
+        instanceManager.recreateReactContextInBackground();
     }
 
     private static Field getCompatibleField(Class<?> clazz, String fieldName)

@@ -57,6 +57,26 @@ def resolveInstalledExpoMajorVersion(File projectDir) {
     }
 }
 
+// Reads node_modules/expo/package.json the way Node would resolve it (walking
+// up from the app directory, so hoisted monorepo installs work) — a file read
+// instead of a `node` process at configuration time.
+def readInstalledExpoMajorVersion(File startDir) {
+    File dir = startDir
+    while (dir != null) {
+        File expoPackageJson = new File(dir, 'node_modules/expo/package.json')
+        if (expoPackageJson.isFile()) {
+            try {
+                return parseMajorVersion(
+                    new groovy.json.JsonSlurper().parseText(expoPackageJson.text).version)
+            } catch (Exception ignored) {
+                return null
+            }
+        }
+        dir = dir.parentFile
+    }
+    return null
+}
+
 def checkProjectInfo() {
     def hasExpoModulesCore = rootProject.subprojects.any { it.name == 'expo-modules-core' }
     def packageJsonFile = new File(rootProject.projectDir.parentFile, 'package.json')
@@ -68,20 +88,21 @@ def checkProjectInfo() {
         def packageJson = new groovy.json.JsonSlurper().parseText(packageJsonFile.text)
         projectVersion = packageJson.version ?: '1.0.0' // Get project version
 
-        // Check for expo dependency and version >= 50.
-        // For pnpm catalogs (e.g. "catalog:native"), the version string in package.json
-        // is not numeric, so we resolve the installed expo package version as fallback.
+        // Check for expo dependency and version >= 50. Only resolved when
+        // expo-modules-core is part of the build and expo is declared; every
+        // other project pays nothing beyond this package.json read.
         String expoVersionString = packageJson.dependencies?.expo ?: packageJson.devDependencies?.expo
-        Integer declaredExpoMajorVersion = parseMajorVersion(expoVersionString)
-        Integer installedExpoMajorVersion = expoVersionString ?
-            resolveInstalledExpoMajorVersion(packageJsonFile.parentFile) :
-            null
-        Integer expoMajorVersion = installedExpoMajorVersion ?: declaredExpoMajorVersion
+        Integer expoMajorVersion = null
+        if (hasExpoModulesCore && expoVersionString) {
+            // For pnpm catalogs (e.g. "catalog:native") the declared version is
+            // not numeric: prefer the installed package, then the declaration,
+            // and spawn `node` only as the last resort.
+            expoMajorVersion = readInstalledExpoMajorVersion(packageJsonFile.parentFile)
+                ?: parseMajorVersion(expoVersionString)
+                ?: resolveInstalledExpoMajorVersion(packageJsonFile.parentFile)
+        }
 
-        boolean expoVersionIsHighEnough =
-            expoMajorVersion != null && expoMajorVersion >= 50
-
-        hasExpoDependency = expoVersionIsHighEnough // Update based on version check
+        hasExpoDependency = expoMajorVersion != null && expoMajorVersion >= 50
     }
     
     def isExpo = hasExpoModulesCore && hasExpoDependency
@@ -125,13 +146,11 @@ android {
             }
         }
     }
-    compileSdkVersion safeExtGet('compileSdkVersion', 31)
-    buildToolsVersion safeExtGet('buildToolsVersion', '31.0.0')
+    compileSdkVersion safeExtGet('compileSdkVersion', 34)
+    buildToolsVersion safeExtGet('buildToolsVersion', '34.0.0')
     defaultConfig {
         minSdkVersion safeExtGet('minSdkVersion', 21)
-        targetSdkVersion safeExtGet('targetSdkVersion', 27)
-        versionCode 1
-        versionName "1.81.4"
+        targetSdkVersion safeExtGet('targetSdkVersion', 34)
         consumerProguardFiles "proguard.pro"
         buildConfigField "boolean", "IS_NEW_ARCHITECTURE_ENABLED", isNewArchitectureEnabled().toString()
     }
@@ -146,9 +165,9 @@ android {
                 java.srcDirs += ['src/oldarch']
             }
             
-            if (expoProject) {
-                java.srcDirs += ['java/expo/modules/pushy']
-            } else {
+            // The Expo module lives in the default src/main/java tree and is
+            // only compiled when the host is an Expo (SDK 50+) project.
+            if (!expoProject) {
                 java.exclude 'expo/modules/pushy/**'
             }
         }
@@ -172,20 +191,27 @@ android {
             resValue("string", "pushy_build_time", "0")
         }
     }
-    lintOptions {
-        abortOnError false
+    if (agpMajor >= 7) {
+        lint {
+            abortOnError false
+        }
+    } else {
+        lintOptions {
+            abortOnError false
+        }
     }
-}
 
-repositories {
-    maven {
-        // All of React Native (JS, Obj-C sources, Android binaries) is installed from npm
-        url "$rootDir/../node_modules/react-native/android"
+    testOptions {
+        // Pure-JVM unit tests (android/src/test): android.* calls return
+        // defaults instead of throwing, org.json comes from the real library.
+        unitTests.returnDefaultValues = true
     }
 }
 
 dependencies {
     implementation 'com.facebook.react:react-native:+'
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
 }
 if (isNewArchitectureEnabled()) {
     react {

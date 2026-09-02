@@ -4,7 +4,6 @@ import android.content.Context;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.res.Resources;
-import android.os.Build;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.util.TypedValue;
@@ -362,7 +361,7 @@ final class BundledResourceCopier {
         try {
             ApplicationInfo appInfo =
                 context.getPackageManager().getApplicationInfo(context.getPackageName(), 0);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP && appInfo.splitSourceDirs != null) {
+            if (appInfo.splitSourceDirs != null) {
                 for (String splitPath : appInfo.splitSourceDirs) {
                     apkPaths.add(splitPath);
                 }

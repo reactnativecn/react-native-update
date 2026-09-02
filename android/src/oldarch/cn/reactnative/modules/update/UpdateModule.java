@@ -7,13 +7,18 @@ import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.bridge.ReadableMap;
 import java.util.Map;
 
+/**
+ * Old-architecture bridge: @ReactMethod declarations only, every method
+ * forwards to UpdateModuleImpl. Each state-changing method takes a trailing
+ * Promise, like the TurboModule spec, so a failed persistence rejects instead
+ * of resolving early (CODE_AUDIT 2.3).
+ */
 public class UpdateModule extends ReactContextBaseJavaModule {
-    private final UpdateContext updateContext;
+    private final UpdateModuleImpl impl;
 
     public UpdateModule(ReactApplicationContext reactContext, UpdateContext updateContext) {
         super(reactContext);
-        this.updateContext = updateContext;
-        UpdateEventEmitter.register(reactContext);
+        this.impl = new UpdateModuleImpl(reactContext, updateContext);
     }
 
     public UpdateModule(ReactApplicationContext reactContext) {
@@ -22,7 +27,7 @@ public class UpdateModule extends ReactContextBaseJavaModule {
 
     @Override
     public Map<String, Object> getConstants() {
-        return UpdateModuleSupport.getConstants(updateContext);
+        return impl.getConstants();
     }
 
     @Override
@@ -32,87 +37,82 @@ public class UpdateModule extends ReactContextBaseJavaModule {
 
     @ReactMethod
     public void downloadFullUpdate(ReadableMap options, Promise promise) {
-        UpdateModuleImpl.downloadFullUpdate(updateContext, options, promise);
+        impl.downloadFullUpdate(options, promise);
     }
 
     @ReactMethod
     public void downloadAndInstallApk(ReadableMap options, Promise promise) {
-        UpdateModuleImpl.downloadAndInstallApk(
-            getReactApplicationContext(),
-            updateContext,
-            options,
-            promise
-        );
+        impl.downloadAndInstallApk(options, promise);
     }
 
     @ReactMethod
     public void downloadPatchFromPackage(ReadableMap options, Promise promise) {
-        UpdateModuleImpl.downloadPatchFromPackage(updateContext, options, promise);
+        impl.downloadPatchFromPackage(options, promise);
     }
 
     @ReactMethod
     public void downloadPatchFromPpk(ReadableMap options, Promise promise) {
-        UpdateModuleImpl.downloadPatchFromPpk(updateContext, options, promise);
+        impl.downloadPatchFromPpk(options, promise);
     }
 
     @ReactMethod
     public void reloadUpdate(ReadableMap options, Promise promise) {
-        UpdateModuleImpl.reloadUpdate(updateContext, getReactApplicationContext(), options, promise);
+        impl.reloadUpdate(options, promise);
     }
 
     @ReactMethod
     public void restartApp(Promise promise) {
-        UpdateModuleImpl.restartApp(updateContext, getReactApplicationContext(), null, promise);
+        impl.restartApp(null, promise);
     }
 
     @ReactMethod
-    public void setNeedUpdate(ReadableMap options) {
-        UpdateModuleImpl.setNeedUpdate(updateContext, options);
+    public void setNeedUpdate(ReadableMap options, Promise promise) {
+        impl.setNeedUpdate(options, promise);
     }
 
     @ReactMethod
-    public void markSuccess() {
-        UpdateModuleImpl.markSuccess(updateContext);
+    public void markSuccess(Promise promise) {
+        impl.markSuccess(promise);
     }
 
     @ReactMethod
     public void getBundleHash(Promise promise) {
-        UpdateModuleImpl.getBundleHash(updateContext, promise);
+        impl.getBundleHash(promise);
     }
 
     @ReactMethod
     public void resetToPackagedBundle(Promise promise) {
-        UpdateModuleImpl.resetToPackagedBundle(updateContext, promise);
+        impl.resetToPackagedBundle(promise);
     }
 
     @ReactMethod
-    public void setUuid(String uuid) {
-        UpdateModuleImpl.setUuid(updateContext, uuid);
+    public void setUuid(String uuid, Promise promise) {
+        impl.setUuid(uuid, promise);
     }
 
     @ReactMethod
     public void syncNativeConfig(String config, Promise promise) {
-        UpdateModuleImpl.syncNativeConfig(updateContext, config, promise);
+        impl.syncNativeConfig(config, promise);
     }
 
     @ReactMethod
     public void getNativeCheckCache(Promise promise) {
-        UpdateModuleImpl.getNativeCheckCache(updateContext, promise);
+        impl.getNativeCheckCache(promise);
     }
 
     @ReactMethod
     public void markJsCheckCompleted(String config, Promise promise) {
-        UpdateModuleImpl.markJsCheckCompleted(updateContext, config, promise);
+        impl.markJsCheckCompleted(config, promise);
     }
 
     @ReactMethod
-    public void setLocalHashInfo(String hash, String info) {
-        UpdateModuleImpl.setLocalHashInfo(updateContext, hash, info);
+    public void setLocalHashInfo(String hash, String info, Promise promise) {
+        impl.setLocalHashInfo(hash, info, promise);
     }
 
     @ReactMethod
     public void getLocalHashInfo(String hash, Promise promise) {
-        UpdateModuleImpl.getLocalHashInfo(updateContext, hash, promise);
+        impl.getLocalHashInfo(hash, promise);
     }
 
     @ReactMethod

@@ -27,4 +27,33 @@ class DownloadTaskParams {
     File        unzipDirectory;
     File        originDirectory;
     UpdateContext.DownloadFileListener listener;
+
+    // Cooperative cancellation for orchestrated downloads (CODE_AUDIT 2.12):
+    // the native check cancels a task whose phase budget expired, so it
+    // neither starts late on the single download thread nor keeps
+    // transferring behind the next attempt. Guarded by this.
+    private boolean cancelled;
+    private okhttp3.Call activeCall;
+
+    synchronized void cancel() {
+        cancelled = true;
+        if (activeCall != null) {
+            activeCall.cancel();
+        }
+    }
+
+    synchronized boolean isCancelled() {
+        return cancelled;
+    }
+
+    /**
+     * Registers the transfer in flight (null clears it); a task cancelled
+     * before its transfer started cancels the call right here.
+     */
+    synchronized void attachCall(okhttp3.Call call) {
+        activeCall = call;
+        if (cancelled && call != null) {
+            call.cancel();
+        }
+    }
 }

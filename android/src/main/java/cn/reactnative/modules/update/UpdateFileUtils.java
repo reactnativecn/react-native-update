@@ -12,6 +12,20 @@ final class UpdateFileUtils {
     private UpdateFileUtils() {
     }
 
+    // Server-provided identifiers (hash/originHash/fileName) become child
+    // names under the update root; anything that could resolve outside of it
+    // (path separators, "..", ".") must be rejected before touching the
+    // filesystem.
+    static boolean isSafePathComponent(String name) {
+        return name != null
+                && !name.isEmpty()
+                && !name.equals(".")
+                && !name.equals("..")
+                && !name.contains("/")
+                && !name.contains("\\")
+                && name.indexOf('\0') < 0;
+    }
+
     static void ensureDirectory(File directory) throws IOException {
         if (!directory.exists() && !directory.mkdirs() && !directory.exists()) {
             throw new IOException("Failed to create directory: " + directory);
