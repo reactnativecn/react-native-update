@@ -77,3 +77,6 @@ harmony/pushy/src/main/cpp/android-generated
 *.tgz
 package
 
+
+# Build outputs of scripts/test-patch-core.sh and scripts/test-update-flow-core.sh
+.tmp/
