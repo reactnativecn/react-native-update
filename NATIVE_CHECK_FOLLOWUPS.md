@@ -512,3 +512,18 @@ feature-detect 把缺失当"老原生"优雅跳过——这是[[no-graceful-degr
 - [ ] 发版 10.52.1(鸿蒙 bridging 修复;Android/iOS 无变化)
 - [ ] Logger.ts isDebug 硬编码 false,轮次全程无日志可观测,排障全靠副作用
       (preferences/服务端流量);考虑 error 级关键节点或可配置开关
+
+## 2026-09-02 处理结论（全面审计后续，见 CODE_AUDIT.md §8）
+
+| 项 | 结论 |
+|---|---|
+| 第四轮"后续小版本"第 4 项（Harmony 超时不取消底层任务） | 已修：下载超时按剩余 deadline 设置 read/connect timeout，编排器与任务链共享绝对 deadline |
+| 第 5 项（iOS/Harmony `switchVersion` 可激活半完成安装） | 已由 6e9ae76 的安装记录 digest 复验关闭；鸿蒙本轮在提交前先校验再写入 |
+| 第 6 项（iOS deferred 异类型 waiter 进度串流） | 已修（同类型合流广播，异类型 deferred） |
+| 第 7 项（`expired+update` 无 hash 畸形响应） | 已修：按 expired-only 处理 |
+| 第 8 项（瞬时空 appKey/server 写入 `disabled`） | 已修：只有 `disableNativeCheck` 才持久化 disabled，瞬时无效配置沿用上一份 |
+| 第 9 项（`noArtifact` 上报位置） | 已修：每个坏发布只报一次，静默策略由 client 报、弹窗策略由 provider 报 |
+| 第 10 项（两处 cleanup） | 已修 |
+| 鸿蒙 e2e 补 native-check 场景 | 未做（需 hdc/uitest 设备链路） |
+| `Logger.ts isDebug` 硬编码 | 已修：从 `BuildProfile.DEBUG` 派生，轮次里程碑提升到 info/warn |
+| "P1 Android/Harmony 重复下载" 遗留的 launchVersion 保护 | 已修：三端清理都保留本进程启动版本；Android 在 keep 集合不含它时跳过本次清理 |
