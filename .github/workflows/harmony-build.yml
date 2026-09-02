@@ -82,14 +82,24 @@ jobs:
       - name: Type-check Harmony TS sources (required)
         shell: bash
         run: |
-          # build-harmony-har.js derives DEVECO_SDK_HOME from the DevEco
-          # install when unset; mirror that so the strict tsc pass finds
-          # the @ohos/@kit declarations instead of skipping.
-          if [ -z "${DEVECO_SDK_HOME:-}" ]; then
-            hv="$(command -v hvigorw || true)"
-            if [ -n "$hv" ]; then
-              export DEVECO_SDK_HOME="$(cd "$(dirname "$hv")/../../.." && pwd)/sdk"
-            fi
+          # The container's SDK is not laid out like a DevEco install, so
+          # locate the ets declaration root (the directory holding api/ and
+          # kits/) directly and hand it to the script.
+          ets_dir="${HARMONY_SDK_ETS_DIR:-}"
+          if [ -z "$ets_dir" ]; then
+            for root in "${DEVECO_SDK_HOME:-}" /opt /usr/local /usr/lib /root /home /github/home; do
+              [ -n "$root" ] && [ -d "$root" ] || continue
+              api_dir="$(find "$root" -maxdepth 8 -type d -path '*/ets/api' -name api 2>/dev/null \
+                | grep -E '/openharmony/ets/api$|/ets/api$' | head -n 1)"
+              if [ -n "$api_dir" ]; then
+                ets_dir="$(dirname "$api_dir")"
+                break
+              fi
+            done
           fi
-          echo "DEVECO_SDK_HOME=${DEVECO_SDK_HOME:-<unset>}"
-          HARMONY_TYPECHECK_REQUIRED=1 node scripts/check-harmony-types.js
+          echo "HARMONY_SDK_ETS_DIR=${ets_dir:-<not found>}"
+          if [ -z "$ets_dir" ]; then
+            echo "SDK candidates under /opt:"; ls -la /opt 2>/dev/null || true
+          fi
+          HARMONY_SDK_ETS_DIR="$ets_dir" HARMONY_TYPECHECK_REQUIRED=1 \
+            node scripts/check-harmony-types.js
