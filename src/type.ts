@@ -105,8 +105,6 @@ export type EventType =
   | 'errorRestart'
   | 'errorSwitchVersion'
   | 'downloadingApk'
-  | 'rejectStoragePermission'
-  | 'errorStoragePermission'
   | 'errorDownloadAndInstallApk'
   | 'errorInstallApk';
 

@@ -355,7 +355,11 @@ export interface DownloadPlan {
   hash: string;
   /** Ordered attempts: incremental first, full as the last resort. */
   attempts: DownloadAttempt[];
-  /** Dev-only: nothing to fetch — treat as an immediate no-op success. */
+  /**
+   * Dev-only: nothing to fetch. The executor logs why and delivers nothing
+   * (resolves undefined) — not a fake success whose hash could never be
+   * switched to.
+   */
   devNoop: boolean;
 }
 

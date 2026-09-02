@@ -1,4 +1,5 @@
 import { UpdateError } from './error';
+import i18n from './i18n';
 import { dedupeEndpoints, orderEndpointCandidates } from './updateFlowCore';
 
 export { dedupeEndpoints };
@@ -146,7 +147,7 @@ export async function executeEndpointFallback<T>({
   let candidates = orderEndpointCandidates(configuredEndpoints, random());
 
   if (!candidates.length) {
-    throw new UpdateError('No endpoints configured', 'NO_ENDPOINTS');
+    throw new UpdateError(i18n.t('error_no_endpoints'), 'NO_ENDPOINTS');
   }
 
   const firstEndpoint = candidates[0];

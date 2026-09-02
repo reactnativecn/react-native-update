@@ -20,8 +20,6 @@ export type UpdateErrorCode =
   | 'SWITCH_VERSION_FAILED'
   | 'MARK_SUCCESS_FAILED'
   | 'APK_INSTALL_PENDING'
-  | 'STORAGE_PERMISSION_REJECTED'
-  | 'STORAGE_PERMISSION_ERROR'
   | 'APK_DOWNLOAD_FAILED'
   // A throw from a user-provided hook (e.g. beforeReload) — not an update
   // pipeline failure, and excluded from server-side patch-health telemetry.
@@ -51,8 +49,6 @@ const KNOWN_CODES = new Set<string>([
   'SWITCH_VERSION_FAILED',
   'MARK_SUCCESS_FAILED',
   'APK_INSTALL_PENDING',
-  'STORAGE_PERMISSION_REJECTED',
-  'STORAGE_PERMISSION_ERROR',
   'APK_DOWNLOAD_FAILED',
   'USER_HOOK_ERROR',
   'SINGLETON_VIOLATION',
@@ -79,6 +75,37 @@ export const asUpdateErrorCode = (
     ? (code as UpdateErrorCode)
     : undefined;
 
+// A bridge that cannot put the code on the rejection's `code` property
+// (Harmony's TurboModule rejections carry only a message) prefixes the
+// message with it instead: `[PATCH_FAILED] copiesCrc mismatch`.
+const CODED_MESSAGE = /^\[([A-Z_]+)\] /;
+
+/**
+ * The stable code a thrown value carries, if any, and its message with the
+ * `[CODE] ` prefix (see CODED_MESSAGE) stripped. A `code` property wins over
+ * the prefix; an unknown code in either place counts as absent.
+ */
+export const readErrorCode = (
+  e: unknown
+): { code?: UpdateErrorCode; message: string } => {
+  const source =
+    e !== null && typeof e === 'object'
+      ? (e as { code?: unknown; message?: unknown })
+      : undefined;
+  const raw =
+    typeof e === 'string'
+      ? e
+      : typeof source?.message === 'string'
+        ? source.message
+        : '';
+  const match = CODED_MESSAGE.exec(raw);
+  const prefixed = match ? asUpdateErrorCode(match[1]) : undefined;
+  return {
+    code: asUpdateErrorCode(source?.code) ?? prefixed,
+    message: prefixed && match ? raw.slice(match[0].length) : raw,
+  };
+};
+
 export class UpdateError extends Error {
   code: UpdateErrorCode;
   cause?: unknown;
@@ -101,9 +128,11 @@ export class UpdateError extends Error {
  * Attach a code to an unknown thrown value. An existing Error keeps its
  * identity (message, stack, and any known code already assigned upstream) so
  * callers comparing the caught error to the original still match; non-Error
- * values are wrapped. A foreign `code` (axios/system errors) is overwritten
- * with ours; a frozen/sealed Error that rejects the assignment is wrapped
- * instead (identity is lost only in that edge case).
+ * values are wrapped. A code carried as a `[CODE] ` message prefix is moved
+ * onto the `code` property (and off the message) exactly as if the bridge
+ * had set it. A foreign `code` (axios/system errors) is overwritten with
+ * ours; a frozen/sealed Error that rejects the assignment is wrapped instead
+ * (identity is lost only in that edge case).
  */
 export const toUpdateError = (
   e: unknown,
@@ -112,14 +141,23 @@ export const toUpdateError = (
   if (e instanceof Error) {
     const err = e as UpdateError;
     if (!asUpdateErrorCode(err.code)) {
+      const parsed = readErrorCode(err);
+      const resolved = parsed.code ?? code;
       try {
-        err.code = code;
+        err.code = resolved;
+        if (parsed.code) {
+          err.message = parsed.message;
+        }
       } catch {}
-      if (err.code !== code) {
-        return new UpdateError(err.message, code, { cause: err });
+      if (err.code !== resolved) {
+        return new UpdateError(parsed.message, resolved, { cause: err });
       }
     }
     return err;
   }
-  return new UpdateError(String(e ?? code), code);
+  const parsed = readErrorCode(e);
+  return new UpdateError(
+    parsed.code ? parsed.message : String(e ?? code),
+    parsed.code ?? code
+  );
 };

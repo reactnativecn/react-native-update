@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, describe, expect, mock, spyOn, test } from 'bun:test';
 
 mock.module('react-native', () => {
   return {
@@ -20,10 +20,15 @@ import {
   computeProgress,
   enhancedFetch,
   fetchWithTimeout,
+  info,
   isProtocolDowngrade,
   joinUrls,
+  log,
+  parseQueryParams,
   promiseAny,
+  setDebugLogging,
   testUrls,
+  warn,
 } from '../utils';
 
 const originalFetch = globalThis.fetch;
@@ -321,5 +326,93 @@ describe('promiseAny', () => {
         Promise.resolve('winner'),
       ])
     ).toBe('winner');
+  });
+});
+
+describe('parseQueryParams', () => {
+  test('parses the test-channel deep link', () => {
+    expect(
+      parseQueryParams('pushy://open?type=__rnPushyVersionHash&data=abc123')
+    ).toEqual({ type: '__rnPushyVersionHash', data: 'abc123' });
+  });
+
+  test('a url without a query has no params', () => {
+    expect(parseQueryParams('pushy://open')).toEqual({});
+    expect(parseQueryParams('pushy://open?')).toEqual({});
+    expect(parseQueryParams('')).toEqual({});
+  });
+
+  test('ignores the fragment', () => {
+    expect(parseQueryParams('https://a.example.com/b?type=t#data=x')).toEqual({
+      type: 't',
+    });
+    expect(parseQueryParams('https://a.example.com/b#?type=t')).toEqual({});
+  });
+
+  test('decodes + and percent-encoding', () => {
+    expect(
+      parseQueryParams('app://x?data=a%20b+c&type=%E4%B8%AD%E6%96%87')
+    ).toEqual({ data: 'a b c', type: '中文' });
+  });
+
+  test('keeps a value that fails to decode instead of throwing', () => {
+    expect(parseQueryParams('app://x?data=%E0%A4%A&type=x')).toEqual({
+      data: '%E0%A4%A',
+      type: 'x',
+    });
+  });
+
+  test('empty values, missing "=", empty keys and duplicates', () => {
+    expect(parseQueryParams('app://x?flag&type=&type=last&=v&&x=1')).toEqual({
+      flag: '',
+      type: 'last',
+      x: '1',
+    });
+  });
+});
+
+describe('log gating (1.11)', () => {
+  const origDev = (globalThis as any).__DEV__;
+  afterEach(() => {
+    (globalThis as any).__DEV__ = origDev;
+    setDebugLogging(false);
+  });
+
+  test('release builds print log/info only with debug logging on; warn always', () => {
+    (globalThis as any).__DEV__ = false;
+    const logSpy = spyOn(console, 'log').mockImplementation(() => {});
+    const infoSpy = spyOn(console, 'info').mockImplementation(() => {});
+    const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      setDebugLogging(false);
+      log('request body');
+      info('detail');
+      warn('problem');
+      expect(logSpy).not.toHaveBeenCalled();
+      expect(infoSpy).not.toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+
+      setDebugLogging(true);
+      log('request body');
+      info('detail');
+      expect(logSpy).toHaveBeenCalledTimes(1);
+      expect(infoSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      logSpy.mockRestore();
+      infoSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
+  });
+
+  test('dev builds always print', () => {
+    (globalThis as any).__DEV__ = true;
+    const logSpy = spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      setDebugLogging(false);
+      log('request body');
+      expect(logSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      logSpy.mockRestore();
+    }
   });
 });

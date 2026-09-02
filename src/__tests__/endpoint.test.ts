@@ -213,3 +213,16 @@ describe('dedupeEndpoints', () => {
     expect(result).toEqual([]);
   });
 });
+
+describe('executeEndpointFallback without endpoints', () => {
+  test('rejects with NO_ENDPOINTS and a localized message', async () => {
+    const err: any = await executeEndpointFallback({
+      configuredEndpoints: [],
+      tryEndpoint: async () => 'never',
+    }).catch((e) => e);
+
+    expect(err.code).toBe('NO_ENDPOINTS');
+    // setup.ts mocks i18n.t to echo the key: the message went through i18n.
+    expect(err.message).toBe('error_no_endpoints');
+  });
+});

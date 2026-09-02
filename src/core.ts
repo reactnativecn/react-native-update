@@ -12,12 +12,13 @@ const isTurboModuleEnabled =
   // https://github.com/facebook/react-native/pull/48362
   (global as any).__turboModuleProxy || (global as any).RN$Bridgeless;
 
-export const PushyModule =
-  Platform.OS === 'web'
-    ? emptyModule
-    : isTurboModuleEnabled
-      ? require('./NativePushy').default
-      : NativeModules.Pushy;
+const isWebPlatform = Platform.OS === 'web';
+
+export const PushyModule = isWebPlatform
+  ? emptyModule
+  : isTurboModuleEnabled
+    ? require('./NativePushy').default
+    : NativeModules.Pushy;
 
 export const UpdateModule = PushyModule;
 
@@ -28,9 +29,27 @@ if (!PushyModule) {
   );
 }
 
-const PushyConstants = isTurboModuleEnabled
-  ? PushyModule.getConstants()
-  : PushyModule;
+// On web PushyModule is a Proxy whose every property is a noop function, so
+// reading the constants off it would make each of them a function:
+// `isRolledBack` true (a fake rollback report on every page load), a uuid of
+// "() => {}", JSON.parse failing on currentVersionInfo. Web has no native
+// state at all, so its constants are the explicit empty ones.
+const PushyConstants: Record<string, any> = isWebPlatform
+  ? {
+      downloadRootDir: '',
+      packageVersion: '',
+      currentVersion: '',
+      isFirstTime: false,
+      rolledBackVersion: '',
+      buildTime: '',
+      uuid: '',
+      currentVersionInfo: '',
+      supportedDiffVersion: 0,
+      currentBundleSha256: '',
+    }
+  : isTurboModuleEnabled
+    ? PushyModule.getConstants()
+    : PushyModule;
 
 export const downloadRootDir: string = PushyConstants.downloadRootDir;
 export const packageVersion: string = PushyConstants.packageVersion;
@@ -97,9 +116,9 @@ let uuid = PushyConstants.uuid;
 // a check for.
 let bundleHash = '';
 // The JS layer can arrive via hot update onto an older binary whose native
-// module predates the method, hence the feature detect. On web PushyModule is
-// a noop Proxy and the call settles to ''.
-if (typeof PushyModule.getBundleHash === 'function') {
+// module predates the method, hence the feature detect (on web the noop Proxy
+// would pass it, so web is excluded explicitly).
+if (!isWebPlatform && typeof PushyModule.getBundleHash === 'function') {
   Promise.resolve(PushyModule.getBundleHash())
     .then((hash: unknown) => {
       bundleHash = String(hash || '');
@@ -131,9 +150,12 @@ if (!uuid) {
   uuid = require('nanoid/non-secure').nanoid();
   // If persisting fails the uuid drifts on every launch, which skews gray
   // release bucketing and inflates stats — log it instead of failing silently.
-  Promise.resolve(PushyModule.setUuid(uuid)).catch((e: any) => {
-    log('setUuid error:', e?.message || e);
-  });
+  // Web has nowhere to persist it (nothing runs there anyway).
+  if (!isWebPlatform) {
+    Promise.resolve(PushyModule.setUuid(uuid)).catch((e: any) => {
+      log('setUuid error:', e?.message || e);
+    });
+  }
 }
 
 export const cInfo = {

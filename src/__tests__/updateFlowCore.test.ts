@@ -265,7 +265,7 @@ describe('decideDownload', () => {
     expect(decision.devNoop).toBe(false);
   });
 
-  test('dev with no full artifact is a no-op success', () => {
+  test('dev with no full artifact is a no-op: nothing to fetch, nothing delivered', () => {
     const decision = decideDownload(
       updateInfo({ full: undefined }),
       identity,
