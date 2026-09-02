@@ -89,8 +89,11 @@ jobs:
           if [ -z "$ets_dir" ]; then
             for root in "${DEVECO_SDK_HOME:-}" /opt /usr/local /usr/lib /root /home /github/home; do
               [ -n "$root" ] && [ -d "$root" ] || continue
-              api_dir="$(find "$root" -maxdepth 8 -type d -path '*/ets/api' -name api 2>/dev/null \
-                | grep -E '/openharmony/ets/api$|/ets/api$' | head -n 1)"
+              # The @ohos.*/@kit.* declarations live under the OpenHarmony SDK
+              # (sdk/<ver>/openharmony/ets); the sibling hms/ets tree only
+              # holds HMS kits and must not win.
+              api_dir="$(find "$root" -maxdepth 8 -type d -path '*/openharmony/ets/api' 2>/dev/null \
+                | sort | head -n 1)"
               if [ -n "$api_dir" ]; then
                 ets_dir="$(dirname "$api_dir")"
                 break
