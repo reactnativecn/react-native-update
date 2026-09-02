@@ -16,6 +16,10 @@
 #include <unistd.h>
 #include <vector>
 
+extern "C" {
+#include "patch.h"  // HDiffPatch: getSingleCompressedDiffInfo / mem_as_hStreamInput
+}
+
 namespace {
 
 using pushy::patch::ApplyPatchFromFileSource;
@@ -441,6 +445,142 @@ void TestApplyPatchFromFileSourceRejectsUnsafePaths() {
   Status status = ApplyPatchFromFileSource(options, patcher);
   Expect(!status.ok, "unsafe path should fail");
   Expect(patcher.calls == 0, "bundle patcher should not run when validation fails");
+}
+
+// Manifest paths are attacker-controlled. Every c_str() consumer downstream
+// truncates at NUL, so "..\0x" (which compares unequal to "..") would resolve
+// to the parent directory; other control bytes have no legitimate use either.
+void TestIsSafeRelativePathRejectsControlBytes() {
+  using pushy::patch::IsSafeRelativePath;
+  Expect(IsSafeRelativePath("assets/a.png"), "plain relative path is safe");
+  Expect(
+      IsSafeRelativePath("assets/\xe5\x9b\xbe.png"),
+      "non-ASCII UTF-8 stays allowed");
+  Expect(
+      !IsSafeRelativePath(std::string("..\0x", 4)),
+      "embedded NUL after .. must be rejected");
+  Expect(
+      !IsSafeRelativePath(std::string("assets/a\0.png", 13)),
+      "embedded NUL inside a segment must be rejected");
+  Expect(!IsSafeRelativePath("assets/a\x01" "b"), "control byte must be rejected");
+  Expect(!IsSafeRelativePath("assets/a\tb"), "tab must be rejected");
+  Expect(!IsSafeRelativePath("a\nb"), "newline must be rejected");
+  Expect(!IsSafeRelativePath("assets/a\x7f"), "DEL must be rejected");
+
+  PatchManifest manifest;
+  manifest.copies.push_back(CopyOperation{"assets/a.png", std::string("..\0x", 4)});
+  Expect(
+      !pushy::patch::ValidateManifest(manifest).ok,
+      "manifest with a NUL-bearing target must be rejected");
+  manifest.copies.clear();
+  manifest.deletes.push_back(std::string("assets/\0..", 10));
+  Expect(
+      !pushy::patch::ValidateManifest(manifest).ok,
+      "manifest with a NUL-bearing delete must be rejected");
+}
+
+// Builds `levels` nested directories under `base` and returns the deepest.
+std::string MakeDeepTree(const std::string& base, int levels) {
+  std::string deep = base;
+  EnsureDirectory(deep);
+  for (int i = 0; i < levels; ++i) {
+    deep = JoinPath(deep, "d");
+    mkdir(deep.c_str(), 0755);
+  }
+  WriteFile(JoinPath(deep, "leaf.txt"), "leaf");
+  return deep;
+}
+
+// The recursive walkers (cleanup removal, merge) stop at 64 levels with an
+// error instead of overflowing the stack on a hostile deeply nested archive.
+void TestDirectoryWalkersBoundNestingDepth() {
+  TempDir temp;
+  const std::time_t now = 1'700'000'000;
+  const std::time_t old_time = now - (9 * 24 * 60 * 60);
+
+  // Realistic nesting is fine.
+  const std::string shallow_root = JoinPath(temp.path, "shallow");
+  MakeDeepTree(JoinPath(shallow_root, "stale"), 10);
+  SetMtime(JoinPath(shallow_root, "stale"), old_time);
+  Status shallow_status = CleanupOldEntries(
+      shallow_root, std::vector<std::string>{"keep"}, 7, now);
+  Expect(shallow_status.ok, shallow_status.message);
+  Expect(!Exists(JoinPath(shallow_root, "stale")), "10-deep stale tree is removed");
+
+  // Beyond the cap: a clean error, tree left in place.
+  const std::string deep_root = JoinPath(temp.path, "deep");
+  const std::string deepest = MakeDeepTree(JoinPath(deep_root, "stale"), 80);
+  SetMtime(JoinPath(deep_root, "stale"), old_time);
+  Status deep_status = CleanupOldEntries(
+      deep_root, std::vector<std::string>{"keep"}, 7, now);
+  Expect(
+      !deep_status.ok && deep_status.message.find("too deep") != std::string::npos,
+      "removing an over-deep tree must fail cleanly: " + deep_status.message);
+  Expect(Exists(JoinPath(deepest, "leaf.txt")), "over-deep tree is left in place");
+
+  // The merge walker applies the same bound.
+  const std::string source = JoinPath(temp.path, "origin");
+  const std::string target = JoinPath(temp.path, "target");
+  WriteFile(JoinPath(source, "index.bundlejs"), "old bundle");
+  MakeDeepTree(JoinPath(source, "assets"), 80);
+  WriteFile(JoinPath(temp.path, "bundle.patch"), "unused patch");
+
+  FakeBundlePatcher patcher("patched bundle");
+  FileSourcePatchOptions options;
+  options.source_root = source;
+  options.target_root = target;
+  options.origin_bundle_path = JoinPath(source, "index.bundlejs");
+  options.bundle_patch_path = JoinPath(temp.path, "bundle.patch");
+  options.bundle_output_path = JoinPath(target, "index.bundlejs");
+  options.merge_source_subdir = "";
+  Status merge_status = ApplyPatchFromFileSource(options, patcher);
+  Expect(
+      !merge_status.ok && merge_status.message.find("too deep") != std::string::npos,
+      "merging an over-deep tree must fail cleanly: " + merge_status.message);
+}
+
+// A patch stream that declares a 4 GB LZMA2 dictionary must be refused before
+// the decoder allocates it (hpatch.c caps the dictionary; without the cap the
+// decoder happily allocates and the patch even applies on 64-bit hosts).
+void TestHpatchRejectsOversizedLzmaDictionary() {
+  TempDir temp;
+  std::string patch = ReadFile(JoinPath(g_fixtures_dir, "v96.tpatch.bin"));
+  Expect(!patch.empty(), "hbc patch fixture must exist");
+
+  hpatch_TStreamInput stream;
+  const unsigned char* bytes = reinterpret_cast<const unsigned char*>(patch.data());
+  mem_as_hStreamInput(&stream, bytes, bytes + patch.size());
+  hpatch_singleCompressedDiffInfo info;
+  Expect(
+      getSingleCompressedDiffInfo(&info, &stream, 0),
+      "fixture must be a single-compressed diff");
+  Expect(
+      std::string(info.compressType) == "lzma2" && info.compressedSize > 0,
+      "fixture must be lzma2-compressed");
+  // The LZMA2 property byte leads the compressed stream; 40 declares 4 GB.
+  patch[static_cast<size_t>(info.diffDataPos)] = static_cast<char>(40);
+  const std::string tampered = JoinPath(temp.path, "tampered.patch");
+  WriteFile(tampered, patch);
+
+  FileSourcePatchOptions options;
+  options.source_root = JoinPath(temp.path, "src");
+  options.target_root = JoinPath(temp.path, "dst");
+  options.origin_bundle_path = JoinPath(g_fixtures_dir, "v96.hbc");
+  options.bundle_patch_path = tampered;
+  options.bundle_output_path = JoinPath(temp.path, "out/index.bundlejs");
+  options.enable_merge = false;
+  options.bundle_hbc_transform_meta = ReadFile(JoinPath(g_fixtures_dir, "v96.meta.json"));
+
+  Status status = ApplyPatchFromFileSource(options);
+  Expect(!status.ok, "a patch declaring a 4 GB LZMA dictionary must be refused");
+  Expect(
+      status.message.find("hpatch error") != std::string::npos,
+      "refusal surfaces as an hpatch error: " + status.message);
+  Expect(!Exists(options.bundle_output_path), "no output on failure");
+  Expect(
+      !Exists(options.bundle_output_path + ".hbct-origin") &&
+          !Exists(options.bundle_output_path + ".hbct-patched"),
+      "temp files are removed on failure");
 }
 
 void TestCleanupOldEntriesRemovesOnlyExpiredPaths() {
@@ -928,6 +1068,9 @@ int main(int argc, char** argv) {
       {"ApplyPatchMergeFallsBackToByteCopy", TestApplyPatchMergeFallsBackToByteCopy},
       {"ApplyPatchFromFileSourceCanLimitMergeSubdir", TestApplyPatchFromFileSourceCanLimitMergeSubdir},
       {"ApplyPatchFromFileSourceRejectsUnsafePaths", TestApplyPatchFromFileSourceRejectsUnsafePaths},
+      {"IsSafeRelativePathRejectsControlBytes", TestIsSafeRelativePathRejectsControlBytes},
+      {"DirectoryWalkersBoundNestingDepth", TestDirectoryWalkersBoundNestingDepth},
+      {"HpatchRejectsOversizedLzmaDictionary", TestHpatchRejectsOversizedLzmaDictionary},
       {"CleanupOldEntriesRemovesOnlyExpiredPaths", TestCleanupOldEntriesRemovesOnlyExpiredPaths},
       {"StateCoreSyncBinaryVersionResetsUpdates", TestStateCoreSyncBinaryVersionResetsUpdates},
       {"StateCoreSwitchVersionAndMarkSuccess", TestStateCoreSwitchVersionAndMarkSuccess},

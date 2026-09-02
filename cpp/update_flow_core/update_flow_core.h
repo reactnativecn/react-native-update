@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "flow_json.h"
 
@@ -23,6 +24,14 @@ uint32_t Murmur3_32(const std::string& key, uint32_t seed = 0);
 
 // murmur(uuid) % 100 < rollout — the gray-release bucketing predicate.
 bool IsInRollout(double rollout, const std::string& uuid);
+
+// Whether a failed download attempt should move on to the next mirror of the
+// same artifact. Anything but PATCH_FAILED is: every mirror serves the same
+// bytes, so a patch that could not be applied fails on all of them and only
+// the next strategy can help. An absent code (empty string) is retryable.
+// Mirrors isMirrorRetryableCode; covered by the golden vectors so the native
+// orchestrators' retry loops cannot drift from the TS reference.
+bool IsMirrorRetryableCode(const std::string& code);
 
 // paths × fileName -> candidate URL array; Undefined when fileName is falsy
 // (mirrors joinUrls returning undefined without a file name).

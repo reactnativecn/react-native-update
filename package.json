@@ -8,6 +8,7 @@
     "src",
     "!src/__tests__",
     "android/src",
+    "!android/src/test",
     "android/lib",
     "android/jni",
     "!android/jni/HDiffPatch/test",

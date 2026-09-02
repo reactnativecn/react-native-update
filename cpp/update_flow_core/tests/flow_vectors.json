@@ -100,6 +100,74 @@
       "expected": 1139631978
     },
     {
+      "fn": "murmurhash3_32_gc",
+      "args": [
+        "héllo"
+      ],
+      "expected": 1069087607
+    },
+    {
+      "fn": "murmurhash3_32_gc",
+      "args": [
+        "ключ"
+      ],
+      "expected": 171620335
+    },
+    {
+      "fn": "murmurhash3_32_gc",
+      "args": [
+        "日本語"
+      ],
+      "expected": 450827494
+    },
+    {
+      "fn": "murmurhash3_32_gc",
+      "args": [
+        "😀"
+      ],
+      "expected": 3750478581
+    },
+    {
+      "fn": "murmurhash3_32_gc",
+      "args": [
+        "a😀b"
+      ],
+      "expected": 1254000860
+    },
+    {
+      "fn": "murmurhash3_32_gc",
+      "args": [
+        "é"
+      ],
+      "expected": 18176400
+    },
+    {
+      "fn": "isMirrorRetryableCode",
+      "args": [
+        "PATCH_FAILED"
+      ],
+      "expected": false
+    },
+    {
+      "fn": "isMirrorRetryableCode",
+      "args": [
+        "DOWNLOAD_FAILED"
+      ],
+      "expected": true
+    },
+    {
+      "fn": "isMirrorRetryableCode",
+      "args": [
+        ""
+      ],
+      "expected": true
+    },
+    {
+      "fn": "isMirrorRetryableCode",
+      "args": [],
+      "expected": true
+    },
+    {
       "fn": "isInRollout",
       "args": [
         63,
@@ -395,6 +463,56 @@
       ],
       "expected": [
         "a"
+      ]
+    },
+    {
+      "fn": "orderEndpointCandidates",
+      "args": [
+        [
+          "a",
+          1,
+          "a",
+          1,
+          2,
+          true,
+          "b",
+          "1",
+          0
+        ],
+        0
+      ],
+      "expected": [
+        "a",
+        1,
+        2,
+        true,
+        "b",
+        "1"
+      ]
+    },
+    {
+      "fn": "orderEndpointCandidates",
+      "args": [
+        [
+          "a",
+          1,
+          "a",
+          1,
+          2,
+          true,
+          "b",
+          "1",
+          0
+        ],
+        0.5
+      ],
+      "expected": [
+        true,
+        "a",
+        1,
+        2,
+        "b",
+        "1"
       ]
     },
     {
@@ -710,6 +828,34 @@
         ""
       ],
       "expected": false
+    },
+    {
+      "fn": "isValidCheckResponse",
+      "args": [
+        "{\"upToDate\":true,\"s\":\"\\ud800\"}"
+      ],
+      "expected": true
+    },
+    {
+      "fn": "isValidCheckResponse",
+      "args": [
+        "{\"upToDate\":true,\"s\":\"\\udc00x\"}"
+      ],
+      "expected": true
+    },
+    {
+      "fn": "isValidCheckResponse",
+      "args": [
+        "{\"upToDate\":true,\"s\":\"\\ud800\\u0041\"}"
+      ],
+      "expected": true
+    },
+    {
+      "fn": "isValidCheckResponse",
+      "args": [
+        "{\"upToDate\":true,\"s\":\"\\ud83d\\ude00\"}"
+      ],
+      "expected": true
     },
     {
       "fn": "resolveCheckResult",
@@ -1363,6 +1509,52 @@
       "expected": {
         "action": "none",
         "reason": "noArtifact"
+      }
+    },
+    {
+      "fn": "decideDownload",
+      "args": [
+        {
+          "update": true,
+          "hash": "next-hash",
+          "diff": "cur-next.hdiff",
+          "pdiff": "pkg-next.phdiff",
+          "full": "next.ppk",
+          "paths": null
+        },
+        {
+          "currentVersion": "current-hash",
+          "rolledBackVersion": "bad-hash"
+        },
+        false
+      ],
+      "expected": {
+        "action": "none",
+        "reason": "noArtifact"
+      }
+    },
+    {
+      "fn": "decideDownload",
+      "args": [
+        {
+          "update": true,
+          "hash": "next-hash",
+          "diff": "cur-next.hdiff",
+          "pdiff": "pkg-next.phdiff",
+          "full": "next.ppk",
+          "paths": null
+        },
+        {
+          "currentVersion": "current-hash",
+          "rolledBackVersion": "bad-hash"
+        },
+        true
+      ],
+      "expected": {
+        "action": "download",
+        "hash": "next-hash",
+        "attempts": [],
+        "devNoop": true
       }
     },
     {

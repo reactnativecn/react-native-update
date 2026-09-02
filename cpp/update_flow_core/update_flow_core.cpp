@@ -6,19 +6,83 @@ namespace updateflow {
 
 using flowjson::Value;
 
+namespace {
+
+// The low byte of every UTF-16 code unit of `utf8`, which is exactly what the
+// TS reference hashes (`key.charCodeAt(i) & 0xff` over `key.length` units).
+// Identity for ASCII; an astral code point contributes its two surrogate
+// units. Accepts the JNI modified-UTF-8 forms too (C0 80 for U+0000 and
+// byte-encoded surrogates count as one unit each, as charCodeAt would see
+// them); malformed bytes decode to U+FFFD.
+std::vector<unsigned char> Utf16LowBytes(const std::string& utf8) {
+  std::vector<unsigned char> units;
+  units.reserve(utf8.size());
+  size_t i = 0;
+  while (i < utf8.size()) {
+    const unsigned char first = static_cast<unsigned char>(utf8[i]);
+    uint32_t codePoint = 0xfffd;
+    size_t width = 1;
+    if (first < 0x80) {
+      codePoint = first;
+    } else if (first >= 0xc2 && first <= 0xdf && i + 1 < utf8.size()) {
+      const unsigned char b1 = static_cast<unsigned char>(utf8[i + 1]);
+      if ((b1 & 0xc0) == 0x80) {
+        codePoint = ((first & 0x1f) << 6) | (b1 & 0x3f);
+        width = 2;
+      }
+    } else if (first == 0xc0 && i + 1 < utf8.size() &&
+               static_cast<unsigned char>(utf8[i + 1]) == 0x80) {
+      codePoint = 0;
+      width = 2;
+    } else if (first >= 0xe0 && first <= 0xef && i + 2 < utf8.size()) {
+      const unsigned char b1 = static_cast<unsigned char>(utf8[i + 1]);
+      const unsigned char b2 = static_cast<unsigned char>(utf8[i + 2]);
+      if ((b1 & 0xc0) == 0x80 && (b2 & 0xc0) == 0x80 &&
+          !(first == 0xe0 && b1 < 0xa0)) {
+        codePoint = ((first & 0x0f) << 12) | ((b1 & 0x3f) << 6) | (b2 & 0x3f);
+        width = 3;
+      }
+    } else if (first >= 0xf0 && first <= 0xf4 && i + 3 < utf8.size()) {
+      const unsigned char b1 = static_cast<unsigned char>(utf8[i + 1]);
+      const unsigned char b2 = static_cast<unsigned char>(utf8[i + 2]);
+      const unsigned char b3 = static_cast<unsigned char>(utf8[i + 3]);
+      if ((b1 & 0xc0) == 0x80 && (b2 & 0xc0) == 0x80 &&
+          (b3 & 0xc0) == 0x80 && !(first == 0xf0 && b1 < 0x90) &&
+          !(first == 0xf4 && b1 > 0x8f)) {
+        codePoint = ((first & 0x07) << 18) | ((b1 & 0x3f) << 12) |
+                    ((b2 & 0x3f) << 6) | (b3 & 0x3f);
+        width = 4;
+      }
+    }
+    i += width;
+    if (codePoint <= 0xffff) {
+      units.push_back(static_cast<unsigned char>(codePoint & 0xff));
+    } else {
+      codePoint -= 0x10000;
+      units.push_back(static_cast<unsigned char>((0xd800 + (codePoint >> 10)) & 0xff));
+      units.push_back(static_cast<unsigned char>((0xdc00 + (codePoint & 0x3ff)) & 0xff));
+    }
+  }
+  return units;
+}
+
+}  // namespace
+
 uint32_t Murmur3_32(const std::string& key, uint32_t seed) {
   // The TS reference emulates 32-bit multiplication with 16-bit halves;
   // native uint32_t arithmetic is exactly (x * y) mod 2^32, so the halved
-  // dance collapses to plain multiplies. Bytes are read as charCodeAt & 0xff,
-  // which is identical for the ASCII inputs this layer handles (uuids, keys).
+  // dance collapses to plain multiplies. Input bytes are the low byte of each
+  // UTF-16 code unit (charCodeAt & 0xff), not the UTF-8 bytes: hashing UTF-8
+  // would bucket non-ASCII keys differently from the TS reference.
   const uint32_t c1 = 0xcc9e2d51;
   const uint32_t c2 = 0x1b873593;
-  const size_t len = key.size();
+  const std::vector<unsigned char> units = Utf16LowBytes(key);
+  static const unsigned char kEmpty = 0;
+  const unsigned char* data = units.empty() ? &kEmpty : units.data();
+  const size_t len = units.size();
   const size_t nblocks = len / 4;
   uint32_t h1 = seed;
 
-  const unsigned char* data =
-      reinterpret_cast<const unsigned char*>(key.data());
   for (size_t i = 0; i < nblocks; i++) {
     uint32_t k1 = static_cast<uint32_t>(data[i * 4]) |
                   (static_cast<uint32_t>(data[i * 4 + 1]) << 8) |
@@ -60,6 +124,10 @@ uint32_t Murmur3_32(const std::string& key, uint32_t seed) {
 
 bool IsInRollout(double rollout, const std::string& uuid) {
   return static_cast<double>(Murmur3_32(uuid) % 100) < rollout;
+}
+
+bool IsMirrorRetryableCode(const std::string& code) {
+  return code != "PATCH_FAILED";
 }
 
 namespace {
@@ -114,7 +182,9 @@ Value OrderEndpointCandidates(const Value& endpoints, double randomSample) {
     }
     bool seen = false;
     for (const auto& kept : deduped.elements()) {
-      if (kept.AsString() == endpoint.AsString()) {
+      // Set membership is ===: a stray non-string entry (a number, `true`)
+      // dedupes against equal primitives only, never against strings.
+      if (Value::StrictEquals(kept, endpoint)) {
         seen = true;
         break;
       }
@@ -247,8 +317,8 @@ Value DeclineDownload(const char* reason) {
 Value DecideDownload(const Value& info, const Value& identity, bool isDev) {
   const Value& hash = info.Get("hash");
   Value paths = info.Get("paths");
-  if (paths.IsUndefined()) {
-    paths = Value::Array();  // const { paths = [] } — undefined only
+  if (paths.IsUndefined() || paths.kind() == Value::Kind::Null) {
+    paths = Value::Array();  // info.paths ?? [] — a server `null` too
   }
   if (!info.Get("update").Truthy() || !hash.Truthy()) {
     return DeclineDownload("noUpdate");

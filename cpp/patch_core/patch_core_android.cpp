@@ -1,5 +1,6 @@
 #include <jni.h>
 
+#include <exception>
 #include <string>
 #include <vector>
 
@@ -29,36 +30,45 @@ Java_cn_reactnative_modules_update_DownloadTask_applyPatchFromFileSource(
     jobjectArray copy_tos,
     jobjectArray deletes,
     jstring hbc_transform_meta) {
-  const std::vector<std::string> from_values = JArrayToVector(env, copy_froms);
-  const std::vector<std::string> to_values = JArrayToVector(env, copy_tos);
+  // C++ exceptions (bad_alloc/length_error from input-proportional STL
+  // allocations) must not unwind through the JNI boundary: convert them to a
+  // Java RuntimeException like every other failure of this entry point.
+  try {
+    const std::vector<std::string> from_values = JArrayToVector(env, copy_froms);
+    const std::vector<std::string> to_values = JArrayToVector(env, copy_tos);
 
-  if (from_values.size() != to_values.size()) {
-    ThrowRuntimeException(env, "copy_froms and copy_tos length mismatch");
-    return;
-  }
+    if (from_values.size() != to_values.size()) {
+      ThrowRuntimeException(env, "copy_froms and copy_tos length mismatch");
+      return;
+    }
 
-  pushy::patch::FileSourcePatchOptions options;
-  options.source_root = JStringToString(env, source_root);
-  options.target_root = JStringToString(env, target_root);
-  options.origin_bundle_path = JStringToString(env, origin_bundle_path);
-  options.bundle_patch_path = JStringToString(env, bundle_patch_path);
-  options.bundle_output_path = JStringToString(env, bundle_output_path);
-  options.merge_source_subdir = JStringToString(env, merge_source_subdir);
-  options.enable_merge = enable_merge == JNI_TRUE;
-  options.bundle_hbc_transform_meta = JStringToString(env, hbc_transform_meta);
+    pushy::patch::FileSourcePatchOptions options;
+    options.source_root = JStringToString(env, source_root);
+    options.target_root = JStringToString(env, target_root);
+    options.origin_bundle_path = JStringToString(env, origin_bundle_path);
+    options.bundle_patch_path = JStringToString(env, bundle_patch_path);
+    options.bundle_output_path = JStringToString(env, bundle_output_path);
+    options.merge_source_subdir = JStringToString(env, merge_source_subdir);
+    options.enable_merge = enable_merge == JNI_TRUE;
+    options.bundle_hbc_transform_meta = JStringToString(env, hbc_transform_meta);
 
-  for (size_t index = 0; index < from_values.size(); ++index) {
-    options.manifest.copies.push_back(pushy::patch::CopyOperation{
-        from_values[index],
-        to_values[index],
-    });
-  }
-  options.manifest.deletes = JArrayToVector(env, deletes);
+    for (size_t index = 0; index < from_values.size(); ++index) {
+      options.manifest.copies.push_back(pushy::patch::CopyOperation{
+          from_values[index],
+          to_values[index],
+      });
+    }
+    options.manifest.deletes = JArrayToVector(env, deletes);
 
-  const pushy::patch::Status status =
-      pushy::patch::ApplyPatchFromFileSource(options);
-  if (!status.ok) {
-    ThrowRuntimeException(env, status.message);
+    const pushy::patch::Status status =
+        pushy::patch::ApplyPatchFromFileSource(options);
+    if (!status.ok) {
+      ThrowRuntimeException(env, status.message);
+    }
+  } catch (const std::exception& error) {
+    ThrowRuntimeException(env, error.what());
+  } catch (...) {
+    ThrowRuntimeException(env, "Unexpected native exception in applyPatchFromFileSource");
   }
 }
 
@@ -70,12 +80,18 @@ Java_cn_reactnative_modules_update_DownloadTask_cleanupOldEntries(
     jstring keep_current,
     jstring keep_previous,
     jint max_age_days) {
-  const pushy::patch::Status status = pushy::patch::CleanupOldEntries(
-      JStringToString(env, root_dir),
-      JStringToString(env, keep_current),
-      JStringToString(env, keep_previous),
-      static_cast<int>(max_age_days));
-  if (!status.ok) {
-    ThrowRuntimeException(env, status.message);
+  try {
+    const pushy::patch::Status status = pushy::patch::CleanupOldEntries(
+        JStringToString(env, root_dir),
+        JStringToString(env, keep_current),
+        JStringToString(env, keep_previous),
+        static_cast<int>(max_age_days));
+    if (!status.ok) {
+      ThrowRuntimeException(env, status.message);
+    }
+  } catch (const std::exception& error) {
+    ThrowRuntimeException(env, error.what());
+  } catch (...) {
+    ThrowRuntimeException(env, "Unexpected native exception in cleanupOldEntries");
   }
 }
