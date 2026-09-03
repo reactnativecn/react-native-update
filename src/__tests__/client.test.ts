@@ -877,6 +877,117 @@ describe('error pipeline (onError + stable codes, EH-1/EH-2/EH-3)', () => {
   });
 });
 
+describe('switchVersion operation ownership', () => {
+  const realSetTimeout = globalThis.setTimeout;
+  const realClearTimeout = globalThis.clearTimeout;
+
+  afterEach(() => {
+    globalThis.setTimeout = realSetTimeout;
+    globalThis.clearTimeout = realClearTimeout;
+  });
+
+  test('a queued stale watchdog cannot clear or report for a newer switch', async () => {
+    const callbacks = new Map<number, () => void>();
+    const active = new Set<number>();
+    let nextTimer = 0;
+    globalThis.setTimeout = ((callback: () => void) => {
+      const id = ++nextTimer;
+      callbacks.set(id, callback);
+      active.add(id);
+      return id;
+    }) as unknown as typeof setTimeout;
+    globalThis.clearTimeout = ((id: number) => {
+      active.delete(Number(id));
+    }) as unknown as typeof clearTimeout;
+
+    setupClientMocks({ reloadUpdate: mock(() => Promise.resolve()) });
+    const { Pushy, sharedState } = await importFreshClient(
+      'switch-watchdog-ownership'
+    );
+    const logger = mock((_event: any) => {});
+    const client = new Pushy({
+      appKey: 'demo-app',
+      logger,
+      disableTelemetry: true,
+      disableErrorReporting: true,
+    });
+
+    const onlyTimer = () => {
+      const timer = active.values().next().value;
+      if (typeof timer !== 'number') {
+        throw new Error('expected one active reload watchdog');
+      }
+      return timer;
+    };
+
+    sharedState.downloadedHash = 'version-a';
+    expect(await client.switchVersion('version-a')).toBe(true);
+    const oldCallback = callbacks.get(onlyTimer())!;
+
+    expect(await client.resetToPackagedBundle()).toBe(true);
+    sharedState.downloadedHash = 'version-b';
+    expect(await client.switchVersion('version-b')).toBe(true);
+    const currentTimer = onlyTimer();
+
+    oldCallback(); // simulate a callback already queued before clearTimeout
+    expect(sharedState.applyingUpdate).toBe(true);
+    expect(
+      logger.mock.calls.some(([event]) => event.data?.code === 'RESTART_FAILED')
+    ).toBe(false);
+
+    callbacks.get(currentTimer)!();
+    expect(sharedState.applyingUpdate).toBe(false);
+    expect(
+      logger.mock.calls.some(
+        ([event]) =>
+          event.data?.code === 'RESTART_FAILED' &&
+          event.data?.newVersion === 'version-b'
+      )
+    ).toBe(true);
+  });
+
+  test('a superseded native rejection cannot clear a newer switch', async () => {
+    globalThis.setTimeout = (() => 1) as unknown as typeof setTimeout;
+    globalThis.clearTimeout = (() => {}) as typeof clearTimeout;
+    const calls: Array<{
+      resolve: () => void;
+      reject: (reason: unknown) => void;
+    }> = [];
+    const reloadUpdate = mock(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          calls.push({ resolve, reject });
+        })
+    );
+    setupClientMocks({ reloadUpdate });
+    const { Pushy, sharedState } = await importFreshClient(
+      'switch-rejection-ownership'
+    );
+    const client = new Pushy({
+      appKey: 'demo-app',
+      disableTelemetry: true,
+      disableErrorReporting: true,
+    });
+
+    sharedState.downloadedHash = 'version-a';
+    const first = client.switchVersion('version-a');
+    await Promise.resolve();
+    expect(await client.resetToPackagedBundle()).toBe(true);
+
+    sharedState.downloadedHash = 'version-b';
+    const second = client.switchVersion('version-b');
+    await Promise.resolve();
+
+    calls[0]!.reject(new Error('old reload failed'));
+    await expect(first).rejects.toThrow('old reload failed');
+    expect(sharedState.applyingUpdate).toBe(true);
+
+    calls[1]!.resolve();
+    expect(await second).toBe(true);
+    expect(sharedState.applyingUpdate).toBe(true);
+  });
+});
+
 describe('downloadUpdate fallback chain', () => {
   const realSetTimeout = globalThis.setTimeout;
 
