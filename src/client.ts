@@ -157,6 +157,59 @@ export const sharedState: {
   applyingUpdate: false,
 };
 
+// A reset/new switch invalidates ownership of older async completions and
+// watchdogs before the process-wide applyingUpdate flag can be reused.
+let applyingUpdateGeneration = 0;
+let reloadWatchdogTimer: ReturnType<typeof setTimeout> | undefined;
+
+const clearReloadWatchdog = () => {
+  if (reloadWatchdogTimer !== undefined) {
+    clearTimeout(reloadWatchdogTimer);
+    reloadWatchdogTimer = undefined;
+  }
+};
+
+const beginApplyingUpdate = (): number => {
+  clearReloadWatchdog();
+  sharedState.applyingUpdate = true;
+  return ++applyingUpdateGeneration;
+};
+
+const ownsApplyingUpdate = (generation: number): boolean =>
+  generation === applyingUpdateGeneration && sharedState.applyingUpdate;
+
+const finishApplyingUpdate = (generation: number): boolean => {
+  if (!ownsApplyingUpdate(generation)) {
+    return false;
+  }
+  clearReloadWatchdog();
+  sharedState.applyingUpdate = false;
+  return true;
+};
+
+const invalidateApplyingUpdate = () => {
+  applyingUpdateGeneration++;
+  clearReloadWatchdog();
+  sharedState.applyingUpdate = false;
+};
+
+const armReloadWatchdog = (generation: number, onTimeout: () => void) => {
+  if (!ownsApplyingUpdate(generation)) {
+    return;
+  }
+  clearReloadWatchdog();
+  const timer = setTimeout(() => {
+    // A cancelled callback may already be queued; both identities must match.
+    if (reloadWatchdogTimer !== timer || !ownsApplyingUpdate(generation)) {
+      return;
+    }
+    reloadWatchdogTimer = undefined;
+    sharedState.applyingUpdate = false;
+    onTimeout();
+  }, RELOAD_WATCHDOG_MS);
+  reloadWatchdogTimer = timer;
+};
+
 // The SDK is a process-level singleton: module-level sharedState, the global
 // i18n locale and the native update state are all per-process, so a second
 // client would silently share (and fight over) them. Constructing one is a
@@ -1073,14 +1126,14 @@ export class Pushy {
       return false;
     }
     log(`switchVersion: ${hash}`);
-    sharedState.applyingUpdate = true;
+    const applyingGeneration = beginApplyingUpdate();
     try {
       if (!(await this.runBeforeReload({ type: 'switchVersion', hash }))) {
-        sharedState.applyingUpdate = false;
+        finishApplyingUpdate(applyingGeneration);
         return false;
       }
     } catch (e) {
-      sharedState.applyingUpdate = false;
+      finishApplyingUpdate(applyingGeneration);
       // A throw from the user's beforeReload hook is business-code failure,
       // not an update-pipeline one: give it a distinct code so telemetry
       // excludes it from the server-side patch-health stats.
@@ -1090,12 +1143,15 @@ export class Pushy {
       });
       throw err;
     }
+    // resetToPackagedBundle may have completed while beforeReload awaited.
+    if (!ownsApplyingUpdate(applyingGeneration)) {
+      return false;
+    }
     try {
       await PushyModule.reloadUpdate({ hash });
     } catch (e) {
-      // reloadUpdate can reject (e.g. bundle missing); reset the flag so a
-      // later retry is not permanently blocked by a stuck applyingUpdate.
-      sharedState.applyingUpdate = false;
+      // Do not let a superseded rejection clear a newer switch.
+      finishApplyingUpdate(applyingGeneration);
       const err = toUpdateError(e, 'SWITCH_VERSION_FAILED');
       this.emitError(err, 'errorSwitchVersion', {
         data: { newVersion: hash },
@@ -1107,18 +1163,14 @@ export class Pushy {
     // applyingUpdate would then silently swallow every later switchVersion,
     // so release it once the process has outlived the reload and tell the
     // logger (RESTART_FAILED: restart mechanics, not patch health).
-    setTimeout(() => {
-      if (!sharedState.applyingUpdate) {
-        return;
-      }
-      sharedState.applyingUpdate = false;
+    armReloadWatchdog(applyingGeneration, () => {
       this.report({
         type: 'errorSwitchVersion',
         code: 'RESTART_FAILED',
         message: 'reloadUpdate resolved but the app did not restart',
         data: { newVersion: hash },
       });
-    }, RELOAD_WATCHDOG_MS);
+    });
     return true;
   };
 
@@ -1745,9 +1797,9 @@ export class Pushy {
     sharedState.downloadedHash = undefined;
     sharedState.toHash = undefined;
     sharedState.marked = false;
-    // A switch or APK install that was in flight targets state that no
-    // longer exists; do not let its flag block the next attempt.
-    sharedState.applyingUpdate = false;
+    // Invalidate the private owner too: old promises/timers must not touch
+    // a switch that starts after this reset.
+    invalidateApplyingUpdate();
     sharedState.apkStatus = null;
     this.report({ type: 'reset' });
     if (options?.restart) {

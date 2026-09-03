@@ -75,6 +75,9 @@ public class UpdateContext {
     // as getBundleUrl -> rollBack are fine. Nothing slow runs inside it: the
     // bundle digest of a switch is verified before the lock is taken.
     private static final Object commitLock = new Object();
+    // Cleanup and activation share this lock from directory verification through
+    // deletion/state commit. Slow filesystem work still stays outside commitLock.
+    private static final Object versionFilesLock = new Object();
     
     // Singleton instance
     private static volatile UpdateContext sInstance;
@@ -469,13 +472,15 @@ public class UpdateContext {
     }
 
     public void switchVersion(String hash) {
-        verifySwitchTarget(hash);
-        synchronized (commitLock) {
-            StateCoreResult nextState = computeSwitchState(hash);
-            SharedPreferences.Editor editor = sp.edit();
-            applyState(editor, nextState);
-            persistEditorOrThrow(editor, "switch version");
-            ignoreRollback = false;
+        synchronized (versionFilesLock) {
+            verifySwitchTarget(hash);
+            synchronized (commitLock) {
+                StateCoreResult nextState = computeSwitchState(hash);
+                SharedPreferences.Editor editor = sp.edit();
+                applyState(editor, nextState);
+                persistEditorOrThrow(editor, "switch version");
+                ignoreRollback = false;
+            }
         }
     }
 
@@ -616,10 +621,8 @@ public class UpdateContext {
         DownloadTaskParams params = new DownloadTaskParams();
         params.type = DownloadTaskParams.TASK_TYPE_CLEANUP;
         params.maxAgeDays = 0;
-        // Keep the directory of the version this process is running from (a
-        // silent reset would otherwise break its on-demand asset loads); the
-        // orphaned directory is removed by the next regular cleanup.
-        params.hash = launchVersion;
+        // Keep names are resolved by the queued task at execution time, so a
+        // later activation is protected too.
         params.unzipDirectory = rootDir;
         enqueue(params);
     }
@@ -753,20 +756,28 @@ public class UpdateContext {
         String responseCacheJson
     ) {
         boolean switching = activate && hash != null;
-        if (switching) {
-            // The bundle digest stays outside the lock (see switchVersion); a
-            // reset landing in between bumps the generation and is caught
-            // below.
-            verifySwitchTarget(hash);
+        if (!switching) {
+            return commitNativeCheckResultState(
+                expectedGeneration, hash, hashInfoJson, false, responseCacheJson);
         }
+        synchronized (versionFilesLock) {
+            verifySwitchTarget(hash);
+            return commitNativeCheckResultState(
+                expectedGeneration, hash, hashInfoJson, true, responseCacheJson);
+        }
+    }
+
+    private boolean commitNativeCheckResultState(
+        long expectedGeneration,
+        String hash,
+        String hashInfoJson,
+        boolean switching,
+        String responseCacheJson
+    ) {
         synchronized (commitLock) {
             if (resetGeneration.get() != expectedGeneration) {
                 return false;
             }
-            // One editor, one commit: the version info, the activation and
-            // the response cache land together or not at all. Three separate
-            // commits under the same lock only prevented interleaving, not a
-            // half-written round after a failed or interrupted write.
             SharedPreferences.Editor editor = sp.edit();
             if (hash != null && hashInfoJson != null) {
                 editor.putString("hash_" + hash, hashInfoJson);
@@ -837,31 +848,34 @@ public class UpdateContext {
         return instance == null ? null : instance.launchVersion;
     }
 
-    private void cleanUp() {
-        String currentVersion = sp.getString("currentVersion", null);
-        String lastVersion = sp.getString("lastVersion", null);
-        String running = launchVersion;
-        if (running != null
-            && !running.equals(currentVersion)
-            && !running.equals(lastVersion)) {
-            // CleanupOldEntries (cpp/patch_core/patch_core.cpp) keeps exactly
-            // the two names it is handed plus dot-prefixed entries, and
-            // deletes every other entry older than maxAgeDays. Two switches
-            // without a restart (switchVersionLater(B), then a native round
-            // activating C) push the running version A out of current/last,
-            // and the next markSuccess/launch-marker cleanup would delete the
-            // directory its images and fonts are still read from. The JNI
-            // binding takes two keep names and must not change, so this
-            // process simply skips cleanup; the next launch runs from a
-            // current/last member again and cleans up then (CODE_AUDIT 2.5).
-            Log.i(TAG, "Skipping cleanup: running version " + running
-                + " is neither current nor last");
-            return;
+    interface CleanupAction {
+        void run(@Nullable String keepCurrent, @Nullable String keepPrevious);
+    }
+
+    /** Resolve keep names immediately before deletion, never when enqueued. */
+    void runCleanupWithLatestState(CleanupAction action) {
+        synchronized (versionFilesLock) {
+            final String[] keepNames;
+            synchronized (commitLock) {
+                keepNames = CleanupKeepNames.select(
+                    sp.getString("currentVersion", null),
+                    sp.getString("lastVersion", null),
+                    launchVersion
+                );
+            }
+            if (keepNames == null) {
+                // JNI has only two keep slots; three distinct live versions are
+                // safer to defer until the next process than to delete one.
+                Log.i(TAG, "Skipping cleanup: three live versions need protection");
+                return;
+            }
+            action.run(keepNames[0], keepNames[1]);
         }
+    }
+
+    private void cleanUp() {
         DownloadTaskParams params = new DownloadTaskParams();
         params.type = DownloadTaskParams.TASK_TYPE_CLEANUP;
-        params.hash = currentVersion;
-        params.originHash = lastVersion;
         params.unzipDirectory = rootDir;
         enqueue(params);
     }

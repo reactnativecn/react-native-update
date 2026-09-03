@@ -686,11 +686,18 @@ class DownloadTask implements Runnable {
     }
 
     private void doCleanUp() {
-        cleanupOldEntries(
-            params.unzipDirectory.getAbsolutePath(),
-            params.hash,
-            params.originHash,
-            params.maxAgeDays
+        UpdateContext.getInstance(context).runCleanupWithLatestState(
+            new UpdateContext.CleanupAction() {
+                @Override
+                public void run(String keepCurrent, String keepPrevious) {
+                    cleanupOldEntries(
+                        params.unzipDirectory.getAbsolutePath(),
+                        keepCurrent,
+                        keepPrevious,
+                        params.maxAgeDays
+                    );
+                }
+            }
         );
     }
 
