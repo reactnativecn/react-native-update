@@ -70,7 +70,10 @@ NSString *RCTPushyFreeSpaceShortfall(NSString *path, long long bytesToWrite) {
 }
 
 // "bytes <start>-<end>/<total>". Returns the total (0 when "*"), or -1 when
-// missing/malformed or the start does not match the local partial.
+// missing/malformed, the start does not match the local partial, or the
+// range and total contradict each other (end before start, or a numeric
+// total not beyond the end — RFC 9110 §14.4). A total of 0 would otherwise
+// pass as "unknown" and skip the final size check.
 static long long RCTPushyParseContentRange(NSString *header, long long expectedStart) {
     if (![header hasPrefix:@"bytes "]) {
         return -1;
@@ -83,16 +86,35 @@ static long long RCTPushyParseContentRange(NSString *header, long long expectedS
         || dash.location > slash.location) {
         return -1;
     }
-    long long start = [range substringToIndex:dash.location].longLongValue;
-    if (start != expectedStart) {
+    NSCharacterSet *whitespace = [NSCharacterSet whitespaceCharacterSet];
+    NSString *startPart = [[range substringToIndex:dash.location]
+        stringByTrimmingCharactersInSet:whitespace];
+    NSString *endPart = [[range substringWithRange:
+        NSMakeRange(dash.location + 1, slash.location - dash.location - 1)]
+        stringByTrimmingCharactersInSet:whitespace];
+    NSString *totalPart = [[range substringFromIndex:slash.location + 1]
+        stringByTrimmingCharactersInSet:whitespace];
+    // longLongValue reads 0 for non-numeric text; require real digits.
+    NSCharacterSet *digits = [NSCharacterSet decimalDigitCharacterSet];
+    if (startPart.length == 0 || endPart.length == 0
+        || [startPart rangeOfCharacterFromSet:digits.invertedSet].location != NSNotFound
+        || [endPart rangeOfCharacterFromSet:digits.invertedSet].location != NSNotFound) {
         return -1;
     }
-    NSString *totalPart = [range substringFromIndex:slash.location + 1];
+    long long start = startPart.longLongValue;
+    long long end = endPart.longLongValue;
+    if (start != expectedStart || end < start) {
+        return -1;
+    }
     if ([totalPart isEqualToString:@"*"]) {
         return 0;
     }
+    if (totalPart.length == 0
+        || [totalPart rangeOfCharacterFromSet:digits.invertedSet].location != NSNotFound) {
+        return -1;
+    }
     long long total = totalPart.longLongValue;
-    return total > 0 ? total : -1;
+    return total > end ? total : -1;
 }
 
 @interface RCTPushyDownloader()<NSURLSessionDataDelegate>
@@ -123,6 +145,8 @@ static long long RCTPushyParseContentRange(NSString *header, long long expectedS
 @property (nonatomic, assign) BOOL discardPartial;
 @property (nonatomic, assign) int lastReportedPercentage;
 @property (nonatomic, assign) long long lastReportedBytes;
+// receivedBytes at the last streaming free-space probe (unknown-length bodies)
+@property (nonatomic, assign) long long lastFreeSpaceProbeBytes;
 @end
 
 @implementation RCTPushyDownloader
@@ -427,22 +451,27 @@ didReceiveResponse:(NSURLResponse *)response
         [self completeWithError:self.fileError];
         return;
     }
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    if (!append) {
+        // The server ignored the range (or none was sent): the stale partial
+        // is dead weight either way, so free it before the space check
+        // counts it against this download (a full restart must not fail
+        // forever on space the partial itself is holding).
+        [fileManager removeItemAtPath:self.savePath error:nil];
+    }
     NSString *shortfall = RCTPushyFreeSpaceShortfall(
         self.savePath, announcedTotal > 0 ? announcedTotal - self.baseOffset : 0);
     if (shortfall != nil) {
-        // The partial (if any) stays: a later attempt may find the space.
+        // A resumable partial stays: a later attempt may find the space.
         [self failWithDescription:shortfall code:-1];
         completionHandler(NSURLSessionResponseCancel);
         [self completeWithError:self.fileError];
         return;
     }
-
-    NSFileManager *fileManager = [NSFileManager defaultManager];
     if (!append) {
-        // The server ignored the range (or none was sent): start over.
-        [fileManager removeItemAtPath:self.savePath error:nil];
         [fileManager createFileAtPath:self.savePath contents:nil attributes:nil];
     }
+    self.lastFreeSpaceProbeBytes = 0;
     self.fileHandle = [NSFileHandle fileHandleForWritingAtPath:self.savePath];
     if (self.fileHandle == nil) {
         [self failWithDescription:@"cannot open download file for writing" code:-1];
@@ -492,6 +521,21 @@ didReceiveResponse:(NSURLResponse *)response
         self.discardPartial = YES;
         [dataTask cancel];
         return;
+    }
+    if (self.expectedTotal <= 0
+        && self.receivedBytes - self.lastFreeSpaceProbeBytes
+            >= pushy::archive_limits::kUnknownLengthFreeSpaceProbeBytes) {
+        // Unknown/encoded length: the response-time check could only
+        // reserve the margin, so re-probe the disk as bytes stream in. The
+        // archive cap alone (512 MiB) is far more than the margin protects.
+        // The partial stays: a later attempt may find the space.
+        self.lastFreeSpaceProbeBytes = self.receivedBytes;
+        NSString *shortfall = RCTPushyFreeSpaceShortfall(self.savePath, data.length);
+        if (shortfall != nil) {
+            [self failWithDescription:shortfall code:-1];
+            [dataTask cancel];
+            return;
+        }
     }
     @try {
         [self.fileHandle writeData:data];

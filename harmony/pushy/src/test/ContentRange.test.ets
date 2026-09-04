@@ -40,5 +40,15 @@ export default function contentRangeTest() {
       expect(parseContentRangeTotal('bytes 100-199/-5', 100)).assertEqual(-1);
       expect(parseContentRangeTotal('bytes 100-199/abc', 100)).assertEqual(-1);
     });
+
+    // 数值 total 必须大于 end(RFC 9110 §14.4);end 不能在 start 之前。
+    it('rejects a range that contradicts its total', 0, () => {
+      expect(parseContentRangeTotal('bytes 100-199/199', 100)).assertEqual(-1);
+      expect(parseContentRangeTotal('bytes 100-199/150', 100)).assertEqual(-1);
+      expect(parseContentRangeTotal('bytes 100-99/200', 100)).assertEqual(-1);
+      expect(parseContentRangeTotal('bytes 100-99/*', 100)).assertEqual(-1);
+      expect(parseContentRangeTotal('bytes 100-x/200', 100)).assertEqual(-1);
+      expect(parseContentRangeTotal('bytes 100-100/200', 100)).assertEqual(200);
+    });
   });
 }

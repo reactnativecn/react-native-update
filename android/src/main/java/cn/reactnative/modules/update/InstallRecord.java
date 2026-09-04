@@ -59,8 +59,11 @@ final class InstallRecord {
     // java.nio.file (the only way to open a directory for fsync from Java)
     // is API 26+ on Android; below that the file fsync above is all there
     // is. Best-effort by design: a file system that refuses to open a
-    // directory for reading must not fail the install.
-    private static void syncDirectory(File dir) {
+    // directory for reading must not fail the install. Also called by the
+    // installer on the versions root after the staging -> version rename:
+    // that rename changes the parent's entries, which only the parent's own
+    // sync makes durable.
+    static void syncDirectory(File dir) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             return;
         }

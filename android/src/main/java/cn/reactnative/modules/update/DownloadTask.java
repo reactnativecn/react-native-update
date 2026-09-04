@@ -352,6 +352,7 @@ class DownloadTask implements Runnable {
             long received = 0;
             int currentPercentage = 0;
             long lastPostedBytes = baseOffset;
+            long lastFreeSpaceProbeBytes = 0;
 
             try (
                 BufferedSource source = body.source();
@@ -367,6 +368,15 @@ class DownloadTask implements Runnable {
                         // Unknown/chunked length backstop.
                         throw new IOException(
                             "archive too large: exceeded " + ArchiveLimits.MAX_ARCHIVE_BYTES);
+                    }
+                    if (totalAll <= 0 && received - lastFreeSpaceProbeBytes
+                            >= ArchiveLimits.UNKNOWN_LENGTH_FREE_SPACE_PROBE_BYTES) {
+                        // Unknown length: the response-time check could only
+                        // reserve the margin, so re-probe as bytes stream in
+                        // (the archive cap alone is far more than the margin).
+                        // A throw keeps the partial for a later attempt.
+                        lastFreeSpaceProbeBytes = received;
+                        ArchiveLimits.ensureFreeSpace(writePath, DOWNLOAD_CHUNK_SIZE);
                     }
                     if (totalAll > 0) {
                         int percentage = (int) (overall * 100.0 / totalAll + 0.5);
@@ -579,6 +589,12 @@ class DownloadTask implements Runnable {
         }
         if (!work.renameTo(params.unzipDirectory)) {
             throw new IOException("failed to promote staging directory to " + params.unzipDirectory);
+        }
+        // The rename rewrote the versions root's entries; the record's own
+        // directory was synced by InstallRecord.write, the root was not.
+        File versionsRoot = params.unzipDirectory.getParentFile();
+        if (versionsRoot != null) {
+            InstallRecord.syncDirectory(versionsRoot);
         }
     }
 

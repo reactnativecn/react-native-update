@@ -188,13 +188,26 @@ int RunNumberConversion() {
       "1e22", "1e-22", "1.7e12", "12345678901234567e10", "2.5e-3",
       "1e37", "4e37", "9007199254740992e15",
   };
+  // Outside the exact-rounding contract (a significand over 2^53) the
+  // parser documents a possible one-ulp difference from strtod; pin those
+  // tokens to within one ulp instead of bit-for-bit.
+  const char* approximate_tokens[] = {"12345678901234567e10"};
   for (const char* token : tokens) {
     bool ok = false;
     Value v = Parse(token, &ok);
     const double expected = std::strtod(token, nullptr);
     const double actual = v.AsNumber();
-    if (!ok || !v.IsNumber() ||
-        std::memcmp(&expected, &actual, sizeof(double)) != 0) {
+    bool approximate = false;
+    for (const char* candidate : approximate_tokens) {
+      approximate = approximate || std::strcmp(candidate, token) == 0;
+    }
+    const bool matches =
+        approximate
+            ? actual == expected ||
+                  actual == std::nextafter(expected, -INFINITY) ||
+                  actual == std::nextafter(expected, INFINITY)
+            : std::memcmp(&expected, &actual, sizeof(double)) == 0;
+    if (!ok || !v.IsNumber() || !matches) {
       std::fprintf(stderr, "number: %s -> ok=%d %.17g (expected %.17g)\n",
                    token, ok, actual, expected);
       failures++;

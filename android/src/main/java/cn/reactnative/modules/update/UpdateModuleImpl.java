@@ -382,6 +382,12 @@ public class UpdateModuleImpl {
             return;
         }
         String value = updateContext.getKv("hash_" + hash);
+        if (value == null || value.isEmpty()) {
+            // No record (iOS resolves nil the same way): JS treats it as {}.
+            // Only a record that exists and is not a JSON object is invalid.
+            promise.resolve(null);
+            return;
+        }
         if (!isValidHashInfo(value)) {
             promise.reject(ErrorCodes.INVALID_HASH_INFO, "getLocalHashInfo failed: invalid json string");
             return;

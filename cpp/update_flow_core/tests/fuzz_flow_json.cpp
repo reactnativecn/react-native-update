@@ -19,10 +19,17 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   if (ok) {
     // Whatever parses must stringify to something that parses again: the
     // canonical serialization is what every vector comparison relies on.
-    bool ok_again = false;
-    flowjson::Parse(flowjson::Stringify(parsed), &ok_again);
-    if (!ok_again) {
-      std::abort();
+    // Stringify can legitimately emit more bytes than it consumed (raw
+    // control bytes become \u00xx, "1e308" prints through %.17g), so a
+    // serialization that crosses the parser's input cap is not a finding —
+    // only a rejection of text within the cap is.
+    const std::string again = flowjson::Stringify(parsed);
+    if (again.size() <= flowjson::kMaxInputBytes) {
+      bool ok_again = false;
+      flowjson::Parse(again, &ok_again);
+      if (!ok_again) {
+        std::abort();
+      }
     }
   }
 

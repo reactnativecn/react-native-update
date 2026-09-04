@@ -131,8 +131,11 @@ if (!isWebPlatform && typeof PushyModule.getBundleHash === 'function') {
 /** '' while unknown (not yet computed, debug build, no embedded bundle, older native). */
 export const getBundleHash = (): string => bundleHash;
 
+// Natives resolve null/'' when no record exists for the hash (only a record
+// that exists and is not a JSON object rejects with INVALID_HASH_INFO).
 async function getLocalHashInfo(hash: string) {
-  return JSON.parse(await PushyModule.getLocalHashInfo(hash));
+  const raw = await PushyModule.getLocalHashInfo(hash);
+  return raw ? JSON.parse(raw) : null;
 }
 
 // @deprecated use currentVersionInfo instead
