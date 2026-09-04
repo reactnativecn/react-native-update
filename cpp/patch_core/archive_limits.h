@@ -33,7 +33,9 @@ constexpr long long kMaxManifestBytes = 16LL * 1024 * 1024;
 constexpr long long kFreeDiskMarginBytes = 64LL * 1024 * 1024;
 // A download whose length is unknown up front (chunked / encoded body) can
 // only reserve the margin when the response arrives; the disk is re-probed
-// every this many streamed bytes so the cap above cannot eat the margin.
+// before the first body byte and then every this many streamed bytes, each
+// probe reserving this many bytes ahead, so the writes between two probes
+// can never eat into the margin.
 constexpr long long kUnknownLengthFreeSpaceProbeBytes = 8LL * 1024 * 1024;
 
 }  // namespace archive_limits

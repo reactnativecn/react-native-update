@@ -145,8 +145,9 @@ static long long RCTPushyParseContentRange(NSString *header, long long expectedS
 @property (nonatomic, assign) BOOL discardPartial;
 @property (nonatomic, assign) int lastReportedPercentage;
 @property (nonatomic, assign) long long lastReportedBytes;
-// receivedBytes at the last streaming free-space probe (unknown-length bodies)
-@property (nonatomic, assign) long long lastFreeSpaceProbeBytes;
+// receivedBytes at which the next streaming free-space probe is due
+// (unknown-length bodies; 0 = probe before the first write)
+@property (nonatomic, assign) long long nextFreeSpaceProbeAt;
 @end
 
 @implementation RCTPushyDownloader
@@ -471,7 +472,7 @@ didReceiveResponse:(NSURLResponse *)response
     if (!append) {
         [fileManager createFileAtPath:self.savePath contents:nil attributes:nil];
     }
-    self.lastFreeSpaceProbeBytes = 0;
+    self.nextFreeSpaceProbeAt = 0;
     self.fileHandle = [NSFileHandle fileHandleForWritingAtPath:self.savePath];
     if (self.fileHandle == nil) {
         [self failWithDescription:@"cannot open download file for writing" code:-1];
@@ -522,15 +523,17 @@ didReceiveResponse:(NSURLResponse *)response
         [dataTask cancel];
         return;
     }
-    if (self.expectedTotal <= 0
-        && self.receivedBytes - self.lastFreeSpaceProbeBytes
-            >= pushy::archive_limits::kUnknownLengthFreeSpaceProbeBytes) {
+    if (self.expectedTotal <= 0 && self.receivedBytes >= self.nextFreeSpaceProbeAt) {
         // Unknown/encoded length: the response-time check could only
-        // reserve the margin, so re-probe the disk as bytes stream in. The
-        // archive cap alone (512 MiB) is far more than the margin protects.
-        // The partial stays: a later attempt may find the space.
-        self.lastFreeSpaceProbeBytes = self.receivedBytes;
-        NSString *shortfall = RCTPushyFreeSpaceShortfall(self.savePath, data.length);
+        // reserve the margin, so probe before the first write and then every
+        // PROBE bytes, each probe reserving the next PROBE bytes — the writes
+        // between two probes can never eat into the margin. The archive cap
+        // alone (512 MiB) is far more than the margin protects. The partial
+        // stays: a later attempt may find the space.
+        self.nextFreeSpaceProbeAt = self.receivedBytes
+            + pushy::archive_limits::kUnknownLengthFreeSpaceProbeBytes;
+        NSString *shortfall = RCTPushyFreeSpaceShortfall(
+            self.savePath, pushy::archive_limits::kUnknownLengthFreeSpaceProbeBytes);
         if (shortfall != nil) {
             [self failWithDescription:shortfall code:-1];
             [dataTask cancel];

@@ -352,7 +352,13 @@ class DownloadTask implements Runnable {
             long received = 0;
             int currentPercentage = 0;
             long lastPostedBytes = baseOffset;
-            long lastFreeSpaceProbeBytes = 0;
+            // Unknown length: the response-time check could only reserve the
+            // margin, so the disk is probed before the first write and then
+            // every PROBE bytes, each probe reserving the next PROBE bytes —
+            // the writes between two probes can never eat into the margin
+            // (the archive cap alone is far more than the margin). A throw
+            // keeps the partial for a later attempt.
+            long nextFreeSpaceProbeAt = 0;
 
             try (
                 BufferedSource source = body.source();
@@ -361,6 +367,12 @@ class DownloadTask implements Runnable {
             ) {
                 while ((bytesRead = source.read(sink.buffer(), DOWNLOAD_CHUNK_SIZE)) != -1) {
                     received += bytesRead;
+                    if (totalAll <= 0 && received - bytesRead >= nextFreeSpaceProbeAt) {
+                        nextFreeSpaceProbeAt = received - bytesRead
+                            + ArchiveLimits.UNKNOWN_LENGTH_FREE_SPACE_PROBE_BYTES;
+                        ArchiveLimits.ensureFreeSpace(
+                            writePath, ArchiveLimits.UNKNOWN_LENGTH_FREE_SPACE_PROBE_BYTES);
+                    }
                     sink.emit();
 
                     long overall = baseOffset + received;
@@ -368,15 +380,6 @@ class DownloadTask implements Runnable {
                         // Unknown/chunked length backstop.
                         throw new IOException(
                             "archive too large: exceeded " + ArchiveLimits.MAX_ARCHIVE_BYTES);
-                    }
-                    if (totalAll <= 0 && received - lastFreeSpaceProbeBytes
-                            >= ArchiveLimits.UNKNOWN_LENGTH_FREE_SPACE_PROBE_BYTES) {
-                        // Unknown length: the response-time check could only
-                        // reserve the margin, so re-probe as bytes stream in
-                        // (the archive cap alone is far more than the margin).
-                        // A throw keeps the partial for a later attempt.
-                        lastFreeSpaceProbeBytes = received;
-                        ArchiveLimits.ensureFreeSpace(writePath, DOWNLOAD_CHUNK_SIZE);
                     }
                     if (totalAll > 0) {
                         int percentage = (int) (overall * 100.0 / totalAll + 0.5);
