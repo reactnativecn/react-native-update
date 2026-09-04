@@ -679,7 +679,7 @@ export class DownloadTask {
       }
     };
 
-    let nextFreeSpaceProbeAt = 0;
+    let freeSpaceReservedUntil = 0;
     const enqueueWrite = (data: ArrayBuffer) => {
       received += data.byteLength;
       if (!writeError && baseOffset + received > MAX_ARCHIVE_BYTES) {
@@ -689,16 +689,18 @@ export class DownloadTask {
           `archive too large: exceeded ${MAX_ARCHIVE_BYTES}`,
         );
       }
-      // 未知长度:响应到达时只能预留安全余量,所以首次写入前探测一次,之后
-      // 每写满 PROBE 字节再探测,每次都预留接下来的 PROBE 字节——两次探测之间
-      // 的写入永远吃不到余量(归档上限本身远大于余量)。失败保留 partial 供
-      // 下次续传。
+      // 未知长度:响应到达时只能预留安全余量,所以任何会写过已预留字节数的
+      // 写入之前先探测,每次至少预留接下来的 PROBE 字节(单个 chunk 更大时按
+      // chunk 算)——任何写入都吃不到余量(归档上限本身远大于余量)。失败保留
+      // partial 供下次续传。
       const writtenBefore = received - data.byteLength;
-      const probeFreeSpace =
-        totalAll <= 0 && writtenBefore >= nextFreeSpaceProbeAt;
+      const probeFreeSpace = totalAll <= 0 && received > freeSpaceReservedUntil;
+      const reserve = Math.max(
+        UNKNOWN_LENGTH_FREE_SPACE_PROBE_BYTES,
+        data.byteLength,
+      );
       if (probeFreeSpace) {
-        nextFreeSpaceProbeAt =
-          writtenBefore + UNKNOWN_LENGTH_FREE_SPACE_PROBE_BYTES;
+        freeSpaceReservedUntil = writtenBefore + reserve;
       }
       writeQueue = writeQueue.then(async () => {
         if (!writer || writeError) {
@@ -706,10 +708,7 @@ export class DownloadTask {
         }
         try {
           if (probeFreeSpace) {
-            await ensureFreeSpace(
-              params.targetFile,
-              UNKNOWN_LENGTH_FREE_SPACE_PROBE_BYTES,
-            );
+            await ensureFreeSpace(params.targetFile, reserve);
           }
           await fileIo.write(writer.fd, data);
         } catch (error) {
