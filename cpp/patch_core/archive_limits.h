@@ -31,6 +31,10 @@ constexpr long long kRatioCheckMinBytes = 1LL * 1024 * 1024;
 constexpr long long kMaxManifestBytes = 16LL * 1024 * 1024;
 // Free disk required beyond the bytes about to be written.
 constexpr long long kFreeDiskMarginBytes = 64LL * 1024 * 1024;
+// A download whose length is unknown up front (chunked / encoded body) can
+// only reserve the margin when the response arrives; the disk is re-probed
+// every this many streamed bytes so the cap above cannot eat the margin.
+constexpr long long kUnknownLengthFreeSpaceProbeBytes = 8LL * 1024 * 1024;
 
 }  // namespace archive_limits
 }  // namespace pushy

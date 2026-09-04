@@ -24,8 +24,11 @@ const fs = require('fs');
 const path = require('path');
 const ohPackagePath = path.join(__dirname, '..', 'harmony/pushy/oh-package.json5');
 const ohPackage = fs.readFileSync(ohPackagePath, 'utf8');
-const ohVersion = (ohPackage.match(/^\s*version\s*:\s*['"]([^'"]+)['"]/m) ||
-  [])[1];
+// JSON5 allows the key bare or quoted; the regex is shared in spirit with
+// syncOhPackageVersion in scripts/build-harmony-har.js.
+const ohVersion = (ohPackage.match(
+  /^\s*(?:"version"|'version'|version)\s*:\s*['"]([^'"]+)['"]/m
+) || [])[1];
 if (ohVersion !== pkg.version) {
   console.error(
     `check-release-version: harmony/pushy/oh-package.json5 version ${ohVersion} does not match package.json version ${pkg.version}`

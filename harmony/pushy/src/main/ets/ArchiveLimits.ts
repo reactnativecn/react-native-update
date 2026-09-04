@@ -18,6 +18,7 @@ export const MAX_COMPRESSION_RATIO = 100;
 export const RATIO_CHECK_MIN_BYTES = 1 * 1024 * 1024;
 export const MAX_MANIFEST_BYTES = 16 * 1024 * 1024;
 export const FREE_DISK_MARGIN_BYTES = 64 * 1024 * 1024;
+export const UNKNOWN_LENGTH_FREE_SPACE_PROBE_BYTES = 8 * 1024 * 1024;
 
 /**
  * 解压前的总量校验(zlib.getOriginalSize 给出的归档解压后总字节数)。

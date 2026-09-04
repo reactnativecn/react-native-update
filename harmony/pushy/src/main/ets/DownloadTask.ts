@@ -16,6 +16,7 @@ import logger from './Logger';
 import {
   MAX_ARCHIVE_BYTES,
   MAX_MANIFEST_BYTES,
+  UNKNOWN_LENGTH_FREE_SPACE_PROBE_BYTES,
   checkUncompressedSize,
   ensureFreeSpace,
   measureExtractedDirectory,
@@ -140,7 +141,9 @@ interface ResumeMeta {
 }
 
 // "bytes <start>-<end>/<total>"。返回总长(“*”记 0);缺失/畸形/起点与
-// 本地 partial 不符返回 -1——那样追加的字节不可信。
+// 本地 partial 不符、或 range 与 total 自相矛盾(end 在 start 之前、数值
+// total 不大于 end)返回 -1——那样追加的字节不可信。RFC 9110 §14.4 要求
+// 完整长度必须大于 last-pos。
 export function parseContentRangeTotal(
   header: string,
   expectedStart: number,
@@ -155,7 +158,13 @@ export function parseContentRangeTotal(
     return -1;
   }
   const start = parseInt(range.substring(0, dash).trim(), 10);
-  if (Number.isNaN(start) || start !== expectedStart) {
+  const end = parseInt(range.substring(dash + 1, slash).trim(), 10);
+  if (
+    Number.isNaN(start) ||
+    Number.isNaN(end) ||
+    start !== expectedStart ||
+    end < start
+  ) {
     return -1;
   }
   const totalPart = range.substring(slash + 1).trim();
@@ -163,7 +172,7 @@ export function parseContentRangeTotal(
     return 0;
   }
   const total = parseInt(totalPart, 10);
-  return Number.isNaN(total) || total <= 0 ? -1 : total;
+  return Number.isNaN(total) || total <= end ? -1 : total;
 }
 
 export class DownloadTask {
@@ -318,28 +327,36 @@ export class DownloadTask {
   }
 
   /**
-   * 解压前读取归档解压后的总字节数(zlib.getOriginalSize,API 12)。老 API /
-   * 读取失败返回 -1,回退到解压后统计。
+   * 解压前读取归档解压后的总字节数(zlib.getOriginalSize,API 12——RNOH 的
+   * 最低 API 已覆盖)。读不到就拒绝归档:zlib.decompressFile 没有逐条钩子,
+   * 不知道展开量就放行等于允许一个 20MB 的归档在 measureExtractedDirectory
+   * 跑到之前先把磁盘写满。
    */
   private async readOriginalSize(archiveFile: string): Promise<number> {
+    let size: number | undefined;
     try {
-      const size = await zlib.getOriginalSize(archiveFile);
-      return typeof size === 'number' && Number.isFinite(size) ? size : -1;
+      size = await zlib.getOriginalSize(archiveFile);
     } catch (e) {
-      logger.warn(
-        TAG,
-        `zlib.getOriginalSize unavailable, measuring after extraction: ${getErrorMessage(e)}`,
+      throw createUpdateError(
+        ERROR_PATCH_FAILED,
+        `cannot determine archive expansion size: ${getErrorMessage(e)}`,
       );
-      return -1;
     }
+    if (typeof size !== 'number' || !Number.isFinite(size) || size < 0) {
+      throw createUpdateError(
+        ERROR_PATCH_FAILED,
+        `cannot determine archive expansion size: ${String(size)}`,
+      );
+    }
+    return size;
   }
 
   /**
    * 解压 + 资源上限(cpp/patch_core/archive_limits.h)。zlib.decompressFile
    * 没有逐条钩子:解压前用 getOriginalSize 把总解压量与整包压缩比挡在
    * 上限内(20MB 归档 100:1 的 2GB 载荷不会先解出来再量),按已知解压量查
-   * 磁盘;解压后再统计条目数/单条大小/总字节数并拒绝任意深度的 `.pushy-`
-   * 保留条目(超限即失败,staging 目录由失败清理删除)。
+   * 磁盘,解压量未知直接拒绝;解压后再统计条目数/单条大小/总字节数并拒绝
+   * 任意深度的 `.pushy-` 保留条目(超限即失败,staging 目录由失败清理删除)。
    */
   private async extractArchive(
     archiveFile: string,
@@ -353,13 +370,8 @@ export class DownloadTask {
       );
     }
     const originalSize = await this.readOriginalSize(archiveFile);
-    if (originalSize >= 0) {
-      checkUncompressedSize(archiveStat.size, originalSize);
-    }
-    await ensureFreeSpace(
-      unzipDirectory,
-      originalSize > 0 ? originalSize : archiveStat.size * 2,
-    );
+    checkUncompressedSize(archiveStat.size, originalSize);
+    await ensureFreeSpace(unzipDirectory, originalSize);
     try {
       await zlib.decompressFile(archiveFile, unzipDirectory);
     } catch (e) {
@@ -667,6 +679,7 @@ export class DownloadTask {
       }
     };
 
+    let lastFreeSpaceProbeBytes = 0;
     const enqueueWrite = (data: ArrayBuffer) => {
       received += data.byteLength;
       if (!writeError && baseOffset + received > MAX_ARCHIVE_BYTES) {
@@ -676,11 +689,23 @@ export class DownloadTask {
           `archive too large: exceeded ${MAX_ARCHIVE_BYTES}`,
         );
       }
+      const probeFreeSpace =
+        totalAll <= 0 &&
+        received - lastFreeSpaceProbeBytes >=
+          UNKNOWN_LENGTH_FREE_SPACE_PROBE_BYTES;
+      if (probeFreeSpace) {
+        lastFreeSpaceProbeBytes = received;
+      }
       writeQueue = writeQueue.then(async () => {
         if (!writer || writeError) {
           return;
         }
         try {
+          if (probeFreeSpace) {
+            // 未知长度:响应到达时只能预留安全余量,边收边重新探测磁盘
+            // (归档上限本身远大于余量)。失败保留 partial 供下次续传。
+            await ensureFreeSpace(params.targetFile, data.byteLength);
+          }
           await fileIo.write(writer.fd, data);
         } catch (error) {
           writeError = error as Error;

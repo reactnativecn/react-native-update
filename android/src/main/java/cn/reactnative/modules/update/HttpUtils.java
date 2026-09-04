@@ -24,8 +24,12 @@ final class HttpUtils {
     }
 
     // "bytes <start>-<end>/<total>". Returns the total (0 when "*"), or -1
-    // when the header is missing/malformed or the start does not match the
-    // local partial — either way the appended bytes could not be trusted.
+    // when the header is missing/malformed, the start does not match the
+    // local partial, or the range and total contradict each other (end
+    // before start, or a numeric total not beyond the end) — either way the
+    // appended bytes could not be trusted. A total of 0 would otherwise pass
+    // as "unknown" and skip the final size check (RFC 9110 §14.4: the
+    // complete length must exceed the last position).
     static long parseContentRange(String header, long expectedStart) {
         if (header == null || !header.startsWith("bytes ")) {
             return -1;
@@ -38,11 +42,16 @@ final class HttpUtils {
                 return -1;
             }
             long start = Long.parseLong(range.substring(0, dash).trim());
-            if (start != expectedStart) {
+            long end = Long.parseLong(range.substring(dash + 1, slash).trim());
+            if (start != expectedStart || end < start) {
                 return -1;
             }
             String totalPart = range.substring(slash + 1).trim();
-            return totalPart.equals("*") ? 0 : Long.parseLong(totalPart);
+            if (totalPart.equals("*")) {
+                return 0;
+            }
+            long total = Long.parseLong(totalPart);
+            return total > end ? total : -1;
         } catch (NumberFormatException e) {
             return -1;
         }

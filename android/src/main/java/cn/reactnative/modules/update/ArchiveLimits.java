@@ -13,6 +13,7 @@ final class ArchiveLimits {
     static final long RATIO_CHECK_MIN_BYTES = 1L * 1024 * 1024;
     static final long MAX_MANIFEST_BYTES = 16L * 1024 * 1024;
     static final long FREE_DISK_MARGIN_BYTES = 64L * 1024 * 1024;
+    static final long UNKNOWN_LENGTH_FREE_SPACE_PROBE_BYTES = 8L * 1024 * 1024;
 
     private ArchiveLimits() {
     }

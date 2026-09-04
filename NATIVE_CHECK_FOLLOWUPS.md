@@ -525,5 +525,5 @@ feature-detect 把缺失当"老原生"优雅跳过——这是[[no-graceful-degr
 | 第 9 项（`noArtifact` 上报位置） | 已修：每个坏发布只报一次，静默策略由 client 报、弹窗策略由 provider 报 |
 | 第 10 项（两处 cleanup） | 已修 |
 | 鸿蒙 e2e 补 native-check 场景 | 未做（需 hdc/uitest 设备链路） |
-| `Logger.ts isDebug` 硬编码 | 已修：从 `BuildProfile.DEBUG` 派生，轮次里程碑提升到 info/warn |
+| `Logger.ts isDebug` 硬编码 | 已修：由宿主 `isDebugModeEnabled` 在模块构造时打开（HAR 内无法引用 hvigor 生成的 `BuildProfile`，首次 CI 编译已证实），轮次里程碑提升到 info/warn |
 | "P1 Android/Harmony 重复下载" 遗留的 launchVersion 保护 | 已修：三端清理都保留本进程启动版本；Android 在 keep 集合不含它时跳过本次清理 |

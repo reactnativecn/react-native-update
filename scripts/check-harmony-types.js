@@ -26,10 +26,12 @@ function findSdkEtsDir() {
     if (fs.existsSync(path.join(explicit, 'api'))) {
       return explicit;
     }
-    console.error(
-      `check-harmony-types: HARMONY_SDK_ETS_DIR=${explicit} has no api/ dir.`
+    // A stale override must not hide a valid DEVECO_SDK_HOME / default
+    // install: say so and keep probing.
+    console.warn(
+      `check-harmony-types: HARMONY_SDK_ETS_DIR=${explicit} has no api/ dir; ` +
+        'ignoring it and probing the default SDK locations.'
     );
-    return null;
   }
   const bases = [];
   if (process.env.DEVECO_SDK_HOME) {

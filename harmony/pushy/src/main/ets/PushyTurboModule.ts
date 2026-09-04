@@ -236,9 +236,14 @@ export class PushyTurboModule extends UITurboModule {
     }
   }
 
+  // 没有记录时返回 ''(iOS 同样 resolve nil):JS 侧把空值当 {}。只有存在
+  // 但不是 JSON 对象的记录才是 INVALID_HASH_INFO。
   async getLocalHashInfo(hash: string): Promise<string> {
     this.requireHash(hash, 'getLocalHashInfo');
     const value = this.context.getKv(`hash_${hash}`);
+    if (!value) {
+      return '';
+    }
     validateHashInfo(value);
     return value;
   }

@@ -59,11 +59,14 @@ try {
 }
 
 function main() {
-  syncOhPackageVersion();
-  syncHarmonyNativeSources();
   let buildError = null;
 
+  // Setup runs inside the guard too: a failed version sync or staging copy
+  // must still clean the android-generated staging directory (its own or a
+  // stale one from an earlier build) instead of leaving it behind.
   try {
+    syncOhPackageVersion();
+    syncHarmonyNativeSources();
     buildHar();
   } catch (error) {
     buildError = error;
@@ -196,7 +199,10 @@ function syncOhPackageVersion() {
     fail('package.json has no version to write into oh-package.json5');
   }
   const content = fs.readFileSync(ohPackagePath, 'utf8');
-  const versionLine = /^(\s*version\s*:\s*)(['"])([^'"]*)\2(\s*,?)/m;
+  // JSON5 allows the key bare or quoted (check-release-version.js matches
+  // the same shapes).
+  const versionLine =
+    /^(\s*(?:"version"|'version'|version)\s*:\s*)(['"])([^'"]*)\2(\s*,?)/m;
   const match = content.match(versionLine);
   if (!match) {
     fail(
