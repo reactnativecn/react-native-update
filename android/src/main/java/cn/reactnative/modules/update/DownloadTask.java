@@ -353,12 +353,12 @@ class DownloadTask implements Runnable {
             int currentPercentage = 0;
             long lastPostedBytes = baseOffset;
             // Unknown length: the response-time check could only reserve the
-            // margin, so the disk is probed before the first write and then
-            // every PROBE bytes, each probe reserving the next PROBE bytes —
-            // the writes between two probes can never eat into the margin
-            // (the archive cap alone is far more than the margin). A throw
-            // keeps the partial for a later attempt.
-            long nextFreeSpaceProbeAt = 0;
+            // margin, so the disk is probed before any write that would run
+            // past the bytes reserved so far, each probe reserving at least
+            // the next PROBE bytes (more when one chunk is larger) — no write
+            // can ever eat into the margin (the archive cap alone is far more
+            // than the margin). A throw keeps the partial for a later attempt.
+            long freeSpaceReservedUntil = 0;
 
             try (
                 BufferedSource source = body.source();
@@ -367,11 +367,19 @@ class DownloadTask implements Runnable {
             ) {
                 while ((bytesRead = source.read(sink.buffer(), DOWNLOAD_CHUNK_SIZE)) != -1) {
                     received += bytesRead;
-                    if (totalAll <= 0 && received - bytesRead >= nextFreeSpaceProbeAt) {
-                        nextFreeSpaceProbeAt = received - bytesRead
-                            + ArchiveLimits.UNKNOWN_LENGTH_FREE_SPACE_PROBE_BYTES;
-                        ArchiveLimits.ensureFreeSpace(
-                            writePath, ArchiveLimits.UNKNOWN_LENGTH_FREE_SPACE_PROBE_BYTES);
+                    if (totalAll <= 0 && received > freeSpaceReservedUntil) {
+                        long reserve = Math.max(
+                            ArchiveLimits.UNKNOWN_LENGTH_FREE_SPACE_PROBE_BYTES, bytesRead);
+                        freeSpaceReservedUntil = received - bytesRead + reserve;
+                        try {
+                            ArchiveLimits.ensureFreeSpace(writePath, reserve);
+                        } catch (IOException e) {
+                            // The chunk is still only buffered; closing the
+                            // sink would flush it onto the disk that just
+                            // failed the probe.
+                            sink.buffer().clear();
+                            throw e;
+                        }
                     }
                     sink.emit();
 
