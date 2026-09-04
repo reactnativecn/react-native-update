@@ -67,7 +67,11 @@ const json = execFileSync(
   ['pack', '--dry-run', '--json', '--ignore-scripts'],
   { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }
 );
-const files = JSON.parse(json)[0].files.map((f) => f.path);
+// npm <= 11 prints an array of packed tarballs; npm 12 prints an object
+// keyed by package name. Accept both.
+const parsed = JSON.parse(json);
+const packed = Array.isArray(parsed) ? parsed[0] : Object.values(parsed)[0];
+const files = packed.files.map((f) => f.path);
 const set = new Set(files);
 const problems = [];
 

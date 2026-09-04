@@ -46,7 +46,14 @@
     *** useDevSupport;
     *** mReactHostDelegate;
     *** reactHostDelegate;
-    void reload(java.lang.String);
+    *** reload(java.lang.String);
+}
+# reload(String) returns TaskInterface<Void> (not void) and is looked up on
+# the runtime class of whatever ReactHost the app provides; the `***` return
+# type is what makes the rule match — verified against an R8-minified
+# RN 0.85 build, where `void reload(...)` silently kept nothing.
+-keepclassmembers class * implements com.facebook.react.ReactHost {
+    *** reload(java.lang.String);
 }
 -keepclassmembers class * implements com.facebook.react.runtime.ReactHostDelegate {
     *** jsBundleLoader;
