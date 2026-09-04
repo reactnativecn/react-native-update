@@ -679,7 +679,7 @@ export class DownloadTask {
       }
     };
 
-    let lastFreeSpaceProbeBytes = 0;
+    let nextFreeSpaceProbeAt = 0;
     const enqueueWrite = (data: ArrayBuffer) => {
       received += data.byteLength;
       if (!writeError && baseOffset + received > MAX_ARCHIVE_BYTES) {
@@ -689,12 +689,16 @@ export class DownloadTask {
           `archive too large: exceeded ${MAX_ARCHIVE_BYTES}`,
         );
       }
+      // 未知长度:响应到达时只能预留安全余量,所以首次写入前探测一次,之后
+      // 每写满 PROBE 字节再探测,每次都预留接下来的 PROBE 字节——两次探测之间
+      // 的写入永远吃不到余量(归档上限本身远大于余量)。失败保留 partial 供
+      // 下次续传。
+      const writtenBefore = received - data.byteLength;
       const probeFreeSpace =
-        totalAll <= 0 &&
-        received - lastFreeSpaceProbeBytes >=
-          UNKNOWN_LENGTH_FREE_SPACE_PROBE_BYTES;
+        totalAll <= 0 && writtenBefore >= nextFreeSpaceProbeAt;
       if (probeFreeSpace) {
-        lastFreeSpaceProbeBytes = received;
+        nextFreeSpaceProbeAt =
+          writtenBefore + UNKNOWN_LENGTH_FREE_SPACE_PROBE_BYTES;
       }
       writeQueue = writeQueue.then(async () => {
         if (!writer || writeError) {
@@ -702,9 +706,10 @@ export class DownloadTask {
         }
         try {
           if (probeFreeSpace) {
-            // 未知长度:响应到达时只能预留安全余量,边收边重新探测磁盘
-            // (归档上限本身远大于余量)。失败保留 partial 供下次续传。
-            await ensureFreeSpace(params.targetFile, data.byteLength);
+            await ensureFreeSpace(
+              params.targetFile,
+              UNKNOWN_LENGTH_FREE_SPACE_PROBE_BYTES,
+            );
           }
           await fileIo.write(writer.fd, data);
         } catch (error) {
