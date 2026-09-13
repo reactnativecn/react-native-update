@@ -95,8 +95,11 @@ Pod::Spec.new do |s|
   # relative to the including file (the cpp/ core via ../../cpp/...), and the
   # former absolute "#{podspec_dir}/ios" entry made the generated xcconfig
   # machine-specific.
+  # DEFINES_MODULE writes the umbrella under Headers/Public/react_native_update/
+  # (underscores). CocoaPods copies public headers to react-native-update/
+  # (hyphens). Include the latter so the umbrella can #import "ImportReact.h".
   s.pod_target_xcconfig = { 
-    'USER_HEADER_SEARCH_PATHS' => "\"$(PODS_ROOT)/Headers/Public/SSZipArchive\" \"$(PODS_ROOT)/Headers/Public/React-Codegen/RCTPushySpec\"", 
+    'USER_HEADER_SEARCH_PATHS' => "\"$(PODS_ROOT)/Headers/Public/react-native-update\" \"$(PODS_ROOT)/Headers/Public/SSZipArchive\" \"$(PODS_ROOT)/Headers/Public/React-Codegen/RCTPushySpec\"", 
     "DEFINES_MODULE" => "YES" 
   }
   # buildTime for binary-rebuild detection (SyncBinaryVersion) and the check
@@ -137,6 +140,10 @@ Pod::Spec.new do |s|
 
   # Conditionally add Expo dependency
   if valid_expo_project
+    # DEFINES_MODULE lists public headers in the umbrella. Marking
+    # ImportReact.h public without source_files leaves it out of
+    # Headers/Public, so compiling the Swift module fails.
+    s.source_files = 'ios/ImportReact.h'
     s.public_header_files = ['ios/ImportReact.h']
     s.dependency 'ExpoModulesCore'
   end
