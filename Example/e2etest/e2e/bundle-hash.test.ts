@@ -17,11 +17,11 @@ import { device } from 'detox';
 // 压缩存储,AssetManager 读出的解压字节必须等于 CLI 解包提取的条目字节。
 const IOS_APP_PATH = path.resolve(
   __dirname,
-  '../ios/build/Build/Products/Release-iphonesimulator/AwesomeProject.app',
+  '../ios/build/Build/Products/Release-iphonesimulator/AwesomeProject.app'
 );
 const ANDROID_APK_PATH = path.resolve(
   __dirname,
-  '../android/app/build/outputs/apk/release/app-release.apk',
+  '../android/app/build/outputs/apk/release/app-release.apk'
 );
 const IOS_DEFAULTS_KEY = 'REACTNATIVECN_PUSHY_BUNDLEHASH_KEY';
 const ANDROID_PREFS_KEY = 'bundleHashCache';
@@ -40,20 +40,20 @@ function extractHash(raw: string): string | null {
 
 function readIosCachedBundleHash(
   udid: string,
-  bundleId: string,
+  bundleId: string
 ): string | null {
   try {
     // app 容器的 NSUserDefaults 对 `simctl spawn defaults read` 不可见,
     // 必须定位容器后直接读 plist。
     const container = execSync(
       `xcrun simctl get_app_container ${udid} ${bundleId} data`,
-      { stdio: ['ignore', 'pipe', 'ignore'] },
+      { stdio: ['ignore', 'pipe', 'ignore'] }
     )
       .toString()
       .trim();
     const raw = execSync(
       `plutil -extract ${IOS_DEFAULTS_KEY} raw -o - "${container}/Library/Preferences/${bundleId}.plist"`,
-      { stdio: ['ignore', 'pipe', 'ignore'] },
+      { stdio: ['ignore', 'pipe', 'ignore'] }
     )
       .toString()
       .trim();
@@ -68,7 +68,7 @@ let adbRooted = false;
 
 function readAndroidCachedBundleHash(
   adbName: string,
-  packageName: string,
+  packageName: string
 ): string | null {
   // release 包不可 run-as;模拟器(AOSP/Google APIs 镜像)上 adb root 后可
   // 直读 SharedPreferences xml。root 一次即可,幂等;Google Play 镜像会拒绝,
@@ -96,7 +96,7 @@ function readAndroidCachedBundleHash(
         stdio: ['ignore', 'pipe', 'ignore'],
       }).toString();
       const match = xml.match(
-        new RegExp(`name="${ANDROID_PREFS_KEY}"[^>]*>([^<]+)<`),
+        new RegExp(`name="${ANDROID_PREFS_KEY}"[^>]*>([^<]+)<`)
       );
       if (match) {
         return extractHash(match[1]);
@@ -126,7 +126,7 @@ describe('bundleHash content identity', () => {
       }
       expected = sha256Hex(readFileSync(bundlePath));
       const bundleId = execSync(
-        `/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "${IOS_APP_PATH}/Info.plist"`,
+        `/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "${IOS_APP_PATH}/Info.plist"`
       )
         .toString()
         .trim();
@@ -140,7 +140,7 @@ describe('bundleHash content identity', () => {
       expected = sha256Hex(
         execSync(`unzip -p "${ANDROID_APK_PATH}" assets/index.android.bundle`, {
           maxBuffer: 256 * 1024 * 1024,
-        }),
+        })
       );
       // applicationId 固定(android/app/build.gradle),无需解析二进制 manifest
       readActual = () =>
@@ -157,7 +157,7 @@ describe('bundleHash content identity', () => {
       // 进程即可;数据被 init 重装清空,恰好覆盖"全新安装首次计算"路径。
       execSync(
         `adb -s ${device.id} shell monkey -p com.awesomeproject -c android.intent.category.LAUNCHER 1`,
-        { stdio: ['ignore', 'ignore', 'ignore'] },
+        { stdio: ['ignore', 'ignore', 'ignore'] }
       );
     } else {
       await device.launchApp({ newInstance: true });
@@ -177,7 +177,7 @@ describe('bundleHash content identity', () => {
     if (!actual) {
       throw new Error(
         `native bundleHash was not cached within ${POLL_TIMEOUT_MS}ms — ` +
-          'is the JS prefetch (core.ts) running and the native method present?',
+          'is the JS prefetch (core.ts) running and the native method present?'
       );
     }
     // 显式比较:detox 的 jest 环境把全局 expect 换成了元素断言版,不能对普通
@@ -185,7 +185,7 @@ describe('bundleHash content identity', () => {
     if (actual !== expected) {
       throw new Error(
         `bundleHash mismatch — native computed ${actual}, ` +
-          `sha256 of the embedded bundle is ${expected}`,
+          `sha256 of the embedded bundle is ${expected}`
       );
     }
   });

@@ -11,8 +11,12 @@ console.error(
     `keys=${JSON.stringify(Object.keys(mod)).slice(0, 300)}`
 );
 Promise.resolve()
-  .then(() => (mod.syncNativeConfig as (c: string) => Promise<void>)('{"probe":true}'))
+  .then(() =>
+    (mod.syncNativeConfig as (c: string) => Promise<void>)('{"probe":true}')
+  )
   .then(() => console.error('RNU_DIAG direct syncNativeConfig call OK'))
-  .catch((e: Error) => console.error(`RNU_DIAG direct call failed: ${e.message}`));
+  .catch((e: Error) =>
+    console.error(`RNU_DIAG direct call failed: ${e.message}`)
+  );
 
 AppRegistry.registerComponent(appName, () => App);

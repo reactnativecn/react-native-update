@@ -72,8 +72,13 @@ const server = Bun.serve({
       } else {
         response = { upToDate: true };
       }
-      served.push(`${currentHash || '(base)'} -> ${JSON.stringify(response.hash ?? 'upToDate')}`);
-      console.log(`[checkUpdate] hash=${currentHash || '(base)'} ->`, response.hash ?? 'upToDate');
+      served.push(
+        `${currentHash || '(base)'} -> ${JSON.stringify(response.hash ?? 'upToDate')}`
+      );
+      console.log(
+        `[checkUpdate] hash=${currentHash || '(base)'} ->`,
+        response.hash ?? 'upToDate'
+      );
       return json(response);
     }
 
