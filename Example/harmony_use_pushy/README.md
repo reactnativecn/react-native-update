@@ -1,5 +1,7 @@
 ## 运行harmony_use_pushy项目步骤
 
+基于 React Native 0.82.1 + RNOH（`@rnoh/react-native-openharmony`）0.82.33。
+
 ### 1. 在项目根目录执行下面命令安装第三方依赖。
 ```
 bun install
@@ -20,6 +22,9 @@ bun run build
 **注意⚠️**：在使用pushy bundle --platform harmony命令进行打包的默认bundle包名是Hbundle.harmony.js，不要随意修改包名，因为diff是匹配该包名进行生成的。
 
 ### 4. 使用DevEco Studio IDE打开harmony目录然后执行sync运行项目
+
+**注意⚠️**：RNOH 0.82 的 debug 构建会把 `isDebugModeEnabled` 置为 true，此时 pushy 不会执行 markSuccess，热更新在下次启动时会被回滚。验证热更新请使用 release 构建（`buildMode=release`）。
+
 ![image](./sync.png)
 
 ### 5 运行效果图

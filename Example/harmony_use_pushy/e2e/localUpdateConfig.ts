@@ -1,6 +1,6 @@
 // Keep in sync with Example/e2etest/e2e/localUpdateConfig.ts (the e2etest app
 // is RN 0.85 which RNOH does not support yet, so the harmony e2e app lives in
-// this RN 0.72 project and duplicates the shared constants).
+// this RN 0.82 project and duplicates the shared constants).
 export const LOCAL_UPDATE_PORT = 31337;
 
 export const LOCAL_UPDATE_APP_KEY = 'local-e2e-harmony';

@@ -104,8 +104,8 @@ if (!['ios', 'android', 'harmony'].includes(platform)) {
   throw new Error(`Unsupported E2E_PLATFORM: ${platform}`);
 }
 
-// The harmony e2e app lives in the RN 0.72 example project (RNOH does not
-// support this project's RN version), so its bundles are built from there.
+// The harmony e2e app lives in the RNOH example project (RN 0.82; RNOH does
+// not support this project's RN version), so its bundles are built from there.
 const harmonyProjectRoot = path.resolve(projectRoot, '../harmony_use_pushy');
 const bundleProjectRoot =
   platform === 'harmony' ? harmonyProjectRoot : projectRoot;

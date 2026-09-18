@@ -3,8 +3,9 @@ export const LOCAL_UPDATE_PORT = 31337;
 export const LOCAL_UPDATE_APP_KEYS = {
   ios: 'local-e2e-ios',
   android: 'local-e2e-android',
-  // The harmony e2e app lives in Example/harmony_use_pushy (RN 0.72, the
-  // newest RN that RNOH supports); keep its copy of these constants in sync:
+  // The harmony e2e app lives in Example/harmony_use_pushy (RN 0.82 on RNOH,
+  // which does not support this project's RN version); keep its copy of
+  // these constants in sync:
   // Example/harmony_use_pushy/e2e/localUpdateConfig.ts
   harmony: 'local-e2e-harmony',
 } as const;

@@ -5,8 +5,8 @@
  *
  * Prerequisites:
  * - Emulator/device in `hdc list targets`
- * - The harmony base hap built from Example/harmony_use_pushy with the e2e
- *   entry (e2e/entry.base.ts) installed on the device
+ * - The harmony base hap (release) built from Example/harmony_use_pushy with
+ *   the e2e entry (e2e/entry.base.ts) installed on the device
  * - Artifacts + local server are handled by globalSetup (E2E_PLATFORM=harmony)
  */
 import { HarmonyDriver } from '../harness/harmony-driver.ts';
@@ -25,6 +25,12 @@ const READY_TIMEOUT = 60000;
 const RELOAD_TIMEOUT = 120000;
 const RETRYABLE_RELOAD_TIMEOUT = 45000;
 const MAX_CHECK_UPDATE_ATTEMPTS = 2;
+// UpdateProvider arms the automatic markSuccess 1000ms after the new bundle
+// mounts. The label renders first, so relaunching right after it shows kills
+// the process before markSuccess and the next launch rolls the version back.
+// The Detox suite waits for `lastEvent: markSuccess`; the harmony e2e app has
+// no such hook, so wait out the default delay with margin instead.
+const MARK_SUCCESS_SETTLE_MS = 3000;
 
 const driver = new HarmonyDriver(BUNDLE_NAME);
 
@@ -94,6 +100,7 @@ describe('harmony local update flow', () => {
   });
 
   it('keeps the applied update across a relaunch', async () => {
+    await new Promise((resolve) => setTimeout(resolve, MARK_SUCCESS_SETTLE_MS));
     await driver.relaunch();
     await waitForBundleLabel(LABELS.v2Track, READY_TIMEOUT);
   });

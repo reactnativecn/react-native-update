@@ -11,6 +11,7 @@
 #   DEVECO_HOME              DevEco Studio Contents dir
 #   RNU_HARMONY_BUNDLE_NAME  bundle name of the e2e app
 #   RNU_CLI_ROOT             react-native-update-cli checkout (else sibling dir)
+#   RNU_HARMONY_BUILD_MODE   release (default) | debug
 #   SKIP_HAR=true            skip rebuilding pushy.har + oh_modules refresh
 #   SKIP_INSTALL=true        build only, do not touch a device
 set -euo pipefail
@@ -24,6 +25,14 @@ HARMONY_PROJECT="$HARMONY_APP/harmony"
 DEVECO_HOME="${DEVECO_HOME:-/Applications/DevEco-Studio.app/Contents}"
 export DEVECO_SDK_HOME="${DEVECO_SDK_HOME:-$DEVECO_HOME/sdk}"
 HVIGORW_JS="$DEVECO_HOME/tools/hvigor/bin/hvigorw.js"
+# hvigor calls fs.rmdirSync({ recursive }), which newer Node releases reject;
+# run it on the Node bundled with DevEco when available.
+HVIGOR_NODE="$DEVECO_HOME/tools/node/bin/node"
+[ -x "$HVIGOR_NODE" ] || HVIGOR_NODE="node"
+# Release by default: RNOH 0.82 reports isDebugModeEnabled=true for debug
+# haps, and pushy then skips markSuccess by design, so a debug hap rolls every
+# update back on the next launch.
+BUILD_MODE="${RNU_HARMONY_BUILD_MODE:-release}"
 OHPM="$DEVECO_HOME/tools/ohpm/bin/ohpm"
 BUNDLE_NAME="${RNU_HARMONY_BUNDLE_NAME:-com.charmlot.testpushy}"
 HAP_PATH="$HARMONY_PROJECT/entry/build/default/outputs/default/entry-default-signed.hap"
@@ -59,8 +68,9 @@ echo "==> Bundling e2e base entry into rawfile (must follow artifact prep)"
 (cd "$HARMONY_APP" && npx react-native bundle-harmony --dev false --entry-file e2e/entry.base.ts)
 
 echo "==> Assembling signed hap"
-(cd "$HARMONY_PROJECT" && node "$HVIGORW_JS" \
+(cd "$HARMONY_PROJECT" && "$HVIGOR_NODE" "$HVIGORW_JS" \
   --mode module -p module=entry@default -p product=default \
+  -p buildMode="$BUILD_MODE" \
   assembleHap --no-daemon)
 [ -f "$HAP_PATH" ] || {
   echo "signed hap not found: $HAP_PATH" >&2

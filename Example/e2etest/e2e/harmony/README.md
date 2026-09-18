@@ -1,9 +1,9 @@
 # HarmonyOS e2e
 
 基于 `hdc + uitest` 的轻量驱动（`../harness/harmony-driver.ts`），不依赖 Detox。
-被测 App 是 `Example/harmony_use_pushy`（RN 0.72——RNOH 尚不支持 e2etest 的 RN
-版本），以 `e2e/entry.base.ts` 为入口构建，UI 与 e2etest 的 `src/index.tsx`
-对齐（testID：`bundle-label` / `check-update` / `current-hash` 等）。
+被测 App 是 `Example/harmony_use_pushy`（RN 0.82.1 + RNOH 0.82.33——RNOH 尚不
+支持 e2etest 的 RN 版本），以 `e2e/entry.base.ts` 为入口构建，UI 与
+e2etest 的 `src/index.tsx` 对齐（testID：`bundle-label` / `check-update` / `current-hash` 等）。
 
 定位方式：RNOH 会把 RN 的 `testID` 透传为 ArkUI 节点 `id`（`uitest dumpLayout`
 可见）；断言用可见文本（ArkUI 的 `checked`/`selected` 属性不反映 RN 状态）。
@@ -49,6 +49,13 @@ RNU_E2E_SKIP_PREPARE=true npm run test:e2e:harmony
    签名，否则 SignHap 报 00303074。
 
 ## 已知坑（都踩过）
+
+- **基座必须是 release hap**（脚本默认 `buildMode=release`）。RNOH 0.82 在
+  debug 构建下 `isDebugModeEnabled=true`（`REACT_NATIVE_DEBUG` 经由
+  `react/debug/flags.h` 生效；0.72 时代实际恒为 false），pushy 在 debug 宿主下
+  按设计跳过 markSuccess，于是 debug hap 每次重启都会回滚。
+- 系统 Node 太新时 hvigor 切换 buildMode 会报 `options.recursive is no longer
+  supported`；脚本默认改用 DevEco 自带的 Node。
 
 - `pushy bundle --platform harmony` 会把工程的 `rawfile/bundle.harmony.js`
   当中间产物**覆写**——产物准备必须在基座 bundle 之前跑。
