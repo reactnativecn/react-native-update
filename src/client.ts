@@ -420,6 +420,10 @@ export class Pushy {
   };
 
   private flushNativeConfig = () => {
+    if (this.options.nativeConfigSource === 'native') {
+      this.pendingNativeConfigJson = undefined;
+      return;
+    }
     if (this.nativeConfigSyncInFlight) {
       return;
     }
@@ -480,6 +484,10 @@ export class Pushy {
   };
 
   private syncNativeConfig = () => {
+    if (this.options.nativeConfigSource === 'native') {
+      this.pendingNativeConfigJson = undefined;
+      return;
+    }
     if (
       Platform.OS === 'web' ||
       typeof PushyModule.syncNativeConfig !== 'function'

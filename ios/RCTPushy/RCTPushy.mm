@@ -1,4 +1,5 @@
 #import "RCTPushy.h"
+#import "RCTPushyNativeConfig.h"
 #import "RCTPushyDownloader.h"
 #import "ZipArchive.h"
 #include "../../cpp/patch_core/archive_limits.h"
@@ -727,6 +728,8 @@ static void PushySwitchVersionLocked(NSString *hash) {
 // bundle — this is what lets a bricked hot update be replaced on the next
 // launch. Decisions come from cpp/update_flow_core; this class is IO glue.
 @interface RCTPushyOrchestrator : NSObject
++ (void)persistConfiguration:(NSString *)config;
++ (BOOL)hasRunnableConfig;
 + (NSDictionary *)checkAndUpdate;
 + (void)scheduleFromColdStart:(NSString *)launchRolledBackVersion;
 + (void)markJsCheckCompleted:(NSString *)config;
@@ -1022,6 +1025,35 @@ RCT_EXPORT_MODULE(RCTPushy);
     return currentVersion;
 }
 
++ (void)configure:(NSDictionary<NSString *, id> *)options
+       completion:(RCTPushyNativeConfigurationCompletion)completion
+{
+    NSError *validationError = nil;
+    // Snapshot nested mutable caller values before crossing a queue boundary.
+    NSString *config = RCTPushyNormalizeNativeConfig(options, &validationError);
+    static dispatch_queue_t configQueue;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        configQueue = dispatch_queue_create("cn.reactnative.pushy.host-config", DISPATCH_QUEUE_SERIAL);
+    });
+    dispatch_async(configQueue, ^{
+        NSError *failure = validationError;
+        if (config != nil) {
+            @try {
+                [RCTPushyOrchestrator persistConfiguration:config];
+            } @catch (NSException *exception) {
+                failure = PushyErrorWithCode(pushy::error_codes::kFileOperationFailed,
+                    exception.reason ?: @"Native configuration failed");
+            }
+        }
+        if (completion != nil) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                completion(failure);
+            });
+        }
+    });
+}
+
 + (void)checkAndUpdateWithCompletion:(RCTPushyNativeUpdateCompletion)completion
 {
     static dispatch_queue_t hostQueue;
@@ -1153,8 +1185,13 @@ RCT_EXPORT_METHOD(syncNativeConfig:(NSString *)config
             error != nil ? error.localizedDescription : ERROR_OPTIONS));
         return;
     }
-    [PushyDefaults() setObject:config forKey:keyNativeConfig];
-    resolve(@true);
+    @try {
+        [RCTPushyOrchestrator persistConfiguration:config];
+        resolve(@true);
+    } @catch (NSException *exception) {
+        PushyRejectError(reject, PushyErrorWithCode(pushy::error_codes::kFileOperationFailed,
+            exception.reason ?: @"Native configuration failed"));
+    }
 }
 
 RCT_EXPORT_METHOD(getNativeCheckCache:(RCTPromiseResolveBlock)resolve
@@ -2176,6 +2213,35 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
 
 @implementation RCTPushyOrchestrator
 
++ (void)persistConfiguration:(NSString *)config {
+    PushyWithStateLock(^{
+        NSUserDefaults *defaults = PushyDefaults();
+        if ([[defaults stringForKey:keyNativeConfig] isEqualToString:config]) {
+            return;
+        }
+        // The same generation protects reset and replacement of the request
+        // identity/policy, including a late crash-rescue activation.
+        pushyResetGeneration.fetch_add(1);
+        [defaults setObject:config forKey:keyNativeConfig];
+        [defaults removeObjectForKey:keyNativeCheckCache];
+        [self markJsCheckCompleted:nil];
+    });
+    if (pushyNativeCheckReady.load() && [self hasRunnableConfig]) {
+        PushyInstallCrashRescueHandler();
+    }
+}
+
++ (BOOL)hasRunnableConfig {
+    NSString *json = [PushyDefaults() stringForKey:keyNativeConfig];
+    if (json.length == 0) {
+        return NO;
+    }
+    bool ok = false;
+    flowjson::Value config = flowjson::Parse(PushyToStdString(json), &ok);
+    return ok && config.IsObject() && !config.Get("disabled").Truthy()
+        && !config.Get("appKey").AsString().empty();
+}
+
 + (void)scheduleFromColdStart:(NSString *)launchRolledBackVersion {
 #if !DEBUG
     // Once per process; a few seconds of delay keeps the check away from the
@@ -2239,13 +2305,16 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
     [self startRoundWithDeadline:0];
     // A group is broadcast-style. Sharing the rescue semaphore would let one
     // waiter consume the only signal and leave the other waiting forever.
-    dispatch_group_wait(pushyHostRoundGroup, DISPATCH_TIME_FOREVER);
-    if (pushyHostRoundGeneration != pushyResetGeneration.load()) {
-        return PushyHostResult(@"cancelled", @"reset", nil, NO);
+    if (!pushyRoundStarted.load()) {
+        return PushyHostResult(@"skipped", @"config_changed", nil, NO);
     }
+    dispatch_group_wait(pushyHostRoundGroup, DISPATCH_TIME_FOREVER);
     if (![configJson isEqualToString:pushyHostRoundConfig]
         || ![configJson isEqualToString:[PushyDefaults() stringForKey:keyNativeConfig]]) {
-        return PushyHostResult(@"skipped", @"config_changed", nil, NO);
+        return PushyHostResult(@"cancelled", @"config_changed", nil, NO);
+    }
+    if (pushyHostRoundGeneration != pushyResetGeneration.load()) {
+        return PushyHostResult(@"cancelled", @"reset", nil, NO);
     }
     return pushyHostRoundResult ?: PushyHostResult(@"failed", @"internal_error", nil, NO);
 #endif
@@ -2277,6 +2346,10 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
 // started it yet. deadlineUptime > 0 (crash rescue) caps every HTTP call and
 // download phase to the remaining budget.
 + (void)startRoundWithDeadline:(NSTimeInterval)deadlineUptime {
+    // Missing/disabled configuration is a preflight skip, not a used round.
+    if (![self hasRunnableConfig]) {
+        return;
+    }
     bool expected = false;
     if (!pushyRoundStarted.compare_exchange_strong(expected, true)) {
         return;
@@ -2302,7 +2375,7 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
 + (void)runRescueWithDeadline:(NSTimeInterval)deadlineUptime {
     pushyCrashRescueActive.store(true);
     [self startRoundWithDeadline:deadlineUptime];
-    if (!pushyRoundCompleted.load()) {
+    if (pushyRoundStarted.load() && !pushyRoundCompleted.load()) {
         NSTimeInterval remaining = deadlineUptime - PushyMonotonicNow();
         if (remaining > 0) {
             dispatch_semaphore_wait(pushyRoundDone, dispatch_time(DISPATCH_TIME_NOW,

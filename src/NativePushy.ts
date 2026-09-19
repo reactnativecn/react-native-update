@@ -26,8 +26,9 @@ export interface Spec extends TurboModule {
    * Persist the config subset the native cold-start update check consumes
    * (appKey, endpoints, afterDownload policy; NATIVE_CHECKUPDATE_DESIGN
    * §10.1). Stored as a raw JSON string, parsed natively on read. JS is the
-   * single config source — a native side without persisted config silently
-   * skips its check, which doubles as the feature's rollout gate.
+   * default config source. Native hosts may also call configure(); select
+   * nativeConfigSource: 'native' in JS to leave host configuration untouched.
+   * A native side without persisted config skips its check.
    */
   syncNativeConfig(config: string): Promise<void>;
   /**

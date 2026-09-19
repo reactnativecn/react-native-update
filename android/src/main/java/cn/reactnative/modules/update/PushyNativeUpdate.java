@@ -4,11 +4,13 @@ import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
+import androidx.annotation.Nullable;
+import org.json.JSONObject;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 
-/** Native host API. Configuration remains owned and persisted by the JS SDK. */
+/** Bridge-free native configuration and update APIs. */
 public final class PushyNativeUpdate {
     public interface Callback {
         /** Always called on the main thread, including skipped and failed checks. */
@@ -25,6 +27,57 @@ public final class PushyNativeUpdate {
             return thread;
         }
     });
+
+    public interface ConfigurationCallback {
+        /** Main thread; null means configuration was persisted successfully. */
+        void onComplete(@Nullable Exception error);
+    }
+
+    // Configuration must not wait behind a network round that it invalidates.
+    private static final Executor CONFIG_WORKER = Executors.newSingleThreadExecutor(new ThreadFactory() {
+        @Override
+        public Thread newThread(Runnable runnable) {
+            Thread thread = new Thread(runnable, "pushy-host-config");
+            thread.setDaemon(true);
+            return thread;
+        }
+    });
+
+    /**
+     * Validate and persist a complete configuration, even before JS or bundle
+     * resolution. This starts no network work and never resolves a bundle.
+     * Await the callback before continuing startup/checkAndUpdate. Unless JS
+     * uses nativeConfigSource: 'native', later JS config writes can replace it.
+     */
+    public static void configure(Context context, JSONObject options, final ConfigurationCallback callback) {
+        if (context == null || options == null || callback == null) {
+            throw new IllegalArgumentException("context, options and callback are required");
+        }
+        final Context applicationContext = context.getApplicationContext();
+        // Snapshot caller-owned JSON before dispatch, not minutes later on a worker.
+        final String snapshot = options.toString();
+        CONFIG_WORKER.execute(new Runnable() {
+            @Override
+            public void run() {
+                Exception failure = null;
+                try {
+                    String config = NativeUpdateConfig.normalize(snapshot);
+                    UpdateContext.getInstance(applicationContext).setNativeConfig(config);
+                } catch (Exception e) {
+                    failure = e;
+                } catch (LinkageError e) {
+                    failure = new IllegalStateException("Native configuration failed", e);
+                }
+                final Exception error = failure;
+                new Handler(Looper.getMainLooper()).post(new Runnable() {
+                    @Override
+                    public void run() {
+                        callback.onComplete(error);
+                    }
+                });
+            }
+        });
+    }
 
     private PushyNativeUpdate() {
     }

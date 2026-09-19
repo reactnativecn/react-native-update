@@ -102,12 +102,15 @@ final class NativeCheckOrchestrator {
             return NativeUpdateResult.of(NativeUpdateResult.FAILED, "invalid_config");
         }
         startRound(0);
+        if (!roundStarted.get()) {
+            return NativeUpdateResult.of(NativeUpdateResult.SKIPPED, "config_changed");
+        }
         roundDone.await();
+        if (!configJson.equals(roundConfigJson) || !configJson.equals(context.getKv(KEY_CONFIG))) {
+            return NativeUpdateResult.of(NativeUpdateResult.CANCELLED, "config_changed");
+        }
         if (roundGeneration != UpdateContext.getResetGeneration()) {
             return NativeUpdateResult.of(NativeUpdateResult.CANCELLED, "reset");
-        }
-        if (!configJson.equals(roundConfigJson) || !configJson.equals(context.getKv(KEY_CONFIG))) {
-            return NativeUpdateResult.of(NativeUpdateResult.SKIPPED, "config_changed");
         }
         return roundResult;
     }
@@ -184,7 +187,36 @@ final class NativeCheckOrchestrator {
      * started it yet. deadlineNanos > 0 (crash rescue) caps every HTTP call
      * and download phase to the remaining budget.
      */
+    private static boolean hasRunnableConfig(UpdateContext context) {
+        if (context == null) {
+            return false;
+        }
+        try {
+            String json = context.getKv(KEY_CONFIG);
+            if (json == null) {
+                return false;
+            }
+            JSONObject config = new JSONObject(json);
+            return !config.optBoolean("disabled", false)
+                && config.opt("appKey") instanceof String
+                && !config.getString("appKey").trim().isEmpty();
+        } catch (JSONException e) {
+            return false;
+        }
+    }
+
+    static void onConfigured(UpdateContext context) {
+        if (nativeReady && sContext == context && hasRunnableConfig(context)) {
+            CrashRescue.install();
+        }
+    }
+
     private static void startRound(long deadlineNanos) {
+        // An automatic check before first-run provisioning must not consume
+        // the process's only round. Hosts may configure later in this launch.
+        if (!hasRunnableConfig(sContext)) {
+            return;
+        }
         if (!roundStarted.compareAndSet(false, true)) {
             return;
         }
@@ -213,7 +245,7 @@ final class NativeCheckOrchestrator {
         }
         crashRescueActive = true;
         startRound(deadlineNanos);
-        if (!roundCompleted) {
+        if (roundStarted.get() && !roundCompleted) {
             long remainingNanos = deadlineNanos - System.nanoTime();
             if (remainingNanos > 0) {
                 try {

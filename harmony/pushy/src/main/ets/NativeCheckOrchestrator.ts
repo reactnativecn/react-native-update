@@ -120,6 +120,10 @@ function startNativeRound(
   context: UpdateContext,
   launchRolledBackVersion: string,
 ): Promise<NativeUpdateResult> {
+  const preflight = configurationError(context);
+  if (preflight !== undefined) {
+    return Promise.resolve(preflight);
+  }
   return hostRound.run(async () => {
     try {
       await runOnce(context, launchRolledBackVersion);
@@ -129,6 +133,30 @@ function startNativeRound(
     }
     return roundResult;
   });
+}
+
+// A preflight skip must not consume the process's only round: configuration
+// may arrive after the delayed startup timer on a first-ever launch.
+function configurationError(context: UpdateContext): NativeUpdateResult | undefined {
+  const json = context.getKv(KEY_CONFIG);
+  if (!json) {
+    return nativeUpdateResult('skipped', 'not_configured');
+  }
+  try {
+    const config = JSON.parse(json) as NativeConfig;
+    if (!config || typeof config !== 'object' || Array.isArray(config)) {
+      return nativeUpdateResult('failed', 'invalid_config');
+    }
+    if (config.disabled) {
+      return nativeUpdateResult('skipped', 'disabled');
+    }
+    if (typeof config.appKey !== 'string' || config.appKey.trim().length === 0) {
+      return nativeUpdateResult('failed', 'invalid_config');
+    }
+  } catch (e) {
+    return nativeUpdateResult('failed', 'invalid_config');
+  }
+  return undefined;
 }
 
 export async function checkAndUpdateNative(
@@ -156,11 +184,11 @@ export async function checkAndUpdateNative(
     return nativeUpdateResult('failed', 'invalid_config');
   }
   const result = await startNativeRound(context, scheduledRollback);
+  if (configJson !== roundConfigJson || configJson !== context.getKv(KEY_CONFIG)) {
+    return nativeUpdateResult('cancelled', 'config_changed');
+  }
   if (roundGeneration !== context.getResetGeneration()) {
     return nativeUpdateResult('cancelled', 'reset');
-  }
-  if (configJson !== roundConfigJson || configJson !== context.getKv(KEY_CONFIG)) {
-    return nativeUpdateResult('skipped', 'config_changed');
   }
   // Do not let a caller mutate the cached result observed by later callers.
   return nativeUpdateResult(result.status, result.reason, result.hash, result.activated);

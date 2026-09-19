@@ -228,6 +228,13 @@ export interface ClientOptions {
    * per-version forceBoot directive may.
    */
   disableNativeCheck?: boolean;
+  /**
+   * Owner of persisted native update configuration. Default: 'javascript'.
+   * Use 'native' when configure() is called by the host: JS will not overwrite
+   * that configuration. This does not configure or disable JS checks itself;
+   * keep appKey/server consistent and use checkStrategy to control JS checks.
+   */
+  nativeConfigSource?: 'javascript' | 'native';
 }
 
 export interface UpdateTestPayload {

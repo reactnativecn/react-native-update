@@ -1,11 +1,21 @@
 #import <React/RCTBridgeModule.h>
 #import <React/RCTEventEmitter.h>
 
+typedef void (^RCTPushyNativeConfigurationCompletion)(NSError * _Nullable error);
+
 typedef void (^RCTPushyNativeUpdateCompletion)(NSDictionary<NSString *, id> * _Nonnull result);
 
 @interface RCTPushy : RCTEventEmitter<RCTBridgeModule>
 
 + (NSURL *)bundleURL;
+
+/** Validate and persist native options without JS, network work or bundle resolution.
+ * Completion is on the main queue; nil error means success. Call before the
+ * normal launch bundle resolution for first-install native-only provisioning.
+ */
++ (void)configure:(NSDictionary<NSString *, id> * _Nonnull)options
+       completion:(RCTPushyNativeConfigurationCompletion _Nullable)completion
+    NS_SWIFT_NAME(configure(_:completion:));
 
 /**
  * Start, join, or reuse this process's native update round. Call after the

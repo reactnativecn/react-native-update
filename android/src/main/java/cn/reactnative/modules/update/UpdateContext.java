@@ -737,6 +737,25 @@ public class UpdateContext {
     }
 
     /** Sampled/compared by the native check orchestrator; see resetGeneration. */
+    /** Shared by JS and native hosts. Config replacement invalidates old native decisions. */
+    void setNativeConfig(String config) {
+        synchronized (commitLock) {
+            if (config.equals(sp.getString(NativeCheckOrchestrator.KEY_CONFIG, null))) {
+                return;
+            }
+            // Also invalidate on a failed persistence attempt: never allow an
+            // older round to commit over uncertain configuration state.
+            resetGeneration.incrementAndGet();
+            SharedPreferences.Editor editor = sp.edit();
+            editor.putString(NativeCheckOrchestrator.KEY_CONFIG, config);
+            editor.remove(NativeCheckOrchestrator.KEY_RESP_CACHE);
+            NativeCheckOrchestrator.markJsCheckCompleted(null);
+            persistEditorOrThrow(editor, "configure native update");
+        }
+        NativeCheckOrchestrator.onConfigured(this);
+    }
+
+    // Native-decision generation: bumped by reset AND configuration replacement.
     static long getResetGeneration() {
         return resetGeneration.get();
     }
