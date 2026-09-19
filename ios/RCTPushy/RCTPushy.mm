@@ -778,6 +778,8 @@ static std::atomic<bool> pushyNativeCheckReady{false};
 static NSDictionary *pushyHostRoundResult = nil;
 static NSString *pushyHostRoundConfig = nil;
 static uint64_t pushyHostRoundGeneration = 0;
+static std::atomic<uint64_t> pushyNativeConfigGeneration{0};
+static uint64_t pushyHostRoundConfigGeneration = 0;
 
 static const NSTimeInterval kPushyRescueTriggerUptime = 60;
 static const NSTimeInterval kPushyRescueBudgetBackgroundThread = 10;
@@ -2216,12 +2218,16 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
 + (void)persistConfiguration:(NSString *)config {
     PushyWithStateLock(^{
         NSUserDefaults *defaults = PushyDefaults();
+        if ([defaults stringForKey:keyUuid].length == 0) {
+            [defaults setObject:[NSUUID UUID].UUIDString forKey:keyUuid];
+        }
         if ([[defaults stringForKey:keyNativeConfig] isEqualToString:config]) {
             return;
         }
         // The same generation protects reset and replacement of the request
         // identity/policy, including a late crash-rescue activation.
         pushyResetGeneration.fetch_add(1);
+        pushyNativeConfigGeneration.fetch_add(1);
         [defaults setObject:config forKey:keyNativeConfig];
         [defaults removeObjectForKey:keyNativeCheckCache];
         [self markJsCheckCompleted:nil];
@@ -2309,7 +2315,8 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
         return PushyHostResult(@"skipped", @"config_changed", nil, NO);
     }
     dispatch_group_wait(pushyHostRoundGroup, DISPATCH_TIME_FOREVER);
-    if (![configJson isEqualToString:pushyHostRoundConfig]
+    if (pushyHostRoundConfigGeneration != pushyNativeConfigGeneration.load()
+        || ![configJson isEqualToString:pushyHostRoundConfig]
         || ![configJson isEqualToString:[PushyDefaults() stringForKey:keyNativeConfig]]) {
         return PushyHostResult(@"cancelled", @"config_changed", nil, NO);
     }
@@ -2449,6 +2456,7 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
 + (void)runOnce:(NSString *)launchRolledBackVersion deadline:(NSTimeInterval)deadlineUptime {
     const uint64_t resetGeneration = pushyResetGeneration.load();
     pushyHostRoundGeneration = resetGeneration;
+    pushyHostRoundConfigGeneration = pushyNativeConfigGeneration.load();
     pushyHostRoundResult = PushyHostResult(@"failed", @"check_failed", nil, NO);
     NSUserDefaults *defaults = PushyDefaults();
     NSString *configJson = [defaults stringForKey:keyNativeConfig];

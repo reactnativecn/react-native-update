@@ -53,6 +53,7 @@ function harness() {
       values.delete(key);
     },
     getResetGeneration: () => state.generation,
+    getNativeConfigGeneration: () => 0,
     getCurrentVersion: () => '',
     getPackageVersion: () => '1.0',
     getBuildTime: () => '123',
@@ -204,4 +205,36 @@ describe('native host API orchestration', () => {
     expect((await h.check()).reason).toBe('config_changed');
     expect(h.state.checks).toBe(1);
   });
+});
+
+test('automatic preflight without configuration leaves a round for later native provisioning', async () => {
+  const h = harness();
+  h.values.delete('nativeConfig');
+  h.initialize();
+  for (const timer of h.timers) timer();
+  await Promise.resolve();
+  expect(h.state.checks).toBe(0);
+  h.values.set(
+    'nativeConfig',
+    JSON.stringify({
+      appKey: 'native-first-app',
+      afterDownload: 'setNeedUpdate',
+    })
+  );
+  h.state.decision = { action: 'download', hash: 'v2', activate: true };
+  expect((await h.check()).activated).toBe(true);
+  expect(h.state.checks).toBe(1);
+});
+
+test('configuration replacement during an update cancels its returned snapshot', async () => {
+  const h = harness();
+  h.initialize();
+  h.state.decision = { action: 'download', hash: 'v2', activate: true };
+  h.state.beforeResponse = async () => {
+    h.values.set('nativeConfig', JSON.stringify({ appKey: 'replacement' }));
+    h.state.generation += 1;
+  };
+  expect(await h.check()).toEqual(
+    nativeUpdateResult('cancelled', 'config_changed')
+  );
 });

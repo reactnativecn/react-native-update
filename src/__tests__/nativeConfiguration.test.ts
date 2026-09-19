@@ -12,7 +12,9 @@ function runtimeSource(relativePath: string): string {
   return new Bun.Transpiler({ loader: 'ts' }).transformSync(source);
 }
 
-const storeSource = runtimeSource('../../harmony/pushy/src/main/ets/UpdateContext.ts');
+const storeSource = runtimeSource(
+  '../../harmony/pushy/src/main/ets/UpdateContext.ts'
+);
 const clientSource = runtimeSource('../client.ts');
 
 interface ConfigStore {
@@ -45,6 +47,7 @@ function storeHarness() {
     `${storeSource}\nconst store = Object.create(UpdateContext.prototype); store.preferences = preferences; store.flushBatchDepth = 0; store;`,
     {
       preferences,
+      util: { generateRandomUUID: () => 'native-installation-id' },
       KEY_CONFIG: 'nativeConfig',
       KEY_RESP_CACHE: 'nativeCheckResp',
       markJsCheckCompleted: (config: string) => clearedSignals.push(config),
@@ -53,8 +56,12 @@ function storeHarness() {
     }
   ) as ConfigStore;
   return {
-    store, values, clearedSignals,
-    fail: (value: boolean) => { shouldFail = value; },
+    store,
+    values,
+    clearedSignals,
+    fail: (value: boolean) => {
+      shouldFail = value;
+    },
     flushes: () => flushes,
   };
 }
@@ -77,7 +84,9 @@ function clientHarness(native: boolean) {
       i18n: { setLocale() {} },
       dedupeEndpoints: (urls: string[]) => [...new Set(urls)],
       PushyModule: {
-        syncNativeConfig: async (config: string) => { writes.push(config); },
+        syncNativeConfig: async (config: string) => {
+          writes.push(config);
+        },
       },
     }
   ) as { setOptions: (options: Record<string, unknown>) => void };
@@ -86,9 +95,12 @@ function clientHarness(native: boolean) {
 
 describe('native configuration normalization', () => {
   test('appKey alone supplies Pushy endpoints without automatically activating', () => {
-    const config = JSON.parse(normalizeNativeUpdateConfig({ appKey: 'test-app' }));
+    const config = JSON.parse(
+      normalizeNativeUpdateConfig({ appKey: 'test-app' })
+    );
     expect(config.endpoints).toEqual([
-      'https://update.react-native.cn/api', 'https://update.reactnative.cn/api',
+      'https://update.react-native.cn/api',
+      'https://update.reactnative.cn/api',
     ]);
     expect(config.queryUrls).toHaveLength(2);
     expect(config.afterDownload).toBe('none');
@@ -99,7 +111,10 @@ describe('native configuration normalization', () => {
   test('custom endpoints do not inherit public discovery, and are deduplicated', () => {
     const options: NativeUpdateConfig = {
       appKey: 'test-app',
-      endpoints: ['https://updates.example/api/', 'https://updates.example/api'],
+      endpoints: [
+        'https://updates.example/api/',
+        'https://updates.example/api',
+      ],
       afterDownload: 'setNeedUpdate',
     };
     const original = JSON.stringify(options);
@@ -111,24 +126,34 @@ describe('native configuration normalization', () => {
   });
 
   test('allows explicit discovery URLs and version identity overrides', () => {
-    const config = JSON.parse(normalizeNativeUpdateConfig({
-      appKey: 'test-app', endpoints: ['http://localhost:8080/api'],
-      queryUrls: ['https://updates.example/endpoints.json?v=1'],
-      packageVersion: '2.0', rn: '0.77.3', rnu: 'test-sdk', disabled: true,
-    }));
+    const config = JSON.parse(
+      normalizeNativeUpdateConfig({
+        appKey: 'test-app',
+        endpoints: ['http://localhost:8080/api'],
+        queryUrls: ['https://updates.example/endpoints.json?v=1'],
+        packageVersion: '2.0',
+        rn: '0.77.3',
+        rnu: 'test-sdk',
+        disabled: true,
+      })
+    );
     expect(config.packageVersion).toBe('2.0');
     expect(config.disabled).toBe(true);
     expect(config.queryUrls[0]).toContain('?v=1');
   });
 
   for (const [name, options] of [
-    ['missing key', {}], ['blank key', { appKey: '   ' }],
+    ['missing key', {}],
+    ['blank key', { appKey: '   ' }],
     ['wrong key type', { appKey: 12 }],
     ['empty endpoints', { appKey: 'a', endpoints: [] }],
     ['null endpoints', { appKey: 'a', endpoints: null }],
     ['non-array endpoints', { appKey: 'a', endpoints: 'https://example.com' }],
     ['unsafe scheme', { appKey: 'a', endpoints: ['file:///tmp/update'] }],
-    ['credentials', { appKey: 'a', endpoints: ['https://user:pass@example.com'] }],
+    [
+      'credentials',
+      { appKey: 'a', endpoints: ['https://user:pass@example.com'] },
+    ],
     ['relative URL', { appKey: 'a', endpoints: ['/api'] }],
     ['base query', { appKey: 'a', endpoints: ['https://example.com/api?x=1'] }],
     ['wrong discovery type', { appKey: 'a', queryUrls: [42] }],
@@ -138,7 +163,9 @@ describe('native configuration normalization', () => {
     ['unknown option', { appKey: 'a', endponts: ['https://example.com'] }],
   ] as const) {
     test(`rejects ${name} before storage is touched`, () => {
-      expect(() => normalizeNativeUpdateConfig(options as unknown as NativeUpdateConfig)).toThrow();
+      expect(() =>
+        normalizeNativeUpdateConfig(options as unknown as NativeUpdateConfig)
+      ).toThrow();
     });
   }
 });
@@ -153,8 +180,17 @@ describe('actual native configuration store', () => {
     expect(h.values.has('nativeCheckResp')).toBe(false);
     await h.store.setNativeConfig('A');
     expect(h.store.getResetGeneration()).toBe(oldGeneration + 2);
-    expect(await h.store.commitNativeCheckResult(oldGeneration, 'old', '{}', true, 'stale')).toBe(false);
+    expect(
+      await h.store.commitNativeCheckResult(
+        oldGeneration,
+        'old',
+        '{}',
+        true,
+        'stale'
+      )
+    ).toBe(false);
     expect(h.values.has('hash_old')).toBe(false);
+    expect(h.values.get('uuid')).toBe('native-installation-id');
     expect(h.clearedSignals).toEqual(['', '', '']);
   });
 
@@ -170,7 +206,9 @@ describe('actual native configuration store', () => {
   test('storage errors reject and an equal-value retry can recover', async () => {
     const h = storeHarness();
     h.fail(true);
-    await expect(h.store.setNativeConfig('A')).rejects.toThrow('storage unavailable');
+    await expect(h.store.setNativeConfig('A')).rejects.toThrow(
+      'storage unavailable'
+    );
     h.fail(false);
     await h.store.setNativeConfig('A');
     expect(h.flushes()).toBe(2);

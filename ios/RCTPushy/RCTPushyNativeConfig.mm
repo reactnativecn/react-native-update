@@ -75,7 +75,7 @@ NSString *RCTPushyNormalizeNativeConfig(NSDictionary *options, NSError **error) 
             PushyConfigInvalid(@"afterDownload must be none or setNeedUpdate");
         }
         id disabled = options[@"disabled"] ?: @NO;
-        if (CFGetTypeID((__bridge CFTypeRef)disabled) != CFBooleanGetTypeID()) {
+        if (![disabled isKindOfClass:NSNumber.class] || CFGetTypeID((__bridge CFTypeRef)disabled) != CFBooleanGetTypeID()) {
             PushyConfigInvalid(@"disabled must be a boolean");
         }
         NSMutableDictionary *result = [@{

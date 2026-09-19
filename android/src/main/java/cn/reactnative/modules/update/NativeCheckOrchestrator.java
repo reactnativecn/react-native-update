@@ -76,6 +76,7 @@ final class NativeCheckOrchestrator {
     private static volatile NativeUpdateResult roundResult =
         NativeUpdateResult.of(NativeUpdateResult.FAILED, "check_failed");
     private static volatile long roundGeneration = -1;
+    private static volatile long roundConfigGeneration = -1;
     private static volatile String roundConfigJson;
 
     /** Blocking only on the host API's worker; never call on the UI thread. */
@@ -106,7 +107,8 @@ final class NativeCheckOrchestrator {
             return NativeUpdateResult.of(NativeUpdateResult.SKIPPED, "config_changed");
         }
         roundDone.await();
-        if (!configJson.equals(roundConfigJson) || !configJson.equals(context.getKv(KEY_CONFIG))) {
+        if (roundConfigGeneration != UpdateContext.getNativeConfigGeneration()
+            || !configJson.equals(roundConfigJson) || !configJson.equals(context.getKv(KEY_CONFIG))) {
             return NativeUpdateResult.of(NativeUpdateResult.CANCELLED, "config_changed");
         }
         if (roundGeneration != UpdateContext.getResetGeneration()) {
@@ -300,6 +302,7 @@ final class NativeCheckOrchestrator {
     ) throws JSONException {
         final long resetGeneration = UpdateContext.getResetGeneration();
         roundGeneration = resetGeneration;
+        roundConfigGeneration = UpdateContext.getNativeConfigGeneration();
         roundResult = NativeUpdateResult.of(NativeUpdateResult.FAILED, "check_failed");
         String configJson = context.getKv(KEY_CONFIG);
         roundConfigJson = configJson;

@@ -113,6 +113,7 @@ const hostRound = new NativeUpdateRound();
 let scheduledContext: UpdateContext | undefined;
 let scheduledRollback = '';
 let roundGeneration = -1;
+let roundConfigGeneration = -1;
 let roundConfigJson: string | undefined;
 let roundResult = nativeUpdateResult('failed', 'check_failed');
 
@@ -184,7 +185,8 @@ export async function checkAndUpdateNative(
     return nativeUpdateResult('failed', 'invalid_config');
   }
   const result = await startNativeRound(context, scheduledRollback);
-  if (configJson !== roundConfigJson || configJson !== context.getKv(KEY_CONFIG)) {
+  if (roundConfigGeneration !== context.getNativeConfigGeneration()
+      || configJson !== roundConfigJson || configJson !== context.getKv(KEY_CONFIG)) {
     return nativeUpdateResult('cancelled', 'config_changed');
   }
   if (roundGeneration !== context.getResetGeneration()) {
@@ -247,6 +249,7 @@ async function runOnce(
   // reset 必须赢过本轮的决策。
   const resetGeneration = context.getResetGeneration();
   roundGeneration = resetGeneration;
+  roundConfigGeneration = context.getNativeConfigGeneration();
   roundResult = nativeUpdateResult('failed', 'check_failed');
   const configJson = context.getKv(KEY_CONFIG);
   roundConfigJson = configJson;
