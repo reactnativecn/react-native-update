@@ -6,6 +6,8 @@ import {
 import common from '@ohos.app.ability.common';
 import fs from '@ohos.file.fs';
 import { UpdateContext } from './UpdateContext';
+import { checkAndUpdateNative } from './NativeCheckOrchestrator';
+import type { NativeUpdateResult } from './NativeUpdateResult';
 
 export class PushyFileJSBundleProvider extends JSBundleProvider {
   private updateContext: UpdateContext;
@@ -41,6 +43,11 @@ export class PushyFileJSBundleProvider extends JSBundleProvider {
         ],
       });
     }
+  }
+
+  /** Call after the host's real bundle resolution; never resolves it again. */
+  checkAndUpdate(): Promise<NativeUpdateResult> {
+    return checkAndUpdateNative(this.updateContext);
   }
 
   getAppKeys(): string[] {

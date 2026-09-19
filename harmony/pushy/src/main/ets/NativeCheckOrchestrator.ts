@@ -3,6 +3,8 @@ import deviceInfo from '@ohos.deviceInfo';
 import logger from './Logger';
 import NativePatchCore from './NativePatchCore';
 import type { UpdateContext } from './UpdateContext';
+import { NativeUpdateRound, nativeUpdateResult } from './NativeUpdateResult';
+import type { NativeUpdateResult } from './NativeUpdateResult';
 import { isSafePathComponent } from './PathUtils';
 import { monotonicNowMs } from './MonotonicClock';
 import {
@@ -106,6 +108,64 @@ interface RespCacheEntry {
 }
 
 let scheduled = false;
+// The host and delayed check use one promise, including its settled result.
+const hostRound = new NativeUpdateRound();
+let scheduledContext: UpdateContext | undefined;
+let scheduledRollback = '';
+let roundGeneration = -1;
+let roundConfigJson: string | undefined;
+let roundResult = nativeUpdateResult('failed', 'check_failed');
+
+function startNativeRound(
+  context: UpdateContext,
+  launchRolledBackVersion: string,
+): Promise<NativeUpdateResult> {
+  return hostRound.run(async () => {
+    try {
+      await runOnce(context, launchRolledBackVersion);
+    } catch (e) {
+      logger.error(TAG, `native check failed: ${getErrorMessage(e)}`);
+      roundResult = nativeUpdateResult('failed', 'internal_error');
+    }
+    return roundResult;
+  });
+}
+
+export async function checkAndUpdateNative(
+  context: UpdateContext,
+): Promise<NativeUpdateResult> {
+  if (scheduledContext !== context) {
+    return nativeUpdateResult('skipped', 'not_initialized');
+  }
+  const configJson = context.getKv(KEY_CONFIG);
+  if (!configJson) {
+    return nativeUpdateResult('skipped', 'not_configured');
+  }
+  try {
+    const config = JSON.parse(configJson) as NativeConfig;
+    if (!config || typeof config !== 'object' || Array.isArray(config)) {
+      return nativeUpdateResult('failed', 'invalid_config');
+    }
+    if (config.disabled) {
+      return nativeUpdateResult('skipped', 'disabled');
+    }
+    if (typeof config.appKey !== 'string' || !config.appKey) {
+      return nativeUpdateResult('failed', 'invalid_config');
+    }
+  } catch (e) {
+    return nativeUpdateResult('failed', 'invalid_config');
+  }
+  const result = await startNativeRound(context, scheduledRollback);
+  if (roundGeneration !== context.getResetGeneration()) {
+    return nativeUpdateResult('cancelled', 'reset');
+  }
+  if (configJson !== roundConfigJson || configJson !== context.getKv(KEY_CONFIG)) {
+    return nativeUpdateResult('skipped', 'config_changed');
+  }
+  // Do not let a caller mutate the cached result observed by later callers.
+  return nativeUpdateResult(result.status, result.reason, result.hash, result.activated);
+}
+
 // JS 在本进程内已拿到有效检查响应时对应的配置 JSON(markJsCheckCompleted)。
 // 进程级:下次启动无信号,冷启动轮次照常运行。
 let jsCompletedConfig: string | undefined;
@@ -131,6 +191,8 @@ export function scheduleNativeCheck(
     return;
   }
   scheduled = true;
+  scheduledContext = context;
+  scheduledRollback = launchRolledBackVersion;
   // 结果本来就是"下次启动生效",延迟几秒让开冷启动关键路径(§7 R5)——
   // 除非上个进程死于轮中(残留标记),那时每一秒启动时间都要用来续传。
   const delayMs = context.getKv(KEY_ROUND_INCOMPLETE) ? 0 : START_DELAY_MS;
@@ -142,7 +204,7 @@ export function scheduleNativeCheck(
       );
       return;
     }
-    runOnce(context, launchRolledBackVersion).catch((e: Object) => {
+    startNativeRound(context, launchRolledBackVersion).catch((e: Object) => {
       // 救援路径自身绝不能把应用拖垮。
       logger.error(TAG, `native check failed: ${getErrorMessage(e)}`);
     });
@@ -156,22 +218,33 @@ async function runOnce(
   // 在任何 IO 之前采样:resetToPackagedBundle 会递增它,本轮运行期间发生的
   // reset 必须赢过本轮的决策。
   const resetGeneration = context.getResetGeneration();
+  roundGeneration = resetGeneration;
+  roundResult = nativeUpdateResult('failed', 'check_failed');
   const configJson = context.getKv(KEY_CONFIG);
+  roundConfigJson = configJson;
   if (!configJson) {
-    // 无落盘配置(老接入/首启):静默不跑——这就是灰度开关。
+    // No persisted configuration: report the rollout gate to native callers.
+    roundResult = nativeUpdateResult('skipped', 'not_configured');
     return;
   }
   let config: NativeConfig;
   try {
     config = JSON.parse(configJson) as NativeConfig;
+    if (!config || typeof config !== 'object' || Array.isArray(config)) {
+      roundResult = nativeUpdateResult('failed', 'invalid_config');
+      return;
+    }
   } catch (e) {
+    roundResult = nativeUpdateResult('failed', 'invalid_config');
     return;
   }
   if (config.disabled) {
+    roundResult = nativeUpdateResult('skipped', 'disabled');
     return;
   }
   const appKey = config.appKey ?? '';
   if (!appKey) {
+    roundResult = nativeUpdateResult('failed', 'invalid_config');
     return;
   }
   // 从这里起本轮开始做真实工作:留下面包屑,死于轮中时下次启动零延迟续传。
@@ -267,6 +340,7 @@ async function runConfiguredRound(
   };
   const body = NativePatchCore.buildCheckRequestBody(JSON.stringify(input));
   if (!body) {
+    roundResult = nativeUpdateResult('failed', 'invalid_request');
     return;
   }
 
@@ -285,23 +359,28 @@ async function runConfiguredRound(
     config.afterDownload ?? '',
   );
   if (!decisionJson) {
+    roundResult = nativeUpdateResult('failed', 'invalid_response');
     return;
   }
   const decision = JSON.parse(decisionJson) as Decision;
   if (decision.action !== 'download') {
-    await context.commitNativeCheckResult(
+    const committed = await context.commitNativeCheckResult(
       resetGeneration,
       '',
       '',
       false,
       buildResponseCacheJson(configJson, body, responseText, responseAtSeconds),
     );
+    roundResult = committed
+      ? nativeUpdateResult('noUpdate', decision.reason ?? '')
+      : nativeUpdateResult('cancelled', 'reset');
     logger.info(TAG, `nothing to do (${decision.reason ?? ''})`);
     return;
   }
   const hash = decision.hash ?? '';
   if (!isSafePathComponent(hash)) {
     logger.warn(TAG, 'decision carries an unsafe hash, ignoring');
+    roundResult = nativeUpdateResult('failed', 'invalid_response');
     return;
   }
 
@@ -320,13 +399,16 @@ async function runConfiguredRound(
   }
   if (!downloaded) {
     logger.warn(TAG, `all download attempts for ${hash} failed`);
-    await context.commitNativeCheckResult(
+    const committed = await context.commitNativeCheckResult(
       resetGeneration,
       '',
       '',
       false,
       buildResponseCacheJson(configJson, body, responseText, responseAtSeconds),
     );
+    roundResult = committed
+      ? nativeUpdateResult('failed', 'download_failed')
+      : nativeUpdateResult('cancelled', 'reset');
     return;
   }
 
@@ -368,6 +450,7 @@ async function runConfiguredRound(
     );
   } catch (e) {
     logger.error(TAG, `commit failed: ${getErrorMessage(e)}`);
+    roundResult = nativeUpdateResult('failed', 'commit_failed');
     return;
   }
   if (!committed) {
@@ -377,6 +460,9 @@ async function runConfiguredRound(
   } else {
     logger.info(TAG, `downloaded ${hash}, activation left to JS`);
   }
+  roundResult = committed
+    ? nativeUpdateResult('downloaded', '', hash, activate)
+    : nativeUpdateResult('cancelled', 'reset');
 }
 
 function buildResponseCacheJson(
