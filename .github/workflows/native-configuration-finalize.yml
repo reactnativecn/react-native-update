@@ -1,0 +1,41 @@
+name: Verify native-first configuration
+on:
+  push:
+    branches: [feat/native-host-update-api]
+    paths: [.github/workflows/native-configuration-finalize.yml]
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - name: Apply guarded follow-ups
+        run: |
+          python3 scripts/finalize-native-configuration.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('ios/RCTPushy/RCTPushyNativeConfig.mm')
+          s = p.read_text()
+          old = 'if (CFGetTypeID((__bridge CFTypeRef)disabled) != CFBooleanGetTypeID()) {'
+          assert s.count(old) == 1
+          p.write_text(s.replace(old, 'if (![disabled isKindOfClass:NSNumber.class] || CFGetTypeID((__bridge CFTypeRef)disabled) != CFBooleanGetTypeID()) {'))
+          PY
+      - name: Validate tests and types
+        run: |
+          bun install --frozen-lockfile
+          bunx biome check --write src
+          bunx tsc --noEmit
+          bun test src/__tests__
+          git diff --check
+      - name: Commit verified changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add android/src/main/java/cn/reactnative/modules/update/{UpdateContext,NativeCheckOrchestrator}.java ios/RCTPushy/{RCTPushy.mm,RCTPushyNativeConfig.mm} harmony/pushy/src/main/ets/{UpdateContext,NativeCheckOrchestrator}.ts src/__tests__/nativeConfiguration.test.ts src/__tests__/nativeHostApi.test.ts
+          git commit -m 'feat: preserve native-first identity and invalidate superseded configuration rounds'
+          git push origin HEAD:refs/heads/feat/native-host-update-api
