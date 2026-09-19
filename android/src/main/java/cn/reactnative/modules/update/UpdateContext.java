@@ -737,6 +737,41 @@ public class UpdateContext {
     }
 
     /** Sampled/compared by the native check orchestrator; see resetGeneration. */
+    /** Shared by JS and native hosts. Config replacement invalidates old native decisions. */
+    private static final java.util.concurrent.atomic.AtomicLong nativeConfigGeneration =
+        new java.util.concurrent.atomic.AtomicLong(0);
+
+    static long getNativeConfigGeneration() {
+        return nativeConfigGeneration.get();
+    }
+
+    void setNativeConfig(String config) {
+        synchronized (commitLock) {
+            boolean changed = !config.equals(sp.getString(NativeCheckOrchestrator.KEY_CONFIG, null));
+            SharedPreferences.Editor editor = sp.edit();
+            if (changed) {
+                // Also invalidate on a failed persistence attempt: an older
+                // round must not commit over uncertain configuration state.
+                resetGeneration.incrementAndGet();
+                nativeConfigGeneration.incrementAndGet();
+                editor.remove(NativeCheckOrchestrator.KEY_RESP_CACHE);
+                NativeCheckOrchestrator.markJsCheckCompleted(null);
+            }
+            // A native-only first launch needs a stable gray-release identity
+            // before JS initializes. Never replace an existing installation ID.
+            String uuid = sp.getString("uuid", null);
+            if (uuid == null || uuid.isEmpty()) {
+                editor.putString("uuid", java.util.UUID.randomUUID().toString());
+            }
+            editor.putString(NativeCheckOrchestrator.KEY_CONFIG, config);
+            // Persist even an equal value: a previous commit may have updated
+            // SharedPreferences memory but failed to write its file.
+            persistEditorOrThrow(editor, "configure native update");
+        }
+        NativeCheckOrchestrator.onConfigured(this);
+    }
+
+    // Native-decision generation: bumped by reset AND configuration replacement.
     static long getResetGeneration() {
         return resetGeneration.get();
     }

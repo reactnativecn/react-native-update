@@ -71,6 +71,52 @@ final class NativeCheckOrchestrator {
     // (markJsCheckCompleted). Process-scoped by design: the next launch
     // starts with no signal and the cold-start round runs again.
     private static volatile String sJsCompletedConfig;
+    // Published after the launch rollback snapshot, before host calls are accepted.
+    private static volatile boolean nativeReady;
+    private static volatile NativeUpdateResult roundResult =
+        NativeUpdateResult.of(NativeUpdateResult.FAILED, "check_failed");
+    private static volatile long roundGeneration = -1;
+    private static volatile long roundConfigGeneration = -1;
+    private static volatile String roundConfigJson;
+
+    /** Blocking only on the host API's worker; never call on the UI thread. */
+    static NativeUpdateResult checkAndUpdate(UpdateContext context) throws InterruptedException {
+        if (UpdateContext.DEBUG) {
+            return NativeUpdateResult.of(NativeUpdateResult.SKIPPED, "debug");
+        }
+        if (!nativeReady || sContext != context || !context.getIsUsingBundleUrl()) {
+            return NativeUpdateResult.of(NativeUpdateResult.SKIPPED, "not_initialized");
+        }
+        String configJson = context.getKv(KEY_CONFIG);
+        if (configJson == null || configJson.isEmpty()) {
+            return NativeUpdateResult.of(NativeUpdateResult.SKIPPED, "not_configured");
+        }
+        try {
+            JSONObject config = new JSONObject(configJson);
+            if (config.optBoolean("disabled", false)) {
+                return NativeUpdateResult.of(NativeUpdateResult.SKIPPED, "disabled");
+            }
+            if (config.optString("appKey", "").isEmpty()) {
+                return NativeUpdateResult.of(NativeUpdateResult.FAILED, "invalid_config");
+            }
+        } catch (JSONException e) {
+            return NativeUpdateResult.of(NativeUpdateResult.FAILED, "invalid_config");
+        }
+        startRound(0);
+        if (!roundStarted.get()) {
+            return NativeUpdateResult.of(NativeUpdateResult.SKIPPED, "config_changed");
+        }
+        roundDone.await();
+        if (roundConfigGeneration != UpdateContext.getNativeConfigGeneration()
+            || !configJson.equals(roundConfigJson) || !configJson.equals(context.getKv(KEY_CONFIG))) {
+            return NativeUpdateResult.of(NativeUpdateResult.CANCELLED, "config_changed");
+        }
+        if (roundGeneration != UpdateContext.getResetGeneration()) {
+            return NativeUpdateResult.of(NativeUpdateResult.CANCELLED, "reset");
+        }
+        return roundResult;
+    }
+
 
     static void markJsCheckCompleted(String config) {
         sJsCompletedConfig = config;
@@ -99,6 +145,7 @@ final class NativeCheckOrchestrator {
         }
         sContext = context;
         sLaunchRolledBackVersion = launchRolledBackVersion;
+        nativeReady = true;
         // The crash-hold rescue shares the orchestrator's rollout gate: no
         // persisted config, no handler (§11.3).
         if (context.getKv(KEY_CONFIG) != null) {
@@ -142,7 +189,36 @@ final class NativeCheckOrchestrator {
      * started it yet. deadlineNanos > 0 (crash rescue) caps every HTTP call
      * and download phase to the remaining budget.
      */
+    private static boolean hasRunnableConfig(UpdateContext context) {
+        if (context == null) {
+            return false;
+        }
+        try {
+            String json = context.getKv(KEY_CONFIG);
+            if (json == null) {
+                return false;
+            }
+            JSONObject config = new JSONObject(json);
+            return !config.optBoolean("disabled", false)
+                && config.opt("appKey") instanceof String
+                && !config.getString("appKey").trim().isEmpty();
+        } catch (JSONException e) {
+            return false;
+        }
+    }
+
+    static void onConfigured(UpdateContext context) {
+        if (nativeReady && sContext == context && hasRunnableConfig(context)) {
+            CrashRescue.install();
+        }
+    }
+
     private static void startRound(long deadlineNanos) {
+        // An automatic check before first-run provisioning must not consume
+        // the process's only round. Hosts may configure later in this launch.
+        if (!hasRunnableConfig(sContext)) {
+            return;
+        }
         if (!roundStarted.compareAndSet(false, true)) {
             return;
         }
@@ -150,6 +226,7 @@ final class NativeCheckOrchestrator {
             runOnce(sContext, sLaunchRolledBackVersion, deadlineNanos);
         } catch (Throwable e) {
             Log.w(UpdateContext.TAG, "native check failed: " + e);
+            roundResult = NativeUpdateResult.of(NativeUpdateResult.FAILED, "internal_error");
         } finally {
             roundCompleted = true;
             roundDone.countDown();
@@ -170,7 +247,7 @@ final class NativeCheckOrchestrator {
         }
         crashRescueActive = true;
         startRound(deadlineNanos);
-        if (!roundCompleted) {
+        if (roundStarted.get() && !roundCompleted) {
             long remainingNanos = deadlineNanos - System.nanoTime();
             if (remainingNanos > 0) {
                 try {
@@ -223,32 +300,33 @@ final class NativeCheckOrchestrator {
         String launchRolledBackVersion,
         long deadlineNanos
     ) throws JSONException {
-        // Sampled before any IO: a reset landing while this round runs must
-        // win over the round's decision.
         final long resetGeneration = UpdateContext.getResetGeneration();
+        roundGeneration = resetGeneration;
+        roundConfigGeneration = UpdateContext.getNativeConfigGeneration();
+        roundResult = NativeUpdateResult.of(NativeUpdateResult.FAILED, "check_failed");
         String configJson = context.getKv(KEY_CONFIG);
+        roundConfigJson = configJson;
         if (configJson == null || configJson.isEmpty()) {
-            // No persisted config (old integration / first ever launch): the
-            // native check silently does not run — this is the rollout gate.
+            roundResult = NativeUpdateResult.of(NativeUpdateResult.SKIPPED, "not_configured");
             return;
         }
         JSONObject config;
         try {
             config = new JSONObject(configJson);
         } catch (JSONException e) {
+            roundResult = NativeUpdateResult.of(NativeUpdateResult.FAILED, "invalid_config");
             return;
         }
         if (config.optBoolean("disabled", false)) {
+            roundResult = NativeUpdateResult.of(NativeUpdateResult.SKIPPED, "disabled");
             return;
         }
         String appKey = config.optString("appKey", "");
         if (appKey.isEmpty()) {
+            roundResult = NativeUpdateResult.of(NativeUpdateResult.FAILED, "invalid_config");
             return;
         }
-        // From here on the round does real work: leave the breadcrumb that
-        // the next launch reads to skip its 5s delay if we die mid-round.
-        // Best-effort: a lost breadcrumb costs one 5s delay, it must not
-        // abort the rescue round itself.
+        // Keep the existing interrupted-round breadcrumb and reset generation.
         try {
             context.setKv(KEY_ROUND_INCOMPLETE, "1");
         } catch (IllegalStateException ignored) {
@@ -323,6 +401,7 @@ final class NativeCheckOrchestrator {
 
         String body = NativeUpdateFlow.buildCheckRequestBody(input.toString());
         if (body == null) {
+            roundResult = NativeUpdateResult.of(NativeUpdateResult.FAILED, "invalid_request");
             return;
         }
 
@@ -339,19 +418,24 @@ final class NativeCheckOrchestrator {
         String decisionJson = NativeUpdateFlow.handleCheckResponse(
             responseText, identity.toString(), config.optString("afterDownload", ""));
         if (decisionJson == null) {
+            roundResult = NativeUpdateResult.of(NativeUpdateResult.FAILED, "invalid_response");
             return;
         }
         JSONObject decision = new JSONObject(decisionJson);
         if (!"download".equals(decision.optString("action"))) {
-            context.commitNativeCheckResult(
+            boolean committed = context.commitNativeCheckResult(
                 resetGeneration, null, null, false,
                 buildResponseCacheJson(configJson, body, responseText, responseAtSeconds));
+            roundResult = committed
+                ? NativeUpdateResult.of(NativeUpdateResult.NO_UPDATE, decision.optString("reason"))
+                : NativeUpdateResult.of(NativeUpdateResult.CANCELLED, "reset");
             Log.i(UpdateContext.TAG,
                 "native check: nothing to do (" + decision.optString("reason") + ")");
             return;
         }
         String hash = decision.optString("hash", "");
         if (!UpdateFileUtils.isSafePathComponent(hash)) {
+            roundResult = NativeUpdateResult.of(NativeUpdateResult.FAILED, "invalid_response");
             return;
         }
 
@@ -364,9 +448,12 @@ final class NativeCheckOrchestrator {
         if (!downloaded) {
             // The native attempt has finished, so JS may safely reuse the
             // response and retry through its own strategy chain.
-            context.commitNativeCheckResult(
+            boolean committed = context.commitNativeCheckResult(
                 resetGeneration, null, null, false,
                 buildResponseCacheJson(configJson, body, responseText, responseAtSeconds));
+            roundResult = NativeUpdateResult.of(
+                committed ? NativeUpdateResult.FAILED : NativeUpdateResult.CANCELLED,
+                committed ? "download_failed" : "reset");
             return;
         }
 
@@ -412,6 +499,7 @@ final class NativeCheckOrchestrator {
                 buildResponseCacheJson(configJson, body, responseText, responseAtSeconds));
         } catch (Exception e) {
             Log.w(UpdateContext.TAG, "native check: commit failed: " + e);
+            roundResult = NativeUpdateResult.of(NativeUpdateResult.FAILED, "commit_failed");
             return;
         }
         if (!committed) {
@@ -428,6 +516,9 @@ final class NativeCheckOrchestrator {
             Log.i(UpdateContext.TAG,
                 "native check: downloaded " + hash + ", activation left to JS");
         }
+        roundResult = committed
+            ? NativeUpdateResult.downloaded(hash, activate)
+            : NativeUpdateResult.of(NativeUpdateResult.CANCELLED, "reset");
     }
 
     private static String buildResponseCacheJson(

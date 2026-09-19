@@ -12,7 +12,9 @@ import { bundleManager } from '@kit.AbilityKit';
 import { util } from '@kit.ArkTS';
 import logger from './Logger';
 import {
+  KEY_CONFIG,
   KEY_RESP_CACHE,
+  markJsCheckCompleted,
   scheduleNativeCheck,
 } from './NativeCheckOrchestrator';
 import NativePatchCore, {
@@ -458,6 +460,29 @@ export class UpdateContext {
   }
 
   /** 写入并落盘;flushSync 不可用时以 flush() 的结果拒绝。 */
+  /** Shared JS/native configuration writer; all mutations precede the first await. */
+  private static nativeConfigGeneration: number = 0;
+
+  public getNativeConfigGeneration(): number {
+    return UpdateContext.nativeConfigGeneration;
+  }
+
+  public setNativeConfig(config: string): Promise<void> {
+    if (!this.getKv('uuid')) {
+      this.preferences.putSync('uuid', util.generateRandomUUID());
+    }
+    if (this.getKv(KEY_CONFIG) !== config) {
+      // Also guards A -> B -> A replacements and late download commits.
+      UpdateContext.resetGeneration += 1;
+      UpdateContext.nativeConfigGeneration += 1;
+      this.preferences.putSync(KEY_CONFIG, config);
+      this.preferences.deleteSync(KEY_RESP_CACHE);
+      markJsCheckCompleted('');
+    }
+    // Flush even an equal value so a retry after a storage error can succeed.
+    return this.flushPreferences('configure native update');
+  }
+
   public setKv(key: string, value: string): Promise<void> {
     this.preferences.putSync(key, value);
     return this.flushPreferences(`set key ${key}`);
