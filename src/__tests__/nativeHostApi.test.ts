@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
+import type { NativeUpdateResult } from '../../harmony/pushy/src/main/ets/NativeUpdateResult';
 import {
   NativeUpdateRound,
   nativeUpdateResult,
 } from '../../harmony/pushy/src/main/ets/NativeUpdateResult';
-import type { NativeUpdateResult } from '../../harmony/pushy/src/main/ets/NativeUpdateResult';
 
 // Evaluate the actual Harmony orchestrator in an isolated VM per test. Only
 // platform imports, HTTP and download IO are substituted; entry points,
@@ -13,9 +13,9 @@ import type { NativeUpdateResult } from '../../harmony/pushy/src/main/ets/Native
 const source = readFileSync(
   new URL(
     '../../harmony/pushy/src/main/ets/NativeCheckOrchestrator.ts',
-    import.meta.url,
+    import.meta.url
   ),
-  'utf8',
+  'utf8'
 )
   .replace(/^import[\s\S]*?;\r?\n/gm, '')
   .replace(/^export /gm, '');
@@ -90,7 +90,7 @@ function harness() {
         state.downloads += 1;
         return state.downloadOK;
       },
-    },
+    }
   ) as {
     check: (ctx: typeof context) => Promise<NativeUpdateResult>;
     schedule: (ctx: typeof context, rollback: string) => void;
@@ -136,7 +136,9 @@ describe('native host API orchestration', () => {
     const second = h.check();
     for (const timer of h.timers) timer();
     const results = await Promise.all([first, second]);
-    expect(results[0]).toEqual(nativeUpdateResult('downloaded', '', 'v2', true));
+    expect(results[0]).toEqual(
+      nativeUpdateResult('downloaded', '', 'v2', true)
+    );
     expect(results[1]).toEqual(results[0]);
     results[0].hash = 'caller-mutated';
     expect((await h.check()).hash).toBe('v2');
@@ -166,12 +168,16 @@ describe('native host API orchestration', () => {
     const offline = harness();
     offline.initialize();
     offline.state.reachable = false;
-    expect(await offline.check()).toEqual(nativeUpdateResult('failed', 'check_failed'));
+    expect(await offline.check()).toEqual(
+      nativeUpdateResult('failed', 'check_failed')
+    );
     const h = harness();
     h.initialize();
     h.state.decision = { action: 'download', hash: 'v2' };
     h.state.downloadOK = false;
-    expect(await h.check()).toEqual(nativeUpdateResult('failed', 'download_failed'));
+    expect(await h.check()).toEqual(
+      nativeUpdateResult('failed', 'download_failed')
+    );
     await h.check();
     expect(h.state.downloads).toBe(1);
   });

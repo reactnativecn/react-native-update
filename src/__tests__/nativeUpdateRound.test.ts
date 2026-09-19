@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
+import type { NativeUpdateResult } from '../../harmony/pushy/src/main/ets/NativeUpdateResult';
 import {
   NativeUpdateRound,
   nativeUpdateResult,
 } from '../../harmony/pushy/src/main/ets/NativeUpdateResult';
-import type { NativeUpdateResult } from '../../harmony/pushy/src/main/ets/NativeUpdateResult';
 
 describe('native host update round', () => {
   test('concurrent callers share the same in-flight operation', async () => {
@@ -74,9 +74,9 @@ describe('native host update round', () => {
       hash: 'version-1',
       activated: false,
     });
-    expect(nativeUpdateResult('downloaded', '', 'version-1', true).activated).toBe(
-      true,
-    );
+    expect(
+      nativeUpdateResult('downloaded', '', 'version-1', true).activated
+    ).toBe(true);
     expect(nativeUpdateResult('skipped', 'not_configured')).toEqual({
       status: 'skipped',
       reason: 'not_configured',
