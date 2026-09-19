@@ -2,9 +2,17 @@ name: Publish Package to npmjs
 on:
   release:
     types: [published]
+  # One-time maintainer-authorized release request; removed after verification.
+  push:
+    branches: [master]
+    paths: [.github/releases/v10.57.0.md]
 
 env:
-  RELEASE_VERSION: ${{ github.event.release.tag_name || github.ref_name }}
+  RELEASE_VERSION: ${{ github.event.release.tag_name || 'v10.57.0' }}
+
+concurrency:
+  group: npm-release-${{ github.event.release.tag_name || 'v10.57.0' }}
+  cancel-in-progress: false
 
 permissions:
   id-token: write  # Required for OIDC
@@ -20,6 +28,8 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      - name: Verify version before building
+        run: node scripts/check-release-version.js
       - name: Check Harmony changes
         id: check
         shell: bash
@@ -202,3 +212,58 @@ jobs:
           else
             npm publish --provenance --access public
           fi
+
+  # Finalize only this explicitly requested release, after registry publication.
+  finalize_v10570:
+    needs: [publish_with_harmony, publish_without_harmony]
+    if: >-
+      always() && github.event_name == 'push' && github.ref == 'refs/heads/master' &&
+      (needs.publish_with_harmony.result == 'success' || needs.publish_without_harmony.result == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Verify the published registry package
+        shell: bash
+        run: |
+          test "$(npm view react-native-update@10.57.0 version)" = '10.57.0'
+          test "$(npm view react-native-update dist-tags.latest)" = '10.57.0'
+          mkdir -p "$RUNNER_TEMP/pushy-10.57.0"
+          cd "$RUNNER_TEMP/pushy-10.57.0"
+          npm pack react-native-update@10.57.0 --ignore-scripts
+          tar -xzf react-native-update-10.57.0.tgz
+          test -s package/harmony/pushy.har
+          grep -q 'configure' package/android/src/main/java/cn/reactnative/modules/update/PushyNativeUpdate.java
+          grep -q 'configure:' package/ios/RCTPushy/RCTPushy.h
+          grep -q 'nativeConfigSource' package/src/type.ts
+          echo 'Registry latest=10.57.0; native APIs and Harmony HAR verified.'
+      - name: Create the bilingual GitHub Release
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require('node:fs');
+            const { owner, repo } = context.repo;
+            const tag = 'v10.57.0';
+            if (require('./package.json').version !== '10.57.0') throw new Error('Version drift');
+            const body = fs.readFileSync('.github/releases/v10.57.0.md', 'utf8');
+            if (!body.includes('## English') || !body.includes('## 中文')) throw new Error('Missing bilingual release notes');
+            let release;
+            try {
+              release = (await github.rest.repos.getReleaseByTag({owner, repo, tag})).data;
+              if (release.body !== body || release.draft || release.prerelease) throw new Error('Existing release differs; refusing overwrite');
+            } catch (e) {
+              if (e.status !== 404) throw e;
+              release = (await github.rest.repos.createRelease({
+                owner, repo, tag_name: tag, target_commitish: context.sha,
+                name: tag, body, draft: false, prerelease: false, make_latest: 'true'
+              })).data;
+            }
+            const verified = (await github.rest.repos.getReleaseByTag({owner, repo, tag})).data;
+            if (verified.body !== body || verified.draft || verified.prerelease) throw new Error('Release verification failed');
+            core.info(verified.html_url);
+            await core.summary.addHeading('v10.57.0 published').addRaw('npm latest and native package contents verified.\n').addLink('GitHub Release', verified.html_url).write();
