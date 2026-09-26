@@ -62,11 +62,19 @@ static int scheduleCount;
 static int64_t waitBudget;
 static NSString *root;
 
-// In-memory NSUserDefaults collaborator. Every production defaults mutation must
-// still hold the REAL production os_unfair_lock. Pausing one write inside that
-// lock lets the opposing operation start without relying on OS scheduling.
-@interface TestDefaults : NSUserDefaults
-@property(nonatomic, strong) NSMutableDictionary<NSString *, id> *values;
+// In-memory collaborator, deliberately NOT an NSUserDefaults subclass: inherited
+// accessors could otherwise reach real preferences without ObserveWrite(). Only
+// explicitly modelled selectors are supported. Every mutation still holds the
+// REAL production lock; pausing one write fixes the competing operation's order.
+@interface TestDefaults : NSObject {
+    NSMutableDictionary<NSString *, id> *_values;
+}
+- (void)setObject:(id)value forKey:(NSString *)key;
+- (void)removeObjectForKey:(NSString *)key;
+- (id)objectForKey:(NSString *)key;
+- (NSString *)stringForKey:(NSString *)key;
+- (NSDictionary *)dictionaryForKey:(NSString *)key;
+- (NSDictionary<NSString *, id> *)dictionaryRepresentation;
 @end
 
 static void ObserveWrite(void) {
@@ -83,19 +91,45 @@ static void ObserveWrite(void) {
     if (self) { _values = [NSMutableDictionary new]; }
     return self;
 }
-- (void)setObject:(id)value forKey:(NSString *)key { ObserveWrite(); self.values[key] = value; }
-- (void)removeObjectForKey:(NSString *)key { ObserveWrite(); [self.values removeObjectForKey:key]; }
-- (id)objectForKey:(NSString *)key { return self.values[key]; }
+- (void)setObject:(id)value forKey:(NSString *)key { ObserveWrite(); _values[key] = value; }
+- (void)removeObjectForKey:(NSString *)key { ObserveWrite(); [_values removeObjectForKey:key]; }
+- (id)objectForKey:(NSString *)key { return _values[key]; }
 - (NSString *)stringForKey:(NSString *)key {
-    id value = self.values[key];
+    id value = _values[key];
     return [value isKindOfClass:NSString.class] ? value : nil;
 }
 - (NSDictionary *)dictionaryForKey:(NSString *)key {
-    id value = self.values[key];
+    id value = _values[key];
     return [value isKindOfClass:NSDictionary.class] ? value : nil;
 }
-- (NSDictionary<NSString *, id> *)dictionaryRepresentation { return [self.values copy]; }
+- (NSDictionary<NSString *, id> *)dictionaryRepresentation { return [_values copy]; }
+- (void)doesNotRecognizeSelector:(SEL)selector {
+    // Fail even if product code catches Objective-C exceptions. Dynamic sends
+    // must not fall through to a real defaults domain or turn into a passed test.
+    std::string message = "unsupported TestDefaults selector: ";
+    message += NSStringFromSelector(selector).UTF8String;
+    Expect(false, message.c_str());
+}
 @end
+
+// Type substitution is confined to this test translation unit, AFTER Foundation
+// is imported. The extracted bodies stay unchanged, but a newly used defaults
+// selector must be explicitly implemented here rather than inherited silently.
+#define NSUserDefaults TestDefaults
+
+// Compile-only contract probes, enabled individually by the runner. Ordinary
+// warnings must remain non-fatal; unmodelled selectors must fail compilation.
+#if defined(TEST_DEFAULTS_READ_PROBE)
+static BOOL DefaultsReadProbe(NSUserDefaults *defaults) {
+    return [defaults boolForKey:@"probe"];
+}
+#elif defined(TEST_DEFAULTS_WRITE_PROBE)
+static void DefaultsWriteProbe(NSUserDefaults *defaults) {
+    [defaults setBool:YES forKey:@"probe"];
+}
+#elif defined(TEST_HARMLESS_WARNING_PROBE)
+#warning PUSHY_TEST_HARMLESS_WARNING
+#endif
 
 static TestDefaults *testDefaults;
 static NSUserDefaults *PushyDefaults(void) { return testDefaults; }
@@ -413,8 +447,45 @@ static void CompleteInTime(void) {
     Finish();
 }
 
+// This contract test deliberately does not call SetUp: a new collaborator must
+// start empty on its own, not only because the fixture reset some known keys.
+static void DefaultsIsolation(void) {
+    TestDefaults *first = [TestDefaults new];
+    TestDefaults *second = [TestDefaults new];
+    Expect(![first isKindOfClass:NSClassFromString(@"NSUserDefaults")],
+           "test defaults must not inherit real preferences storage");
+    PushyWithStateLock(^{
+        [first setObject:@"value" forKey:@"key"];
+        [first setObject:@{@"nested": @YES} forKey:@"dictionary"];
+        Expect([[first stringForKey:@"key"] isEqual:@"value"], "string accessor uses memory");
+        Expect([[first dictionaryForKey:@"dictionary"][@"nested"] boolValue],
+               "dictionary accessor uses memory");
+        NSDictionary *snapshot = [first dictionaryRepresentation];
+        [first removeObjectForKey:@"key"];
+        Expect([first objectForKey:@"key"] == nil, "remove accessor uses memory");
+        Expect([snapshot[@"key"] isEqual:@"value"], "dictionary snapshot is independent");
+        Expect([second dictionaryRepresentation].count == 0, "instances must not share defaults");
+    });
+}
+
 int main(int argc, char **argv) {
     @autoreleasepool {
+        // These intentional failures run in separate processes. Erasing the
+        // static type also checks the runtime backstop, not just the compiler.
+        if (argc > 1 && (std::string(argv[1]) == "unsupported_defaults_read" ||
+                         std::string(argv[1]) == "unsupported_defaults_write")) {
+            testName = argv[1];
+            id defaults = [TestDefaults new];
+            if (std::string(argv[1]) == "unsupported_defaults_read") {
+                (void)[defaults boolForKey:@"probe"];
+            } else {
+                PushyWithStateLock(^{ [defaults setBool:YES forKey:@"probe"]; });
+            }
+            Expect(false, "unsupported defaults call unexpectedly returned");
+        }
+        testName = "defaults_isolation";
+        DefaultsIsolation();
+        std::printf("[PASS] defaults_isolation\n");
         struct Case { const char *name; void (*run)(); };
         const Case cases[] = {
             {"late_commit", LateCommit},
