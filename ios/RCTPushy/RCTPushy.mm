@@ -98,6 +98,14 @@ static NSString *PushyCode(const char *code) {
     return [NSString stringWithUTF8String:code];
 }
 
+// cInfo.os label prefix; must match the JS side (core.ts) so the server
+// buckets tvOS devices apart from iOS ones.
+#if TARGET_OS_TV
+static NSString * const PushyOsName = @"tvos";
+#else
+static NSString * const PushyOsName = @"ios";
+#endif
+
 // event def
 static NSString * const EVENT_PROGRESS_DOWNLOAD = @"RCTPushyDownloadProgress";
 static NSString * const PARAM_PROGRESS_HASH = @"hash";
@@ -732,6 +740,10 @@ static void PushySwitchVersionLocked(NSString *hash) {
 + (BOOL)hasRunnableConfig;
 + (NSDictionary *)checkAndUpdate;
 + (void)scheduleFromColdStart:(NSString *)launchRolledBackVersion;
+#if TARGET_OS_TV && !DEBUG
++ (BOOL)restorePurgedLaunch:(NSString *)purgedVersion
+                 rolledBack:(NSString *)launchRolledBackVersion;
+#endif
 + (void)markJsCheckCompleted:(NSString *)config;
 + (void)startRoundWithDeadline:(NSTimeInterval)deadlineUptime;
 + (void)runOnce:(NSString *)launchRolledBackVersion deadline:(NSTimeInterval)deadlineUptime;
@@ -755,6 +767,9 @@ static std::atomic<bool> pushyRoundCompleted{false};
 // it downloads (§11.3).
 static std::atomic<bool> pushyCrashRescueActive{false};
 static std::atomic<bool> pushyRescueAttempted{false};
+// Set when a launch blocks on reinstalling a version tvOS purged: the round
+// activates what it downloads, JS has not started to decide.
+static std::atomic<bool> pushyPurgeRestoreActive{false};
 static dispatch_semaphore_t pushyRoundDone;
 static NSString *pushyLaunchRolledBackForRescue = nil;
 // A version this process downloaded but left for JS to activate. If the
@@ -785,6 +800,9 @@ static const NSTimeInterval kPushyRescueTriggerUptime = 60;
 static const NSTimeInterval kPushyRescueBudgetBackgroundThread = 10;
 // A held main thread freezes UI teardown; stay well under the watchdog.
 static const NSTimeInterval kPushyRescueBudgetMainThread = 3.5;
+// The purged-version restore blocks +bundleURL, usually inside
+// application:didFinishLaunching: — stay clear of the launch watchdog.
+static const NSTimeInterval kPushyPurgeRestoreBudget = 12;
 
 static void PushyMaybeHoldForRescue(void) {
     // Once per process; a second crashing thread passes straight through
@@ -935,8 +953,42 @@ RCT_EXPORT_MODULE(RCTPushy);
 + (NSURL *)bundleURL
 {
     pushyIsUsingBundleUrl = true;
+    NSString *launchRolledBackVersion = nil;
+    @try {
+        NSString *purgedVersion = nil;
+        NSURL *resolvedURL = [RCTPushy resolveLaunchBundleURL:&launchRolledBackVersion
+                                                purgedVersion:&purgedVersion];
+#if TARGET_OS_TV && !DEBUG
+        // tvOS deleted the installed version while the app was not running.
+        // The app is expected to be online: block the launch on a native
+        // round that reinstalls the latest version, instead of showing the
+        // packaged bundle and jumping forward again on a later launch.
+        if (purgedVersion != nil &&
+            [RCTPushyOrchestrator restorePurgedLaunch:purgedVersion
+                                           rolledBack:launchRolledBackVersion]) {
+            resolvedURL = [RCTPushy resolveLaunchBundleURL:&launchRolledBackVersion
+                                             purgedVersion:&purgedVersion];
+        }
+#endif
+        return resolvedURL ?: [RCTPushy binaryBundleURL];
+    } @finally {
+        // State corruption is exactly when the rescue path matters most. If
+        // resolution throws before a snapshot exists, nil safely omits only
+        // this launch's rollback guard instead of disabling the check.
+        [RCTPushyOrchestrator scheduleFromColdStart:launchRolledBackVersion];
+    }
+}
+
+// Resolves the bundle to launch from the persisted state; nil means the
+// packaged bundle. Consumes the launch's one-shot state (first_time), so a
+// second call is only valid after something re-armed it (a switchVersion).
+// purgedVersion is set on tvOS when the installed version's files are gone.
++ (NSURL *)resolveLaunchBundleURL:(NSString **)launchRolledBackVersionOut
+                    purgedVersion:(NSString **)purgedVersionOut
+{
     __block NSURL *resolvedURL = nil;
     __block NSString *launchRolledBackVersion = nil;
+    __block NSString *purgedVersion = nil;
     @try {
         PushyWithStateLock(^{
             NSUserDefaults *defaults = PushyDefaults();
@@ -995,10 +1047,29 @@ RCT_EXPORT_MODULE(RCTPushy);
                     resolvedURL = [NSURL fileURLWithPath:bundlePath];
                     break;
                 } else {
+#if TARGET_OS_TV
+                    // Caches is purgeable on tvOS: a missing bundle is the OS
+                    // reclaiming space, not a bad release. Everything under
+                    // rctpushy went with it, so walking back to last_version
+                    // is pointless, and a rollback mark would make this
+                    // launch's check refuse to reinstall the version.
+                    RCTLogWarn(@"RCTPushy -- bundle version %@ was purged by the system", loadVersion);
+                    purgedVersion = loadVersion;
+                    state = pushy::state::ForgetPurgedVersions(state);
+                    PushyApplyStateToDefaults(defaults, state);
+                    if (decision.consumed_first_time) {
+                        // The first load being consumed never happens: the
+                        // packaged bundle must not report isFirstTime.
+                        ignoreRollback = false;
+                        [defaults removeObjectForKey:keyFirstLoadMarked];
+                    }
+                    break;
+#else
                     RCTLogError(@"RCTPushy -- bundle version %@ not found, rolling back", loadVersion);
                     state = pushy::state::Rollback(state);
                     PushyApplyStateToDefaults(defaults, state);
                     loadVersion = PushyFromStdString(state.current_version);
+#endif
                 }
             }
         }
@@ -1007,13 +1078,11 @@ RCT_EXPORT_MODULE(RCTPushy);
         // launch just rolled back.
             launchRolledBackVersion = PushyFromStdString(state.rolled_back_version);
         });
-        return resolvedURL ?: [RCTPushy binaryBundleURL];
     } @finally {
-        // State corruption is exactly when the rescue path matters most. If
-        // resolution throws before a snapshot exists, nil safely omits only
-        // this launch's rollback guard instead of disabling the check.
-        [RCTPushyOrchestrator scheduleFromColdStart:launchRolledBackVersion];
+        *launchRolledBackVersionOut = launchRolledBackVersion;
+        *purgedVersionOut = purgedVersion;
     }
+    return resolvedURL;
 }
 
 + (NSString *) rollback {
@@ -1919,6 +1988,7 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
 // excluded from backups.
 + (void)excludeFromBackup:(NSString *)path
 {
+#if !TARGET_OS_TV  // tvOS stores under Caches, which is never backed up.
     NSURL *url = [NSURL fileURLWithPath:path isDirectory:YES];
     NSError *error = nil;
     if (![url setResourceValue:@YES
@@ -1926,6 +1996,7 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
                          error:&error]) {
         RCTLogWarn(@"Pushy exclude from backup error: %@", error.localizedDescription);
     }
+#endif
 }
 
 - (void)unzipFileAtPath:(NSString *)path
@@ -2047,7 +2118,15 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
 
 + (NSString *)downloadDir
 {
-    NSString *directory = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES) firstObject];
+#if TARGET_OS_TV
+    // tvOS apps cannot write Application Support; Caches is the only
+    // writable, non-temporary location, and the system may purge it while
+    // the app is not running (see the purged-version path in +bundleURL).
+    NSSearchPathDirectory base = NSCachesDirectory;
+#else
+    NSSearchPathDirectory base = NSApplicationSupportDirectory;
+#endif
+    NSString *directory = [NSSearchPathForDirectoriesInDomains(base, NSUserDomainMask, YES) firstObject];
     return [directory stringByAppendingPathComponent:@"rctpushy"];
 }
 
@@ -2248,12 +2327,9 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
         && !config.Get("appKey").AsString().empty();
 }
 
-+ (void)scheduleFromColdStart:(NSString *)launchRolledBackVersion {
-#if !DEBUG
-    // Once per process; a few seconds of delay keeps the check away from the
-    // cold-start critical path (§7 R5) — its result targets the NEXT launch.
-    // Unless the previous process died mid-round (residual incomplete
-    // marker), in which case every launch second counts (§11.4).
+// Process-wide round state, set up by whichever launch path needs a round
+// first: the delayed cold-start check or the tvOS purged-version restore.
++ (void)prepareProcess:(NSString *)launchRolledBackVersion {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         pushyRoundDone = dispatch_semaphore_create(0);
@@ -2262,12 +2338,24 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
         pushyProcessAnchorUptime = PushyMonotonicNow();
         pushyLaunchRolledBackForRescue = [launchRolledBackVersion copy];
         pushyNativeCheckReady.store(true);
-        NSUserDefaults *defaults = PushyDefaults();
         // The crash-hold rescue shares the orchestrator's rollout gate: no
         // persisted config, no handler (§11.3).
-        if ([defaults stringForKey:keyNativeConfig].length > 0) {
+        if ([PushyDefaults() stringForKey:keyNativeConfig].length > 0) {
             PushyInstallCrashRescueHandler();
         }
+    });
+}
+
++ (void)scheduleFromColdStart:(NSString *)launchRolledBackVersion {
+#if !DEBUG
+    // Once per process; a few seconds of delay keeps the check away from the
+    // cold-start critical path (§7 R5) — its result targets the NEXT launch.
+    // Unless the previous process died mid-round (residual incomplete
+    // marker), in which case every launch second counts (§11.4).
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        [self prepareProcess:launchRolledBackVersion];
+        NSUserDefaults *defaults = PushyDefaults();
         int64_t delaySeconds =
             [defaults objectForKey:keyNativeCheckIncomplete] != nil ? 0 : 5;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, delaySeconds * NSEC_PER_SEC),
@@ -2283,6 +2371,43 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
     });
 #endif
 }
+
+#if TARGET_OS_TV && !DEBUG
+// Runs this process's round before the first bundle loads, blocking the
+// caller for at most kPushyPurgeRestoreBudget, and activates whatever it
+// installs. The state no longer has a current version, so the server answers
+// with the latest version for the packaged bundle. Returns YES when the
+// round finished in time — the caller then resolves the launch bundle again.
+// The round stops at the same deadline, keeping a partial download for the
+// resumable retry of the next check; the launch then uses the packaged bundle.
++ (BOOL)restorePurgedLaunch:(NSString *)purgedVersion
+                 rolledBack:(NSString *)launchRolledBackVersion {
+    [self prepareProcess:launchRolledBackVersion];
+    if (![self hasRunnableConfig]) {
+        RCTLogWarn(@"RCTPushy -- version %@ was purged and no native check is "
+                   @"configured; launching the packaged bundle", purgedVersion);
+        return NO;
+    }
+    pushyPurgeRestoreActive.store(true);
+    NSTimeInterval deadline = PushyMonotonicNow() + kPushyPurgeRestoreBudget;
+    dispatch_semaphore_t done = dispatch_semaphore_create(0);
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        [self startRoundWithDeadline:deadline];
+        dispatch_semaphore_signal(done);
+    });
+    // The round honours the deadline itself; the extra second only covers
+    // its last commit.
+    if (dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW,
+            (int64_t)((kPushyPurgeRestoreBudget + 1) * NSEC_PER_SEC))) != 0) {
+        RCTLogWarn(@"RCTPushy -- purged version restore timed out; launching the packaged bundle");
+        return NO;
+    }
+    NSDictionary *result = pushyHostRoundResult;
+    RCTLogInfo(@"RCTPushy -- purged version %@ restore: %@ %@ %@", purgedVersion,
+               result[@"status"], result[@"reason"], result[@"hash"]);
+    return YES;
+}
+#endif
 
 + (NSDictionary *)checkAndUpdate {
 #if DEBUG
@@ -2532,7 +2657,7 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
     cInfo.Set("rnu", config.Get("rnu"));
     cInfo.Set("rn", config.Get("rn"));
     cInfo.Set("os", flowjson::Value::String(PushyToStdString([NSString
-        stringWithFormat:@"ios %@", [[UIDevice currentDevice] systemVersion]])));
+        stringWithFormat:@"%@ %@", PushyOsName, [[UIDevice currentDevice] systemVersion]])));
     cInfo.Set("uuid", flowjson::Value::String(PushyToStdString(uuid)));
 
     flowjson::Value input = flowjson::Value::Object();
@@ -2635,12 +2760,17 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
     if (pushyCrashRescueActive.load()) {
         versionInfo[@"crashRescue"] = @YES;
     }
+    if (pushyPurgeRestoreActive.load()) {
+        versionInfo[@"purgeRestore"] = @YES;
+    }
     // Silent strategies or a server-marked forceBoot version (per-version
     // remote override — the brick rescue) activate for the next launch;
     // otherwise activation stays with the JS side (§6/§10.1). Unless a crash
     // is being held: JS is dead, deferring to it would leave the fix on disk
-    // forever (§11.3).
-    BOOL activate = decision.Get("activate").Truthy() || pushyCrashRescueActive.load();
+    // forever (§11.3). Or the launch is blocked on reinstalling a version
+    // tvOS purged: JS has not started, and the whole point is to boot it.
+    BOOL activate = decision.Get("activate").Truthy() || pushyCrashRescueActive.load()
+        || pushyPurgeRestoreActive.load();
     BOOL committed = [self commitRoundWithGeneration:resetGeneration
                                             hashInfo:@{@"hash": hash, @"info": versionInfo}
                                             activate:activate ? hash : nil

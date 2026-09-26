@@ -47,6 +47,12 @@ State ClearRollbackMark(const State& state);
 
 State Rollback(const State& state);
 
+// The OS deleted the installed versions' files (tvOS purges Caches while the
+// app is not running): they were not rejected, so unlike Rollback this leaves
+// no rolled-back mark that would make the next check skip reinstalling them.
+// An existing mark (a rollback earlier in this launch) is kept.
+State ForgetPurgedVersions(const State& state);
+
 bool ShouldRollbackForBrokenFirstLoad(const State& state);
 
 LaunchDecision ResolveLaunchState(

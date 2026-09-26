@@ -43,7 +43,13 @@ Pod::Spec.new do |s|
   end
 
   # Set platform based on whether it's a valid Expo project and if we can parse its target
-  final_ios_deployment_target = '11.0' # Default target
+  # React Native's own minimum (defined by react_native_pods.rb, which the
+  # Podfile loads before evaluating podspecs). The pod platform version also
+  # becomes the deployment target of the privacy resource bundle target,
+  # which React Native's post_install does not raise: Xcode 27 rejects
+  # anything below 15.0 there, so a hard-coded 11.0 fails the build.
+  final_ios_deployment_target =
+    defined?(min_ios_version_supported) ? min_ios_version_supported : '11.0'
 
   if valid_expo_project
     # --- Try to find and parse ExpoModulesCore.podspec only if it's an Expo project ---
@@ -76,7 +82,10 @@ Pod::Spec.new do |s|
     end
   end
 
-  s.platforms = { :ios => final_ios_deployment_target }
+  # tvOS (react-native-tvos) shares the iOS sources; the only platform
+  # differences live behind TARGET_OS_TV in RCTPushy.mm (download directory,
+  # purged-cache recovery).
+  s.platforms = { :ios => final_ios_deployment_target, :tvos => final_ios_deployment_target }
 
   s.name         = package['name']
   s.version      = package['version']

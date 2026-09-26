@@ -57,6 +57,10 @@ describe('getUpdateMetadata', () => {
     mockCore({ currentVersionInfo: { forceBootRescue: true } });
     const forced = await importFreshMetadata('meta-forceboot');
     expect(forced.getUpdateMetadata().rescueSource).toBe('forceBoot');
+
+    mockCore({ currentVersionInfo: { purgeRestore: true } });
+    const restored = await importFreshMetadata('meta-purge-restore');
+    expect(restored.getUpdateMetadata().rescueSource).toBe('purgeRestore');
   });
 
   test('tolerates the embedded bundle and a rollback launch', async () => {
