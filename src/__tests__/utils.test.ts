@@ -148,6 +148,30 @@ describe('fetchWithTimeout', () => {
     expect(capturedSignal?.aborted).toBe(true);
   });
 
+  test('a caller signal passed separately cancels the request, not as a timeout', async () => {
+    let capturedSignal: AbortSignal | undefined;
+    (globalThis as any).fetch = mock((_url: string, params: any) => {
+      capturedSignal = params?.signal;
+      return new Promise((_, reject) => {
+        params?.signal?.addEventListener('abort', () =>
+          reject(new Error('Aborted'))
+        );
+      });
+    });
+    const caller = new AbortController();
+
+    const pending = fetchWithTimeout(
+      'https://example.com/slow',
+      { method: 'POST' },
+      10_000,
+      caller.signal
+    );
+    caller.abort();
+
+    await expect(pending).rejects.toThrow('Aborted');
+    expect(capturedSignal?.aborted).toBe(true);
+  });
+
   test('resolves normally before the timeout', async () => {
     const response = { ok: true } as Response;
     (globalThis as any).fetch = mock(async () => response);

@@ -132,7 +132,11 @@ export const computeProgress = (received: number, total: number): number =>
 export const fetchWithTimeout = (
   url: string,
   params: Parameters<typeof fetch>[1],
-  timeoutMs = DEFAULT_FETCH_TIMEOUT_MS
+  timeoutMs = DEFAULT_FETCH_TIMEOUT_MS,
+  // Taken apart from params: merging it into the RequestInit only type-checks
+  // when the global AbortSignal and fetch's RequestInit come from the same
+  // declarations, which RN 0.87 globals mixed with DOM/Node/bun types break.
+  signal?: AbortSignal
 ): Promise<Response> => {
   // AbortController landed in the RN fetch polyfill around 0.60; we support
   // older peers, so fall back to a plain timer race when it is unavailable
@@ -161,7 +165,8 @@ export const fetchWithTimeout = (
   // The timeout controller replaces params.signal on the fetch call, so a
   // caller-provided signal (e.g. the hedged endpoint race cancelling losers)
   // must be chained onto it manually.
-  const externalSignal = (params as any)?.signal as AbortSignal | undefined;
+  const externalSignal =
+    signal ?? ((params as any)?.signal as AbortSignal | undefined);
   const onExternalAbort = () => controller.abort();
   if (externalSignal?.aborted) {
     controller.abort();

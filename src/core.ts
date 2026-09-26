@@ -3,6 +3,12 @@ import { UpdateError } from './error';
 import i18n from './i18n';
 import { emptyModule, error, log } from './utils';
 
+// RN's JS global object. Declared locally because RN 0.87's own typings no
+// longer define `global` (only @types/node did), and this source is
+// type-checked in consumer projects; the module-scoped declaration also
+// shadows @types/node's without conflicting.
+declare const global: any;
+
 /* eslint-disable @react-native/no-deep-imports */
 const {
   version: v,
@@ -10,7 +16,7 @@ const {
 const RNVersion = `${v.major}.${v.minor}.${v.patch}`;
 const isTurboModuleEnabled =
   // https://github.com/facebook/react-native/pull/48362
-  (global as any).__turboModuleProxy || (global as any).RN$Bridgeless;
+  global.__turboModuleProxy || global.RN$Bridgeless;
 
 const isWebPlatform = Platform.OS === 'web';
 
