@@ -61,6 +61,13 @@ describe('getUpdateMetadata', () => {
     mockCore({ currentVersionInfo: { purgeRestore: true } });
     const restored = await importFreshMetadata('meta-purge-restore');
     expect(restored.getUpdateMetadata().rescueSource).toBe('purgeRestore');
+
+    // One activation can carry several markers; the highest-priority wins.
+    mockCore({
+      currentVersionInfo: { forceBootRescue: true, purgeRestore: true },
+    });
+    const both = await importFreshMetadata('meta-forceboot-purge');
+    expect(both.getUpdateMetadata().rescueSource).toBe('forceBoot');
   });
 
   test('tolerates the embedded bundle and a rollback launch', async () => {

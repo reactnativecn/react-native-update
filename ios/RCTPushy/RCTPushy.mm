@@ -754,7 +754,8 @@ static void PushySwitchVersionLocked(NSString *hash) {
                      responseText:(NSString *)responseText
                           request:(NSString *)requestBody
                            config:(NSString *)configJson
-                       responseAt:(long long)responseAtSeconds;
+                       responseAt:(long long)responseAtSeconds
+                        activated:(BOOL *)activatedOut;
 @end
 
 // One round per process, whoever starts it first — the delayed cold-start
@@ -767,9 +768,15 @@ static std::atomic<bool> pushyRoundCompleted{false};
 // it downloads (§11.3).
 static std::atomic<bool> pushyCrashRescueActive{false};
 static std::atomic<bool> pushyRescueAttempted{false};
-// Set when a launch blocks on reinstalling a version tvOS purged: the round
-// activates what it downloads, JS has not started to decide.
+// Set when this process's round is the tvOS purged-version restore.
 static std::atomic<bool> pushyPurgeRestoreActive{false};
+// True while +bundleURL waits for that restore. Only then may the round
+// activate what it downloads on its own (JS has not started to decide), since
+// the launch resolves the bundle again afterwards. Closed once the wait ends,
+// timeout or not; guarded by the state lock that every activation commits
+// under, so a commit lands either before the close (and launches) or after it
+// (and is left to JS) — never selected behind the packaged bundle's back.
+static bool pushyPurgeRestoreWindowOpen = false;
 static dispatch_semaphore_t pushyRoundDone;
 static NSString *pushyLaunchRolledBackForRescue = nil;
 // A version this process downloaded but left for JS to activate. If the
@@ -2374,12 +2381,13 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
 
 #if TARGET_OS_TV && !DEBUG
 // Runs this process's round before the first bundle loads, blocking the
-// caller for at most kPushyPurgeRestoreBudget, and activates whatever it
-// installs. The state no longer has a current version, so the server answers
-// with the latest version for the packaged bundle. Returns YES when the
-// round finished in time — the caller then resolves the launch bundle again.
-// The round stops at the same deadline, keeping a partial download for the
-// resumable retry of the next check; the launch then uses the packaged bundle.
+// caller for at most kPushyPurgeRestoreBudget. The state no longer has a
+// current version, so the server answers with the latest version for the
+// packaged bundle, and the round activates it while the restore window is
+// open. Returns NO when no round can run; otherwise the caller must resolve
+// the launch bundle again: it launches whatever was activated before the
+// window closed, or the packaged bundle. The round stops at the same
+// deadline, keeping a partial download for the next check to resume.
 + (BOOL)restorePurgedLaunch:(NSString *)purgedVersion
                  rolledBack:(NSString *)launchRolledBackVersion {
     [self prepareProcess:launchRolledBackVersion];
@@ -2388,6 +2396,9 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
                    @"configured; launching the packaged bundle", purgedVersion);
         return NO;
     }
+    PushyWithStateLock(^{
+        pushyPurgeRestoreWindowOpen = true;
+    });
     pushyPurgeRestoreActive.store(true);
     NSTimeInterval deadline = PushyMonotonicNow() + kPushyPurgeRestoreBudget;
     dispatch_semaphore_t done = dispatch_semaphore_create(0);
@@ -2395,16 +2406,21 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
         [self startRoundWithDeadline:deadline];
         dispatch_semaphore_signal(done);
     });
-    // The round honours the deadline itself; the extra second only covers
-    // its last commit.
-    if (dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW,
-            (int64_t)((kPushyPurgeRestoreBudget + 1) * NSEC_PER_SEC))) != 0) {
-        RCTLogWarn(@"RCTPushy -- purged version restore timed out; launching the packaged bundle");
-        return NO;
+    BOOL timedOut = dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW,
+        (int64_t)(kPushyPurgeRestoreBudget * NSEC_PER_SEC))) != 0;
+    // The round's deadline does not bound a slow response (the request
+    // timeout is an idle timeout) nor a version already on disk, so the close
+    // is what stops a late activation — not the deadline.
+    PushyWithStateLock(^{
+        pushyPurgeRestoreWindowOpen = false;
+    });
+    if (timedOut) {
+        RCTLogWarn(@"RCTPushy -- purged version %@ restore timed out", purgedVersion);
+    } else {
+        NSDictionary *result = pushyHostRoundResult;
+        RCTLogInfo(@"RCTPushy -- purged version %@ restore: %@ %@ %@", purgedVersion,
+                   result[@"status"], result[@"reason"], result[@"hash"]);
     }
-    NSDictionary *result = pushyHostRoundResult;
-    RCTLogInfo(@"RCTPushy -- purged version %@ restore: %@ %@ %@", purgedVersion,
-               result[@"status"], result[@"reason"], result[@"hash"]);
     return YES;
 }
 #endif
@@ -2555,7 +2571,8 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
                                         responseText:nil
                                              request:nil
                                               config:nil
-                                          responseAt:0];
+                                          responseAt:0
+                                           activated:NULL];
     if (committed) {
         @synchronized (self) {
             pushyUnactivatedHash = nil;
@@ -2705,7 +2722,8 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
                            responseText:responseText
                                 request:body
                                  config:configJson
-                             responseAt:responseAtSeconds];
+                             responseAt:responseAtSeconds
+                              activated:NULL];
         pushyHostRoundResult = committed
             ? PushyHostResult(@"noUpdate", PushyFromStdString(decision.Get("reason").AsString()), nil, NO)
             : PushyHostResult(@"cancelled", @"reset", nil, NO);
@@ -2734,7 +2752,8 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
                            responseText:responseText
                                 request:body
                                  config:configJson
-                             responseAt:responseAtSeconds];
+                             responseAt:responseAtSeconds
+                              activated:NULL];
         pushyHostRoundResult = committed
             ? PushyHostResult(@"failed", @"download_failed", nil, NO)
             : PushyHostResult(@"cancelled", @"reset", nil, NO);
@@ -2760,24 +2779,25 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
     if (pushyCrashRescueActive.load()) {
         versionInfo[@"crashRescue"] = @YES;
     }
-    if (pushyPurgeRestoreActive.load()) {
-        versionInfo[@"purgeRestore"] = @YES;
-    }
     // Silent strategies or a server-marked forceBoot version (per-version
     // remote override — the brick rescue) activate for the next launch;
     // otherwise activation stays with the JS side (§6/§10.1). Unless a crash
     // is being held: JS is dead, deferring to it would leave the fix on disk
     // forever (§11.3). Or the launch is blocked on reinstalling a version
-    // tvOS purged: JS has not started, and the whole point is to boot it.
+    // tvOS purged: JS has not started, and the whole point is to boot it —
+    // commitRoundWithGeneration drops that one once the restore window closed.
     BOOL activate = decision.Get("activate").Truthy() || pushyCrashRescueActive.load()
         || pushyPurgeRestoreActive.load();
+    BOOL activated = NO;
     BOOL committed = [self commitRoundWithGeneration:resetGeneration
                                             hashInfo:@{@"hash": hash, @"info": versionInfo}
                                             activate:activate ? hash : nil
                                         responseText:responseText
                                              request:body
                                               config:configJson
-                                          responseAt:responseAtSeconds];
+                                          responseAt:responseAtSeconds
+                                           activated:&activated];
+    activate = activated;
     if (!committed) {
         RCTLogInfo(@"RCTPushy -- native check: reset during round, dropping result");
     } else if (activate) {
@@ -2810,7 +2830,8 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
                      responseText:(NSString *)responseText
                           request:(NSString *)requestBody
                            config:(NSString *)configJson
-                       responseAt:(long long)responseAtSeconds {
+                       responseAt:(long long)responseAtSeconds
+                        activated:(BOOL *)activatedOut {
     // responseText is nil for the crash handler's activation-only commit
     // (activatePendingVersion): no round ran, so there is no cache to write.
     NSData *cacheData = nil;
@@ -2824,13 +2845,31 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
         cacheData = [NSJSONSerialization dataWithJSONObject:cacheEntry options:0 error:nil];
     }
     __block BOOL committed = NO;
+    __block BOOL activated = NO;
     PushyWithStateLock(^{
         if (pushyResetGeneration.load() != generation) {
             return;
         }
+        NSString *activation = hashToActivate;
+        NSDictionary *info = hashInfoEntry[@"info"];
+        // The tvOS purged-version restore round (a round commit, not the
+        // crash handler's activation-only one): it may take over this launch
+        // only while +bundleURL still waits for it; after that the version is
+        // left to JS unless a crash is being held (JS is dead then).
+        if (responseText != nil && pushyPurgeRestoreActive.load()) {
+            if (pushyPurgeRestoreWindowOpen) {
+                if (activation != nil && info != nil) {
+                    NSMutableDictionary *marked = [info mutableCopy];
+                    marked[@"purgeRestore"] = @YES;
+                    info = marked;
+                }
+            } else if (!pushyCrashRescueActive.load()) {
+                activation = nil;
+            }
+        }
         NSUserDefaults *defaults = PushyDefaults();
         if (hashInfoEntry != nil) {
-            NSData *infoData = [NSJSONSerialization dataWithJSONObject:hashInfoEntry[@"info"]
+            NSData *infoData = [NSJSONSerialization dataWithJSONObject:info
                                                               options:0
                                                                 error:nil];
             if (infoData != nil) {
@@ -2838,8 +2877,9 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
                              forKey:PushyHashInfoKey(hashInfoEntry[@"hash"])];
             }
         }
-        if (hashToActivate != nil) {
-            PushySwitchVersionLocked(hashToActivate);
+        if (activation != nil) {
+            PushySwitchVersionLocked(activation);
+            activated = YES;
         }
         if (cacheData != nil) {
             [defaults setObject:[[NSString alloc] initWithData:cacheData encoding:NSUTF8StringEncoding]
@@ -2847,6 +2887,9 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
         }
         committed = YES;
     });
+    if (activatedOut != NULL) {
+        *activatedOut = activated;
+    }
     return committed;
 }
 
