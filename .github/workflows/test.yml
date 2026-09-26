@@ -79,3 +79,15 @@ jobs:
           sudo apt-get install -y clang
           FUZZ=1 ./scripts/test-update-flow-core.sh
           FUZZ=1 ./scripts/test-patch-core.sh
+
+  ios-purge-restore-test:
+    name: Native purge-restore ordering
+    runs-on: macos-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v7
+      # Foundation-only executable: exercises the production tvOS Release
+      # methods without RN, CocoaPods, a simulator, or real network delays.
+      - name: Run deterministic native ordering tests and negative controls
+        run: SANITIZE=1 VERIFY_REGRESSIONS=1 bash scripts/test-ios-purge-restore.sh
