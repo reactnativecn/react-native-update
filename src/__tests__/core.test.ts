@@ -105,6 +105,48 @@ describe('core info parsing', () => {
   });
 });
 
+describe('client os label', () => {
+  const mockPlatform = (platform: Record<string, unknown>) => {
+    mock.module('react-native', () => ({
+      Platform: platform,
+      DeviceEventEmitter: {
+        addListener: mock(() => ({ remove: mock(() => {}) })),
+      },
+      NativeModules: {
+        Pushy: {
+          currentVersionInfo: '{}',
+          downloadRootDir: '/tmp',
+          packageVersion: '1.0.0',
+          currentVersion: '',
+          isFirstTime: false,
+          rolledBackVersion: '',
+          buildTime: '1',
+          uuid: 'existing-uuid',
+          setLocalHashInfo: mock(() => {}),
+          getLocalHashInfo: mock(() => Promise.resolve('{}')),
+          setUuid: mock(() => {}),
+        },
+      },
+      NativeEventEmitter: class {
+        addListener = mock(() => ({ remove: mock(() => {}) }));
+      },
+    }));
+  };
+
+  test('labels tvOS apart from iOS', async () => {
+    mockPlatform({ OS: 'ios', Version: '18.0', isTV: true });
+    const { cInfo } = await importFreshCore('os-tvos');
+    expect(cInfo.os).toBe('tvos 18.0');
+  });
+
+  test('keeps the platform name elsewhere, Android TV included', async () => {
+    mockPlatform({ OS: 'ios', Version: '17.5', isTV: false });
+    expect((await importFreshCore('os-ios')).cInfo.os).toBe('ios 17.5');
+    mockPlatform({ OS: 'android', Version: 34, isTV: true });
+    expect((await importFreshCore('os-androidtv')).cInfo.os).toBe('android 34');
+  });
+});
+
 describe('web platform', () => {
   const origDev = (globalThis as any).__DEV__;
   afterEach(() => {

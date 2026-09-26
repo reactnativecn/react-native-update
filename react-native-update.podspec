@@ -82,7 +82,10 @@ Pod::Spec.new do |s|
     end
   end
 
-  s.platforms = { :ios => final_ios_deployment_target }
+  # tvOS (react-native-tvos) shares the iOS sources; the only platform
+  # differences live behind TARGET_OS_TV in RCTPushy.mm (download directory,
+  # purged-cache recovery).
+  s.platforms = { :ios => final_ios_deployment_target, :tvos => final_ios_deployment_target }
 
   s.name         = package['name']
   s.version      = package['version']

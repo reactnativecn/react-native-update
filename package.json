@@ -72,7 +72,7 @@
   },
   "peerDependencies": {
     "react": ">=16.8.0",
-    "react-native": ">=0.59.0"
+    "react-native": "*"
   },
   "homepage": "https://github.com/reactnativecn/react-native-update#readme",
   "dependencies": {

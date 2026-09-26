@@ -76,6 +76,15 @@ State Rollback(const State& state) {
   return next;
 }
 
+State ForgetPurgedVersions(const State& state) {
+  State next = state;
+  next.current_version.clear();
+  next.last_version.clear();
+  next.first_time = false;
+  next.first_time_ok = true;
+  return next;
+}
+
 bool ShouldRollbackForBrokenFirstLoad(const State& state) {
   return !state.first_time && !state.first_time_ok;
 }

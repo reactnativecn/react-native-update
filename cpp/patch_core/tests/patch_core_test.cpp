@@ -863,6 +863,31 @@ void TestStateCoreRollbackToEmptyVersion() {
   Expect(rolled.first_time_ok, "first_time_ok should be true after rollback");
 }
 
+void TestStateCoreForgetPurgedVersions() {
+  State state;
+  state.package_version = "1.0";
+  state.build_time = "123";
+  state.current_version = "current";
+  state.last_version = "previous";
+  state.first_time = true;
+  state.first_time_ok = false;
+
+  State forgot = pushy::state::ForgetPurgedVersions(state);
+  Expect(forgot.current_version.empty(), "forget should clear current_version");
+  Expect(forgot.last_version.empty(), "forget should clear last_version");
+  Expect(forgot.rolled_back_version.empty(), "forget must not leave a rollback marker");
+  Expect(!forgot.first_time, "forget should clear first_time");
+  Expect(forgot.first_time_ok, "forget should reset first_time_ok");
+  ExpectEq(forgot.package_version, "1.0", "forget should keep package_version");
+  ExpectEq(forgot.build_time, "123", "forget should keep build_time");
+
+  state.rolled_back_version = "rolled";
+  ExpectEq(
+      pushy::state::ForgetPurgedVersions(state).rolled_back_version,
+      "rolled",
+      "forget should keep an existing rollback marker");
+}
+
 void TestStateCoreResolveLaunchNoCurrentVersion() {
   State state;
   state.current_version = "";
@@ -1082,6 +1107,7 @@ int main(int argc, char** argv) {
       {"ArchivePatchCoreSupportsCustomBundlePatchEntry", TestArchivePatchCoreSupportsCustomBundlePatchEntry},
       {"ArchivePatchCoreHarmonyBundlePatchFromPackage", TestArchivePatchCoreHarmonyBundlePatchFromPackage},
       {"StateCoreRollbackToEmptyVersion", TestStateCoreRollbackToEmptyVersion},
+      {"StateCoreForgetPurgedVersions", TestStateCoreForgetPurgedVersions},
       {"StateCoreResolveLaunchNoCurrentVersion", TestStateCoreResolveLaunchNoCurrentVersion},
       {"StateCoreSwitchToSameVersion", TestStateCoreSwitchToSameVersion},
       {"Sha256KnownVectors", TestSha256KnownVectors},
