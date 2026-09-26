@@ -44,6 +44,30 @@ post-reset filesystem cleanup. Bundle-existence checks use real temporary files.
 The production state lock is real; every defaults mutation asserts ownership of
 that same `os_unfair_lock`.
 
+## Harness contracts
+
+This executable is not a stricter warning gate for the extracted product code.
+`-Wall -Wextra` keeps warnings visible, without a blanket `-Werror`. The only
+explicit warning promoted to an error is `objc-method-access`: an undeclared
+selector means the test host no longer models a collaborator it needs.
+
+`TestDefaults` inherits from `NSObject`, **not** `NSUserDefaults`. Its six explicit
+accessors use a private, per-instance dictionary. A test-only type substitution,
+after importing Foundation, makes the extracted `NSUserDefaults *` declarations
+refer to this narrow interface. A newly used accessor such as `setBool:forKey:`
+or `boolForKey:` must be implemented deliberately; it cannot silently inherit a
+path into the test process's real preferences. Dynamic calls that erase the
+static type hit a fatal `doesNotRecognizeSelector:` backstop, which production
+exception handlers cannot swallow.
+
+Every test process runs `defaults_isolation` before the ordering cases, verifying
+fresh-instance isolation, the supported accessors and snapshot independence.
+With `VERIFY_REGRESSIONS=1`, compile probes prove that an ordinary warning remains
+non-fatal and both unsupported typed selectors are rejected. Separate subprocess
+probes send the same messages through `id` and require the exact fail-fast runtime
+diagnostic. No probe instantiates a real `NSUserDefaults` object or writes a real
+preferences domain.
+
 ## Orderings
 
 | Test | Enforced ordering | Assertions |
