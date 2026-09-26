@@ -20,6 +20,15 @@ Pod::Spec.new do |s|
      # Silently ignore errors during check
   end
 
+  # expo-modules-core is a dependency of expo, not of the app: resolve it from
+  # expo's own location. A bare require from this podspec's directory misses
+  # it when npm nests it under expo/node_modules (seen with react-native-tvos),
+  # which left EXPO_SUPPORTS_BUNDLEURL unset; the createBridge fallback that
+  # selects no longer exists in ExpoModulesCore (SDK 57), so the build failed.
+  expo_modules_core_package_json_js =
+    "require.resolve('expo-modules-core/package.json', " \
+    "{ paths: [require('path').dirname(require.resolve('expo/package.json'))] })"
+
   # Determine final validity by checking Podfile presence AND Expo version
   valid_expo_project = false # Default
   if is_expo_in_podfile
@@ -55,7 +64,7 @@ Pod::Spec.new do |s|
     # --- Try to find and parse ExpoModulesCore.podspec only if it's an Expo project ---
     parsed_expo_ios_target = nil
     expo_modules_core_podspec_path = begin
-        package_json_path = `node -p "require.resolve('expo-modules-core/package.json')"`.strip
+        package_json_path = `node -p "#{expo_modules_core_package_json_js}"`.strip
         File.join(File.dirname(package_json_path), 'ExpoModulesCore.podspec') if $?.success? && package_json_path && !package_json_path.empty?
     rescue
         nil
@@ -181,8 +190,7 @@ Pod::Spec.new do |s|
 
     # 1. Try executing node to get the version string
     expo_modules_core_version_str = begin
-      # Use node to directly require expo-modules-core/package.json and get its version
-      `node --print \"require('expo-modules-core/package.json').version\"` # Execute, keep raw output
+      `node --print "require(#{expo_modules_core_package_json_js}).version"` # Execute, keep raw output
     rescue
       # Node command failed (e.g., node not found, package not found). Return empty string.
       ''
