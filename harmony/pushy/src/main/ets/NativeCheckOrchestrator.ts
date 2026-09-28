@@ -3,8 +3,8 @@ import deviceInfo from '@ohos.deviceInfo';
 import logger from './Logger';
 import NativePatchCore from './NativePatchCore';
 import type { UpdateContext } from './UpdateContext';
-import { NativeUpdateRound, nativeUpdateResult } from './NativeUpdateResult';
-import type { NativeUpdateResult } from './NativeUpdateResult';
+import { BundlePreparationRound, bundlePreparationResult } from './BundlePreparationResult';
+import type { BundlePreparationResult } from './BundlePreparationResult';
 import { isSafePathComponent } from './PathUtils';
 import { monotonicNowMs } from './MonotonicClock';
 import {
@@ -109,18 +109,18 @@ interface RespCacheEntry {
 
 let scheduled = false;
 // The host and delayed check use one promise, including its settled result.
-const hostRound = new NativeUpdateRound();
+const hostRound = new BundlePreparationRound();
 let scheduledContext: UpdateContext | undefined;
 let scheduledRollback = '';
 let roundGeneration = -1;
 let roundConfigGeneration = -1;
 let roundConfigJson: string | undefined;
-let roundResult = nativeUpdateResult('failed', 'check_failed');
+let roundResult = bundlePreparationResult('failed', 'check_failed');
 
 function startNativeRound(
   context: UpdateContext,
   launchRolledBackVersion: string,
-): Promise<NativeUpdateResult> {
+): Promise<BundlePreparationResult> {
   const preflight = configurationError(context);
   if (preflight !== undefined) {
     return Promise.resolve(preflight);
@@ -130,7 +130,7 @@ function startNativeRound(
       await runOnce(context, launchRolledBackVersion);
     } catch (e) {
       logger.error(TAG, `native check failed: ${getErrorMessage(e)}`);
-      roundResult = nativeUpdateResult('failed', 'internal_error');
+      roundResult = bundlePreparationResult('failed', 'internal_error');
     }
     return roundResult;
   });
@@ -138,62 +138,62 @@ function startNativeRound(
 
 // A preflight skip must not consume the process's only round: configuration
 // may arrive after the delayed startup timer on a first-ever launch.
-function configurationError(context: UpdateContext): NativeUpdateResult | undefined {
+function configurationError(context: UpdateContext): BundlePreparationResult | undefined {
   const json = context.getKv(KEY_CONFIG);
   if (!json) {
-    return nativeUpdateResult('skipped', 'not_configured');
+    return bundlePreparationResult('skipped', 'not_configured');
   }
   try {
     const config = JSON.parse(json) as NativeConfig;
     if (!config || typeof config !== 'object' || Array.isArray(config)) {
-      return nativeUpdateResult('failed', 'invalid_config');
+      return bundlePreparationResult('failed', 'invalid_config');
     }
     if (config.disabled) {
-      return nativeUpdateResult('skipped', 'disabled');
+      return bundlePreparationResult('skipped', 'disabled');
     }
     if (typeof config.appKey !== 'string' || config.appKey.trim().length === 0) {
-      return nativeUpdateResult('failed', 'invalid_config');
+      return bundlePreparationResult('failed', 'invalid_config');
     }
   } catch (e) {
-    return nativeUpdateResult('failed', 'invalid_config');
+    return bundlePreparationResult('failed', 'invalid_config');
   }
   return undefined;
 }
 
-export async function checkAndUpdateNative(
+export async function prepareBundleNative(
   context: UpdateContext,
-): Promise<NativeUpdateResult> {
+): Promise<BundlePreparationResult> {
   if (scheduledContext !== context) {
-    return nativeUpdateResult('skipped', 'not_initialized');
+    return bundlePreparationResult('skipped', 'not_initialized');
   }
   const configJson = context.getKv(KEY_CONFIG);
   if (!configJson) {
-    return nativeUpdateResult('skipped', 'not_configured');
+    return bundlePreparationResult('skipped', 'not_configured');
   }
   try {
     const config = JSON.parse(configJson) as NativeConfig;
     if (!config || typeof config !== 'object' || Array.isArray(config)) {
-      return nativeUpdateResult('failed', 'invalid_config');
+      return bundlePreparationResult('failed', 'invalid_config');
     }
     if (config.disabled) {
-      return nativeUpdateResult('skipped', 'disabled');
+      return bundlePreparationResult('skipped', 'disabled');
     }
     if (typeof config.appKey !== 'string' || !config.appKey) {
-      return nativeUpdateResult('failed', 'invalid_config');
+      return bundlePreparationResult('failed', 'invalid_config');
     }
   } catch (e) {
-    return nativeUpdateResult('failed', 'invalid_config');
+    return bundlePreparationResult('failed', 'invalid_config');
   }
   const result = await startNativeRound(context, scheduledRollback);
   if (roundConfigGeneration !== context.getNativeConfigGeneration()
       || configJson !== roundConfigJson || configJson !== context.getKv(KEY_CONFIG)) {
-    return nativeUpdateResult('cancelled', 'config_changed');
+    return bundlePreparationResult('cancelled', 'config_changed');
   }
   if (roundGeneration !== context.getResetGeneration()) {
-    return nativeUpdateResult('cancelled', 'reset');
+    return bundlePreparationResult('cancelled', 'reset');
   }
   // Do not let a caller mutate the cached result observed by later callers.
-  return nativeUpdateResult(result.status, result.reason, result.hash, result.activated);
+  return bundlePreparationResult(result.status, result.reason, result.hash, result.activated);
 }
 
 // JS 在本进程内已拿到有效检查响应时对应的配置 JSON(markJsCheckCompleted)。
@@ -250,32 +250,32 @@ async function runOnce(
   const resetGeneration = context.getResetGeneration();
   roundGeneration = resetGeneration;
   roundConfigGeneration = context.getNativeConfigGeneration();
-  roundResult = nativeUpdateResult('failed', 'check_failed');
+  roundResult = bundlePreparationResult('failed', 'check_failed');
   const configJson = context.getKv(KEY_CONFIG);
   roundConfigJson = configJson;
   if (!configJson) {
     // No persisted configuration: report the rollout gate to native callers.
-    roundResult = nativeUpdateResult('skipped', 'not_configured');
+    roundResult = bundlePreparationResult('skipped', 'not_configured');
     return;
   }
   let config: NativeConfig;
   try {
     config = JSON.parse(configJson) as NativeConfig;
     if (!config || typeof config !== 'object' || Array.isArray(config)) {
-      roundResult = nativeUpdateResult('failed', 'invalid_config');
+      roundResult = bundlePreparationResult('failed', 'invalid_config');
       return;
     }
   } catch (e) {
-    roundResult = nativeUpdateResult('failed', 'invalid_config');
+    roundResult = bundlePreparationResult('failed', 'invalid_config');
     return;
   }
   if (config.disabled) {
-    roundResult = nativeUpdateResult('skipped', 'disabled');
+    roundResult = bundlePreparationResult('skipped', 'disabled');
     return;
   }
   const appKey = config.appKey ?? '';
   if (!appKey) {
-    roundResult = nativeUpdateResult('failed', 'invalid_config');
+    roundResult = bundlePreparationResult('failed', 'invalid_config');
     return;
   }
   // 从这里起本轮开始做真实工作:留下面包屑,死于轮中时下次启动零延迟续传。
@@ -371,7 +371,7 @@ async function runConfiguredRound(
   };
   const body = NativePatchCore.buildCheckRequestBody(JSON.stringify(input));
   if (!body) {
-    roundResult = nativeUpdateResult('failed', 'invalid_request');
+    roundResult = bundlePreparationResult('failed', 'invalid_request');
     return;
   }
 
@@ -390,7 +390,7 @@ async function runConfiguredRound(
     config.afterDownload ?? '',
   );
   if (!decisionJson) {
-    roundResult = nativeUpdateResult('failed', 'invalid_response');
+    roundResult = bundlePreparationResult('failed', 'invalid_response');
     return;
   }
   const decision = JSON.parse(decisionJson) as Decision;
@@ -403,15 +403,15 @@ async function runConfiguredRound(
       buildResponseCacheJson(configJson, body, responseText, responseAtSeconds),
     );
     roundResult = committed
-      ? nativeUpdateResult('noUpdate', decision.reason ?? '')
-      : nativeUpdateResult('cancelled', 'reset');
+      ? bundlePreparationResult('noUpdate', decision.reason ?? '')
+      : bundlePreparationResult('cancelled', 'reset');
     logger.info(TAG, `nothing to do (${decision.reason ?? ''})`);
     return;
   }
   const hash = decision.hash ?? '';
   if (!isSafePathComponent(hash)) {
     logger.warn(TAG, 'decision carries an unsafe hash, ignoring');
-    roundResult = nativeUpdateResult('failed', 'invalid_response');
+    roundResult = bundlePreparationResult('failed', 'invalid_response');
     return;
   }
 
@@ -438,8 +438,8 @@ async function runConfiguredRound(
       buildResponseCacheJson(configJson, body, responseText, responseAtSeconds),
     );
     roundResult = committed
-      ? nativeUpdateResult('failed', 'download_failed')
-      : nativeUpdateResult('cancelled', 'reset');
+      ? bundlePreparationResult('failed', 'download_failed')
+      : bundlePreparationResult('cancelled', 'reset');
     return;
   }
 
@@ -481,7 +481,7 @@ async function runConfiguredRound(
     );
   } catch (e) {
     logger.error(TAG, `commit failed: ${getErrorMessage(e)}`);
-    roundResult = nativeUpdateResult('failed', 'commit_failed');
+    roundResult = bundlePreparationResult('failed', 'commit_failed');
     return;
   }
   if (!committed) {
@@ -492,8 +492,8 @@ async function runConfiguredRound(
     logger.info(TAG, `downloaded ${hash}, activation left to JS`);
   }
   roundResult = committed
-    ? nativeUpdateResult('downloaded', '', hash, activate)
-    : nativeUpdateResult('cancelled', 'reset');
+    ? bundlePreparationResult('downloaded', '', hash, activate)
+    : bundlePreparationResult('cancelled', 'reset');
 }
 
 function buildResponseCacheJson(

@@ -1,5 +1,5 @@
 /** Options accepted by PushyFileJSBundleProvider.configure(). */
-export interface NativeUpdateConfig {
+export interface PushyConfiguration {
   appKey: string;
   /** Omitted: Pushy's built-in endpoints. Custom endpoints never inherit discovery URLs. */
   endpoints?: string[];
@@ -14,7 +14,7 @@ export interface NativeUpdateConfig {
   rn?: string;
 }
 
-interface PersistedNativeUpdateConfig {
+interface PersistedPushyConfiguration {
   appKey: string;
   endpoints: string[];
   queryUrls: string[];
@@ -67,7 +67,7 @@ function configUrls(values: string[], name: string, base: boolean): string[] {
 }
 
 /** Pure validation, before any native state is touched. Does not mutate options. */
-export function normalizeNativeUpdateConfig(options: NativeUpdateConfig): string {
+export function normalizePushyConfiguration(options: PushyConfiguration): string {
   if (!options || typeof options !== 'object' || Array.isArray(options)) {
     throw new Error('Invalid native configuration: expected an object');
   }
@@ -90,7 +90,7 @@ export function normalizeNativeUpdateConfig(options: NativeUpdateConfig): string
   if (options.disabled !== undefined && typeof options.disabled !== 'boolean') {
     throw new Error('Invalid native configuration: disabled must be a boolean');
   }
-  const result: PersistedNativeUpdateConfig = {
+  const result: PersistedPushyConfiguration = {
     appKey, endpoints, queryUrls, afterDownload, disabled: options.disabled ?? false,
     rnu: options.rnu === undefined ? '' : configString(options.rnu, 'rnu', true),
     rn: options.rn === undefined ? '' : configString(options.rn, 'rn', true),

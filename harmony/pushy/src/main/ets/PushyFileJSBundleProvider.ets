@@ -6,10 +6,10 @@ import {
 import common from '@ohos.app.ability.common';
 import fs from '@ohos.file.fs';
 import { UpdateContext } from './UpdateContext';
-import { checkAndUpdateNative } from './NativeCheckOrchestrator';
-import type { NativeUpdateResult } from './NativeUpdateResult';
-import { normalizeNativeUpdateConfig } from './NativeUpdateConfig';
-import type { NativeUpdateConfig } from './NativeUpdateConfig';
+import { prepareBundleNative } from './NativeCheckOrchestrator';
+import type { BundlePreparationResult } from './BundlePreparationResult';
+import { normalizePushyConfiguration } from './PushyConfiguration';
+import type { PushyConfiguration } from './PushyConfiguration';
 
 export class PushyFileJSBundleProvider extends JSBundleProvider {
   private updateContext: UpdateContext;
@@ -48,14 +48,14 @@ export class PushyFileJSBundleProvider extends JSBundleProvider {
   }
 
   /** Configure before normal bundle resolution; no JS or network work is required. */
-  async configure(options: NativeUpdateConfig): Promise<void> {
-    const config = normalizeNativeUpdateConfig(options);
+  async configure(options: PushyConfiguration): Promise<void> {
+    const config = normalizePushyConfiguration(options);
     await this.updateContext.setNativeConfig(config);
   }
 
   /** Call after the host's real bundle resolution; never resolves it again. */
-  checkAndUpdate(): Promise<NativeUpdateResult> {
-    return checkAndUpdateNative(this.updateContext);
+  prepareBundle(): Promise<BundlePreparationResult> {
+    return prepareBundleNative(this.updateContext);
   }
 
   getAppKeys(): string[] {

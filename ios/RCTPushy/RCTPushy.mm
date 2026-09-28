@@ -1,5 +1,5 @@
 #import "RCTPushy.h"
-#import "RCTPushyNativeConfig.h"
+#import "RCTPushyConfiguration.h"
 #import "RCTPushyDownloader.h"
 #import "ZipArchive.h"
 #include "../../cpp/patch_core/archive_limits.h"
@@ -738,7 +738,7 @@ static void PushySwitchVersionLocked(NSString *hash) {
 @interface RCTPushyOrchestrator : NSObject
 + (void)persistConfiguration:(NSString *)config;
 + (BOOL)hasRunnableConfig;
-+ (NSDictionary *)checkAndUpdate;
++ (NSDictionary *)prepareBundle;
 + (void)scheduleFromColdStart:(NSString *)launchRolledBackVersion;
 #if TARGET_OS_TV && !DEBUG
 + (BOOL)restorePurgedLaunch:(NSString *)purgedVersion
@@ -1104,11 +1104,11 @@ RCT_EXPORT_MODULE(RCTPushy);
 }
 
 + (void)configure:(NSDictionary<NSString *, id> *)options
-       completion:(RCTPushyNativeConfigurationCompletion)completion
+       completion:(RCTPushyConfigurationCompletion)completion
 {
     NSError *validationError = nil;
     // Snapshot nested mutable caller values before crossing a queue boundary.
-    NSString *config = RCTPushyNormalizeNativeConfig(options, &validationError);
+    NSString *config = RCTPushyNormalizeConfiguration(options, &validationError);
     static dispatch_queue_t configQueue;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
@@ -1132,7 +1132,7 @@ RCT_EXPORT_MODULE(RCTPushy);
     });
 }
 
-+ (void)checkAndUpdateWithCompletion:(RCTPushyNativeUpdateCompletion)completion
++ (void)prepareBundleWithCompletion:(RCTPushyBundlePreparationCompletion)completion
 {
     static dispatch_queue_t hostQueue;
     static dispatch_once_t once;
@@ -1142,7 +1142,7 @@ RCT_EXPORT_MODULE(RCTPushy);
     dispatch_async(hostQueue, ^{
         NSDictionary *result;
         @try {
-            result = [RCTPushyOrchestrator checkAndUpdate];
+            result = [RCTPushyOrchestrator prepareBundle];
         } @catch (NSException *exception) {
             RCTLogWarn(@"RCTPushy -- native host check failed: %@", exception.reason);
             result = PushyHostResult(@"failed", @"internal_error", nil, NO);
@@ -2425,7 +2425,7 @@ static BOOL PushyIsValidCheckResponse(NSString *responseText) {
 }
 #endif
 
-+ (NSDictionary *)checkAndUpdate {
++ (NSDictionary *)prepareBundle {
 #if DEBUG
     return PushyHostResult(@"skipped", @"debug", nil, NO);
 #else

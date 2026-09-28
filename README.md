@@ -153,3 +153,11 @@ Since 10.52.1 every cold start runs one background update check that **does not 
 | **Technical Support** | ✅ Paid dedicated support | ⚠️ Community support | ❌ **Discontinued** |
 | **Server Deployment** | ✅ Hosted service or paid private deployment | ✅ Hosted by Expo (EAS Update) | ❌ **Discontinued** |
 | **Bandwidth Usage** | ⭐⭐⭐⭐⭐ Very low (incremental) | ⭐⭐⭐ Higher (full bundle) | ❌ **Discontinued** |
+
+## Native host APIs
+
+Bridge-free hosts use `PushyRuntime.prepareBundle` (Android),
+`RCTPushy.prepareBundle` (Swift), or `PushyFileJSBundleProvider.prepareBundle`
+(HarmonyOS), after normal launch bundle resolution. See the
+[native host API migration guide](NATIVE_HOST_API_MIGRATION.md) for the
+source-breaking rename, unchanged JS bridge contract, and native rebuild steps.

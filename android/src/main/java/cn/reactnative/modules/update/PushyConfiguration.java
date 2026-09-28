@@ -9,8 +9,8 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-/** Internal normalizer for the JSONObject accepted by PushyNativeUpdate.configure. */
-final class NativeUpdateConfig {
+/** Internal normalizer for the JSONObject accepted by PushyRuntime.configure. */
+final class PushyConfiguration {
     private static final Set<String> KEYS = new HashSet<>(Arrays.asList(
         "appKey", "endpoints", "queryUrls", "afterDownload", "disabled",
         "packageVersion", "rnu", "rn"));
@@ -24,7 +24,7 @@ final class NativeUpdateConfig {
         "https://cdn.jsdelivr.net/gh/reactnativecn/react-native-update@master/endpoints.json"
     };
 
-    private NativeUpdateConfig() {}
+    private PushyConfiguration() {}
 
     static String normalize(String json) throws JSONException {
         JSONObject options = new JSONObject(json);

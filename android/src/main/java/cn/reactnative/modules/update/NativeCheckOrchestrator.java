@@ -73,46 +73,46 @@ final class NativeCheckOrchestrator {
     private static volatile String sJsCompletedConfig;
     // Published after the launch rollback snapshot, before host calls are accepted.
     private static volatile boolean nativeReady;
-    private static volatile NativeUpdateResult roundResult =
-        NativeUpdateResult.of(NativeUpdateResult.FAILED, "check_failed");
+    private static volatile BundlePreparationResult roundResult =
+        BundlePreparationResult.of(BundlePreparationResult.FAILED, "check_failed");
     private static volatile long roundGeneration = -1;
     private static volatile long roundConfigGeneration = -1;
     private static volatile String roundConfigJson;
 
     /** Blocking only on the host API's worker; never call on the UI thread. */
-    static NativeUpdateResult checkAndUpdate(UpdateContext context) throws InterruptedException {
+    static BundlePreparationResult prepareBundle(UpdateContext context) throws InterruptedException {
         if (UpdateContext.DEBUG) {
-            return NativeUpdateResult.of(NativeUpdateResult.SKIPPED, "debug");
+            return BundlePreparationResult.of(BundlePreparationResult.SKIPPED, "debug");
         }
         if (!nativeReady || sContext != context || !context.getIsUsingBundleUrl()) {
-            return NativeUpdateResult.of(NativeUpdateResult.SKIPPED, "not_initialized");
+            return BundlePreparationResult.of(BundlePreparationResult.SKIPPED, "not_initialized");
         }
         String configJson = context.getKv(KEY_CONFIG);
         if (configJson == null || configJson.isEmpty()) {
-            return NativeUpdateResult.of(NativeUpdateResult.SKIPPED, "not_configured");
+            return BundlePreparationResult.of(BundlePreparationResult.SKIPPED, "not_configured");
         }
         try {
             JSONObject config = new JSONObject(configJson);
             if (config.optBoolean("disabled", false)) {
-                return NativeUpdateResult.of(NativeUpdateResult.SKIPPED, "disabled");
+                return BundlePreparationResult.of(BundlePreparationResult.SKIPPED, "disabled");
             }
             if (config.optString("appKey", "").isEmpty()) {
-                return NativeUpdateResult.of(NativeUpdateResult.FAILED, "invalid_config");
+                return BundlePreparationResult.of(BundlePreparationResult.FAILED, "invalid_config");
             }
         } catch (JSONException e) {
-            return NativeUpdateResult.of(NativeUpdateResult.FAILED, "invalid_config");
+            return BundlePreparationResult.of(BundlePreparationResult.FAILED, "invalid_config");
         }
         startRound(0);
         if (!roundStarted.get()) {
-            return NativeUpdateResult.of(NativeUpdateResult.SKIPPED, "config_changed");
+            return BundlePreparationResult.of(BundlePreparationResult.SKIPPED, "config_changed");
         }
         roundDone.await();
         if (roundConfigGeneration != UpdateContext.getNativeConfigGeneration()
             || !configJson.equals(roundConfigJson) || !configJson.equals(context.getKv(KEY_CONFIG))) {
-            return NativeUpdateResult.of(NativeUpdateResult.CANCELLED, "config_changed");
+            return BundlePreparationResult.of(BundlePreparationResult.CANCELLED, "config_changed");
         }
         if (roundGeneration != UpdateContext.getResetGeneration()) {
-            return NativeUpdateResult.of(NativeUpdateResult.CANCELLED, "reset");
+            return BundlePreparationResult.of(BundlePreparationResult.CANCELLED, "reset");
         }
         return roundResult;
     }
@@ -226,7 +226,7 @@ final class NativeCheckOrchestrator {
             runOnce(sContext, sLaunchRolledBackVersion, deadlineNanos);
         } catch (Throwable e) {
             Log.w(UpdateContext.TAG, "native check failed: " + e);
-            roundResult = NativeUpdateResult.of(NativeUpdateResult.FAILED, "internal_error");
+            roundResult = BundlePreparationResult.of(BundlePreparationResult.FAILED, "internal_error");
         } finally {
             roundCompleted = true;
             roundDone.countDown();
@@ -303,27 +303,27 @@ final class NativeCheckOrchestrator {
         final long resetGeneration = UpdateContext.getResetGeneration();
         roundGeneration = resetGeneration;
         roundConfigGeneration = UpdateContext.getNativeConfigGeneration();
-        roundResult = NativeUpdateResult.of(NativeUpdateResult.FAILED, "check_failed");
+        roundResult = BundlePreparationResult.of(BundlePreparationResult.FAILED, "check_failed");
         String configJson = context.getKv(KEY_CONFIG);
         roundConfigJson = configJson;
         if (configJson == null || configJson.isEmpty()) {
-            roundResult = NativeUpdateResult.of(NativeUpdateResult.SKIPPED, "not_configured");
+            roundResult = BundlePreparationResult.of(BundlePreparationResult.SKIPPED, "not_configured");
             return;
         }
         JSONObject config;
         try {
             config = new JSONObject(configJson);
         } catch (JSONException e) {
-            roundResult = NativeUpdateResult.of(NativeUpdateResult.FAILED, "invalid_config");
+            roundResult = BundlePreparationResult.of(BundlePreparationResult.FAILED, "invalid_config");
             return;
         }
         if (config.optBoolean("disabled", false)) {
-            roundResult = NativeUpdateResult.of(NativeUpdateResult.SKIPPED, "disabled");
+            roundResult = BundlePreparationResult.of(BundlePreparationResult.SKIPPED, "disabled");
             return;
         }
         String appKey = config.optString("appKey", "");
         if (appKey.isEmpty()) {
-            roundResult = NativeUpdateResult.of(NativeUpdateResult.FAILED, "invalid_config");
+            roundResult = BundlePreparationResult.of(BundlePreparationResult.FAILED, "invalid_config");
             return;
         }
         // Keep the existing interrupted-round breadcrumb and reset generation.
@@ -401,7 +401,7 @@ final class NativeCheckOrchestrator {
 
         String body = NativeUpdateFlow.buildCheckRequestBody(input.toString());
         if (body == null) {
-            roundResult = NativeUpdateResult.of(NativeUpdateResult.FAILED, "invalid_request");
+            roundResult = BundlePreparationResult.of(BundlePreparationResult.FAILED, "invalid_request");
             return;
         }
 
@@ -418,7 +418,7 @@ final class NativeCheckOrchestrator {
         String decisionJson = NativeUpdateFlow.handleCheckResponse(
             responseText, identity.toString(), config.optString("afterDownload", ""));
         if (decisionJson == null) {
-            roundResult = NativeUpdateResult.of(NativeUpdateResult.FAILED, "invalid_response");
+            roundResult = BundlePreparationResult.of(BundlePreparationResult.FAILED, "invalid_response");
             return;
         }
         JSONObject decision = new JSONObject(decisionJson);
@@ -427,15 +427,15 @@ final class NativeCheckOrchestrator {
                 resetGeneration, null, null, false,
                 buildResponseCacheJson(configJson, body, responseText, responseAtSeconds));
             roundResult = committed
-                ? NativeUpdateResult.of(NativeUpdateResult.NO_UPDATE, decision.optString("reason"))
-                : NativeUpdateResult.of(NativeUpdateResult.CANCELLED, "reset");
+                ? BundlePreparationResult.of(BundlePreparationResult.NO_UPDATE, decision.optString("reason"))
+                : BundlePreparationResult.of(BundlePreparationResult.CANCELLED, "reset");
             Log.i(UpdateContext.TAG,
                 "native check: nothing to do (" + decision.optString("reason") + ")");
             return;
         }
         String hash = decision.optString("hash", "");
         if (!UpdateFileUtils.isSafePathComponent(hash)) {
-            roundResult = NativeUpdateResult.of(NativeUpdateResult.FAILED, "invalid_response");
+            roundResult = BundlePreparationResult.of(BundlePreparationResult.FAILED, "invalid_response");
             return;
         }
 
@@ -451,8 +451,8 @@ final class NativeCheckOrchestrator {
             boolean committed = context.commitNativeCheckResult(
                 resetGeneration, null, null, false,
                 buildResponseCacheJson(configJson, body, responseText, responseAtSeconds));
-            roundResult = NativeUpdateResult.of(
-                committed ? NativeUpdateResult.FAILED : NativeUpdateResult.CANCELLED,
+            roundResult = BundlePreparationResult.of(
+                committed ? BundlePreparationResult.FAILED : BundlePreparationResult.CANCELLED,
                 committed ? "download_failed" : "reset");
             return;
         }
@@ -499,7 +499,7 @@ final class NativeCheckOrchestrator {
                 buildResponseCacheJson(configJson, body, responseText, responseAtSeconds));
         } catch (Exception e) {
             Log.w(UpdateContext.TAG, "native check: commit failed: " + e);
-            roundResult = NativeUpdateResult.of(NativeUpdateResult.FAILED, "commit_failed");
+            roundResult = BundlePreparationResult.of(BundlePreparationResult.FAILED, "commit_failed");
             return;
         }
         if (!committed) {
@@ -517,8 +517,8 @@ final class NativeCheckOrchestrator {
                 "native check: downloaded " + hash + ", activation left to JS");
         }
         roundResult = committed
-            ? NativeUpdateResult.downloaded(hash, activate)
-            : NativeUpdateResult.of(NativeUpdateResult.CANCELLED, "reset");
+            ? BundlePreparationResult.downloaded(hash, activate)
+            : BundlePreparationResult.of(BundlePreparationResult.CANCELLED, "reset");
     }
 
     private static String buildResponseCacheJson(
