@@ -1,0 +1,125 @@
+name: Prepare native host API refactor
+
+on:
+  push:
+    branches:
+      - refactor/native-host-prepare-bundle
+    paths:
+      - .github/workflows/native-host-api-refactor.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: native-host-api-refactor-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  refactor:
+    if: github.repository == 'reactnativecn/react-native-update' && github.ref == 'refs/heads/refactor/native-host-prepare-bundle'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - name: Rename native host identifiers and matching source files
+        id: rename
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from collections import Counter
+          from pathlib import Path
+          import re
+          import subprocess
+
+          names = {
+              'checkAndUpdateWithCompletion': 'prepareBundleWithCompletion',
+              'checkAndUpdateNative': 'prepareBundleNative',
+              'checkAndUpdate': 'prepareBundle',
+              'RCTPushyNativeUpdateCompletion': 'RCTPushyBundlePreparationCompletion',
+              'PushyNativeUpdate': 'PushyRuntime',
+              'NativeUpdateResult': 'BundlePreparationResult',
+              'nativeUpdateResult': 'bundlePreparationResult',
+              'NativeUpdateConfig': 'PushyConfiguration',
+              'normalizeNativeUpdateConfig': 'normalizePushyConfiguration',
+          }
+          pattern = re.compile(r'\b(?:' + '|'.join(map(re.escape, sorted(names, key=len, reverse=True))) + r')\b')
+          excluded = {
+              'NATIVE_HOST_API_MIGRATION.md',
+              'src/__tests__/nativeHostApiNaming.test.ts',
+          }
+          android = Path('android/src/main/java/cn/reactnative/modules/update')
+          assert (android / 'PushyNativeUpdate.java').is_file(), 'Expected the original host API'
+          bridge = Path('src/NativePushy.ts').read_bytes()
+          package = Path('package.json').read_bytes()
+          lock = Path('bun.lock').read_bytes()
+          counts = Counter()
+          tracked = subprocess.check_output(['git', 'ls-files', '-z']).decode().split('\0')
+          for relative in tracked:
+              if not relative or relative in excluded or relative.startswith('.github/'):
+                  continue
+              path = Path(relative)
+              if not path.is_file() or path.is_symlink():
+                  continue
+              original = path.read_bytes()
+              if b'\0' in original:
+                  continue
+              try:
+                  text = original.decode('utf-8')
+              except UnicodeDecodeError:
+                  continue
+              def replace(match):
+                  counts[match.group()] += 1
+                  return names[match.group()]
+              replaced = pattern.sub(replace, text)
+              if replaced != text:
+                  path.write_bytes(replaced.encode('utf-8'))
+                  print('edited', relative)
+              if path.stem in names:
+                  destination = path.with_name(names[path.stem] + path.suffix)
+                  assert not destination.exists(), f'Refusing to overwrite {destination}'
+                  path.rename(destination)
+                  print('renamed', relative, '->', destination)
+          assert all(counts[name] > 0 for name in names), counts
+          assert Path('src/NativePushy.ts').read_bytes() == bridge, 'JS bridge ABI must remain unchanged'
+          assert Path('package.json').read_bytes() == package, 'Do not change package identity/version'
+          assert Path('bun.lock').read_bytes() == lock, 'Do not change dependencies'
+          for filename, section in {
+              'README.md': '\n## Native host APIs\n\nBridge-free hosts use `PushyRuntime.prepareBundle` (Android),\n`RCTPushy.prepareBundle` (Swift), or `PushyFileJSBundleProvider.prepareBundle`\n(HarmonyOS), after normal launch bundle resolution. See the\n[native host API migration guide](NATIVE_HOST_API_MIGRATION.md) for the\nsource-breaking rename, unchanged JS bridge contract, and native rebuild steps.\n',
+              'README-CN.md': '\n## 原生宿主接口\n\n原生宿主入口统一为 `prepareBundle`：Android 使用 `PushyRuntime`，\nApple 平台使用 `RCTPushy`，Harmony 使用已有的 `PushyFileJSBundleProvider`。\n请在正常启动 bundle 解析后调用。改名不改变 JS 桥接契约，但原生接入代码需要迁移并重新构建。\n详见[原生接口迁移说明](NATIVE_HOST_API_MIGRATION.md)。\n',
+          }.items():
+              with Path(filename).open('a', encoding='utf-8') as stream:
+                  stream.write(section)
+          print('Replacement counts:', dict(counts))
+          PY
+
+      - name: Install locked dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Format changed JavaScript tests
+        shell: bash
+        run: |
+          mapfile -t changed < <(git diff --name-only --diff-filter=ACM -- src | grep -E '\.(ts|tsx)$' || true)
+          ./node_modules/.bin/biome check --write src/__tests__/nativeHostApiNaming.test.ts "${changed[@]}"
+
+      - name: Run unit tests
+        run: bun test src/__tests__
+
+      - name: Run lint, TypeScript and native parity checks
+        if: success() || failure()
+        run: bun run lint
+
+      - name: Commit source changes to this feature branch only
+        if: always() && steps.rename.outcome == 'success'
+        shell: bash
+        run: |
+          test "${GITHUB_REF}" = 'refs/heads/refactor/native-host-prepare-bundle'
+          git diff --exit-code -- package.json bun.lock src/NativePushy.ts .github
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'refactor!: rename bridge-free native host APIs to bundle preparation'
+          git push origin HEAD:refs/heads/refactor/native-host-prepare-bundle
