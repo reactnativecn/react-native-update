@@ -1,13 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import type { BundlePreparationResult } from '../../harmony/pushy/src/main/ets/BundlePreparationResult';
 import {
+  BundlePreparationRound,
   bundlePreparationResult,
-  NativeUpdateRound,
 } from '../../harmony/pushy/src/main/ets/BundlePreparationResult';
 
-describe('native host update round', () => {
+describe('bundle preparation round', () => {
   test('concurrent callers share the same in-flight operation', async () => {
-    const round = new NativeUpdateRound();
+    const round = new BundlePreparationRound();
     let calls = 0;
     let complete: (result: BundlePreparationResult) => void = () => {};
     const operation = () => {
@@ -30,7 +30,7 @@ describe('native host update round', () => {
   });
 
   test('the promise is published before a reentrant caller runs', async () => {
-    const round = new NativeUpdateRound();
+    const round = new BundlePreparationRound();
     let nested: Promise<BundlePreparationResult> | undefined;
     const first = round.run(async () => {
       nested = round.run(async () => {
@@ -43,7 +43,7 @@ describe('native host update round', () => {
   });
 
   test('a failed round is reused rather than causing a retry storm', async () => {
-    const round = new NativeUpdateRound();
+    const round = new BundlePreparationRound();
     let calls = 0;
     const operation = async () => {
       calls += 1;
@@ -55,7 +55,7 @@ describe('native host update round', () => {
   });
 
   test('unexpected rejection also cannot start a second round', async () => {
-    const round = new NativeUpdateRound();
+    const round = new BundlePreparationRound();
     let calls = 0;
     const operation = async (): Promise<BundlePreparationResult> => {
       calls += 1;

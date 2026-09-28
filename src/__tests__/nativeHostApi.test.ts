@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import type { BundlePreparationResult } from '../../harmony/pushy/src/main/ets/BundlePreparationResult';
 import {
+  BundlePreparationRound,
   bundlePreparationResult,
-  NativeUpdateRound,
 } from '../../harmony/pushy/src/main/ets/BundlePreparationResult';
 
 // Evaluate the actual Harmony orchestrator in an isolated VM per test. Only
@@ -70,7 +70,7 @@ function harness() {
   const runtime = runInNewContext(
     `${javascript}\nrunCheckRequest = mockCheck;\nperformAttempts = mockDownload;\n({ check: prepareBundleNative, schedule: scheduleNativeCheck });`,
     {
-      NativeUpdateRound,
+      BundlePreparationRound,
       bundlePreparationResult,
       logger: { info() {}, warn() {}, error() {} },
       deviceInfo: { osFullName: 'test-os' },

@@ -1,5 +1,5 @@
 #import "RCTPushy.h"
-#import "RCTPushyNativeConfig.h"
+#import "RCTPushyConfiguration.h"
 #import "RCTPushyDownloader.h"
 #import "ZipArchive.h"
 #include "../../cpp/patch_core/archive_limits.h"
@@ -1104,11 +1104,11 @@ RCT_EXPORT_MODULE(RCTPushy);
 }
 
 + (void)configure:(NSDictionary<NSString *, id> *)options
-       completion:(RCTPushyNativeConfigurationCompletion)completion
+       completion:(RCTPushyConfigurationCompletion)completion
 {
     NSError *validationError = nil;
     // Snapshot nested mutable caller values before crossing a queue boundary.
-    NSString *config = RCTPushyNormalizeNativeConfig(options, &validationError);
+    NSString *config = RCTPushyNormalizeConfiguration(options, &validationError);
     static dispatch_queue_t configQueue;
     static dispatch_once_t once;
     dispatch_once(&once, ^{

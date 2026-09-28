@@ -1,4 +1,4 @@
-#import "RCTPushyNativeConfig.h"
+#import "RCTPushyConfiguration.h"
 
 static void PushyConfigInvalid(NSString *message) {
     @throw [NSException exceptionWithName:NSInvalidArgumentException
@@ -48,7 +48,7 @@ static NSArray *PushyConfigUrls(id value, NSString *name, BOOL base) {
     return result;
 }
 
-NSString *RCTPushyNormalizeNativeConfig(NSDictionary *options, NSError **error) {
+NSString *RCTPushyNormalizeConfiguration(NSDictionary *options, NSError **error) {
     @try {
         if (![options isKindOfClass:NSDictionary.class]) {
             PushyConfigInvalid(@"expected an object");

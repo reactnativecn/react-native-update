@@ -480,7 +480,7 @@ export class UpdateContext {
       markJsCheckCompleted('');
     }
     // Flush even an equal value so a retry after a storage error can succeed.
-    return this.flushPreferences('configure native update');
+    return this.flushPreferences('persist configuration');
   }
 
   public setKv(key: string, value: string): Promise<void> {

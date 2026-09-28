@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 
 const root = new URL('../../', import.meta.url);
 const android = 'android/src/main/java/cn/reactnative/modules/update/';
@@ -8,7 +8,23 @@ const source = (path: string) => readFileSync(new URL(path, root), 'utf8');
 
 // These are forbidden host API identifiers, not backend paths or JS bridge names.
 const oldNames =
-  /\b(?:PushyNativeUpdate|NativeUpdateResult|NativeUpdateConfig|RCTPushyNativeUpdateCompletion|checkAndUpdate(?:WithCompletion|Native)?)\b/;
+  /\b(?:PushyNativeUpdate|NativeUpdateResult|NativeUpdateConfig|RCTPushyNativeUpdateCompletion|RCTPushyNativeConfigurationCompletion|RCTPushyNormalizeNativeConfig|checkAndUpdate(?:WithCompletion|Native)?)\b/;
+// Any other "native update" wording in shipped native code. NativeUpdateCore and
+// NativeUpdateFlow predate the host APIs and are bound by JNI symbol names.
+const nativeUpdateWording = /NativeUpdate(?!Core|Flow)|native update/i;
+
+const shippedNativeSources = (dir: string): string[] =>
+  readdirSync(new URL(dir, root), { recursive: true, withFileTypes: true })
+    .filter(
+      (entry) =>
+        entry.isFile() && /\.(?:h|m|mm|java|kt|ts|ets|cpp)$/.test(entry.name)
+    )
+    .map((entry) =>
+      `${entry.parentPath}/${entry.name}`.slice(
+        new URL(dir, root).pathname.length - dir.length
+      )
+    )
+    .filter((path) => !/\/tests?\//.test(path));
 
 describe('native host API naming', () => {
   test('Android exposes prepareBundle through PushyRuntime', () => {
@@ -63,15 +79,30 @@ describe('native host API naming', () => {
     }
   });
 
-  test('renamed host entry files contain no deprecated native aliases', () => {
-    for (const path of [
-      `${android}PushyRuntime.java`,
-      `${android}BundlePreparationResult.java`,
-      `${android}PushyConfiguration.java`,
-      `${harmony}BundlePreparationResult.ts`,
-      `${harmony}PushyConfiguration.ts`,
-    ]) {
-      expect(source(path)).not.toMatch(oldNames);
+  test('iOS configuration names match the other platforms', () => {
+    const header = source('ios/RCTPushy/RCTPushy.h');
+    expect(header).toContain('typedef void (^RCTPushyConfigurationCompletion)');
+    expect(source('ios/RCTPushy/RCTPushyConfiguration.h')).toContain(
+      'RCTPushyNormalizeConfiguration('
+    );
+    for (const name of ['RCTPushyNativeConfig.h', 'RCTPushyNativeConfig.mm']) {
+      expect(existsSync(new URL(`ios/RCTPushy/${name}`, root))).toBe(false);
     }
+  });
+
+  test('shipped native sources contain no old host names or native-update wording', () => {
+    const paths = [
+      'ios/',
+      'android/src/main/',
+      'harmony/pushy/src/main/',
+      'cpp/patch_core/',
+      'cpp/update_flow_core/',
+    ].flatMap(shippedNativeSources);
+    expect(paths).toContain(`${android}PushyRuntime.java`);
+    const offenders = paths.filter((path) => {
+      const text = source(path);
+      return oldNames.test(text) || nativeUpdateWording.test(text);
+    });
+    expect(offenders).toEqual([]);
   });
 });

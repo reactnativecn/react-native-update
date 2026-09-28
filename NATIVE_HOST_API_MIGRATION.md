@@ -14,6 +14,7 @@ or crash-rescue behavior. No deprecated native alias is retained.
 | Android/Harmony `NativeUpdateResult` | `BundlePreparationResult` |
 | Harmony `NativeUpdateConfig` | `PushyConfiguration` |
 | iOS `RCTPushyNativeUpdateCompletion` | `RCTPushyBundlePreparationCompletion` |
+| iOS `RCTPushyNativeConfigurationCompletion` | `RCTPushyConfigurationCompletion` |
 
 `configure` keeps its name. The Android package, iOS module and Harmony package
 identities are unchanged. Update native imports, type annotations and call sites
@@ -53,7 +54,8 @@ the API names that existed in the versions they document.
 
 原生宿主入口统一为 `prepareBundle`，Android 对外类改为 `PushyRuntime`，
 结果类型改为 `BundlePreparationResult`，Harmony 配置类型改为
-`PushyConfiguration`。iOS/Swift 的方法与完成回调类型同步改名，不保留旧名别名。
+`PushyConfiguration`。iOS/Swift 的方法与完成回调类型（含 `configure` 的
+`RCTPushyConfigurationCompletion`）同步改名，不保留旧名别名。
 
 这是原生源码接口的破坏性重命名，不改变下载、下次启动选包、回滚或救援行为。
 配置完成后，先走宿主正常的 bundle 解析流程，再调用 `prepareBundle`；

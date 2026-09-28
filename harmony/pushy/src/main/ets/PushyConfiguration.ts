@@ -14,7 +14,7 @@ export interface PushyConfiguration {
   rn?: string;
 }
 
-interface PersistedNativeUpdateConfig {
+interface PersistedPushyConfiguration {
   appKey: string;
   endpoints: string[];
   queryUrls: string[];
@@ -90,7 +90,7 @@ export function normalizePushyConfiguration(options: PushyConfiguration): string
   if (options.disabled !== undefined && typeof options.disabled !== 'boolean') {
     throw new Error('Invalid native configuration: disabled must be a boolean');
   }
-  const result: PersistedNativeUpdateConfig = {
+  const result: PersistedPushyConfiguration = {
     appKey, endpoints, queryUrls, afterDownload, disabled: options.disabled ?? false,
     rnu: options.rnu === undefined ? '' : configString(options.rnu, 'rnu', true),
     rn: options.rn === undefined ? '' : configString(options.rn, 'rn', true),

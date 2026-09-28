@@ -18,7 +18,7 @@ export function bundlePreparationResult(
 }
 
 /** Internal gate shared by the delayed check and the native host API. */
-export class NativeUpdateRound {
+export class BundlePreparationRound {
   private task: Promise<BundlePreparationResult> | undefined;
 
   run(operation: () => Promise<BundlePreparationResult>): Promise<BundlePreparationResult> {

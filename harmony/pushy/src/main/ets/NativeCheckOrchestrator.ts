@@ -3,7 +3,7 @@ import deviceInfo from '@ohos.deviceInfo';
 import logger from './Logger';
 import NativePatchCore from './NativePatchCore';
 import type { UpdateContext } from './UpdateContext';
-import { NativeUpdateRound, bundlePreparationResult } from './BundlePreparationResult';
+import { BundlePreparationRound, bundlePreparationResult } from './BundlePreparationResult';
 import type { BundlePreparationResult } from './BundlePreparationResult';
 import { isSafePathComponent } from './PathUtils';
 import { monotonicNowMs } from './MonotonicClock';
@@ -109,7 +109,7 @@ interface RespCacheEntry {
 
 let scheduled = false;
 // The host and delayed check use one promise, including its settled result.
-const hostRound = new NativeUpdateRound();
+const hostRound = new BundlePreparationRound();
 let scheduledContext: UpdateContext | undefined;
 let scheduledRollback = '';
 let roundGeneration = -1;

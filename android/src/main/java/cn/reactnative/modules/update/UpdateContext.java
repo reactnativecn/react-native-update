@@ -766,7 +766,7 @@ public class UpdateContext {
             editor.putString(NativeCheckOrchestrator.KEY_CONFIG, config);
             // Persist even an equal value: a previous commit may have updated
             // SharedPreferences memory but failed to write its file.
-            persistEditorOrThrow(editor, "configure native update");
+            persistEditorOrThrow(editor, "persist configuration");
         }
         NativeCheckOrchestrator.onConfigured(this);
     }
