@@ -1,0 +1,34 @@
+name: Bounded content-addressed E2E cache
+description: Restore shared content caches; only mainline core saves a daily snapshot.
+inputs:
+  path:
+    description: Content-addressed cache directory, never a built app.
+    required: true
+  scope:
+    description: Cache schema/toolchain identity.
+    required: true
+  write:
+    description: The core matrix leg may write on a trusted master push.
+    default: 'false'
+runs:
+  using: composite
+  steps:
+    - id: epoch
+      shell: bash
+      run: echo "day=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+    - name: Restore read-only snapshot
+      if: "!(inputs.write == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/master' && github.job == 'e2e-ios')"
+      uses: actions/cache/restore@v6
+      with:
+        path: ${{ inputs.path }}
+        key: e2e-content-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.scope }}-${{ steps.epoch.outputs.day }}
+        restore-keys: |
+          e2e-content-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.scope }}-
+    - name: Restore and save trusted daily snapshot
+      if: inputs.write == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/master' && github.job == 'e2e-ios'
+      uses: actions/cache@v6
+      with:
+        path: ${{ inputs.path }}
+        key: e2e-content-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.scope }}-${{ steps.epoch.outputs.day }}
+        restore-keys: |
+          e2e-content-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.scope }}-

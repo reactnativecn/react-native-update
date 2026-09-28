@@ -6,6 +6,7 @@ on:
       - '**'
     paths:
       - '.github/workflows/e2e_ios.yml'
+      - '.github/actions/e2e-cache/**'
       - '.gitmodules'
       - 'package.json'
       - 'bun.lock'
@@ -23,6 +24,7 @@ on:
       - master
     paths:
       - '.github/workflows/e2e_ios.yml'
+      - '.github/actions/e2e-cache/**'
       - '.gitmodules'
       - 'package.json'
       - 'bun.lock'
@@ -111,27 +113,25 @@ jobs:
           fi
 
       - name: Cache Homebrew downloads
-        # bottle 按 URL 内容寻址,restore-keys 前缀命中即省下载(装/链接照常)
-        uses: actions/cache@v6
+        # Bottle content addressing still controls reuse; only snapshot writes
+        # are reduced to the successful master/core run's daily identity.
+        uses: ./.github/actions/e2e-cache
         with:
           path: ~/Library/Caches/Homebrew
-          key: ${{ runner.os }}-brew-e2e-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-brew-e2e-
+          scope: brew-xcode-26.4
+          write: ${{ matrix.suite == 'core' }}
 
       - name: Install applesimutils and ccache
         run: brew trust wix/brew && HOMEBREW_NO_AUTO_UPDATE=1 brew install wix/brew/applesimutils ccache
 
       - name: Cache ccache
-        # ccache 按(预处理后)内容寻址,不受 fresh checkout 的 mtime 影响——
-        # 这是 DerivedData 缓存在 -UseNewBuildSystem=NO 下做不到的。
-        # 陈旧条目不影响正确性,只影响命中率,所以 restore-keys 用前缀即可。
-        uses: actions/cache@v6
+        # Old content-addressed entries affect hit rate, not build correctness.
+        # PRs and the native matrix leg only restore; no per-commit duplicates.
+        uses: ./.github/actions/e2e-cache
         with:
           path: ~/Library/Caches/ccache
-          key: ${{ runner.os }}-ccache-e2e-xcode-26.4-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-ccache-e2e-xcode-26.4-
+          scope: ccache-xcode-26.4
+          write: ${{ matrix.suite == 'core' }}
 
       - name: Install e2etest dependencies
         run: cd Example/e2etest && bun install --frozen-lockfile
@@ -152,13 +152,12 @@ jobs:
         run: cd react-native-update-cli && bun install --frozen-lockfile && bun run build
 
       - name: Cache Metro transform cache
-        # 内容寻址(等价 ccache 之于 clang):陈旧条目只影响命中率不影响正确性
-        uses: actions/cache@v6
+        # Metro validates its own content keys; stale snapshots only recompile.
+        uses: ./.github/actions/e2e-cache
         with:
           path: Example/e2etest/.metro-cache
-          key: ${{ runner.os }}-metro-e2e-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-metro-e2e-
+          scope: metro-xcode-26.4
+          write: ${{ matrix.suite == 'core' }}
 
       - name: Prepare local update artifacts
         env:
