@@ -11,10 +11,10 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 
 /** Bridge-free native configuration and update APIs. */
-public final class PushyNativeUpdate {
+public final class PushyRuntime {
     public interface Callback {
         /** Always called on the main thread, including skipped and failed checks. */
-        void onComplete(NativeUpdateResult result);
+        void onComplete(BundlePreparationResult result);
     }
 
     // A single waiting worker, not one thread per caller. The actual round is
@@ -46,7 +46,7 @@ public final class PushyNativeUpdate {
     /**
      * Validate and persist a complete configuration, even before JS or bundle
      * resolution. This starts no network work and never resolves a bundle.
-     * Await the callback before continuing startup/checkAndUpdate. Unless JS
+     * Await the callback before continuing startup/prepareBundle. Unless JS
      * uses nativeConfigSource: 'native', later JS config writes can replace it.
      */
     public static void configure(Context context, JSONObject options, final ConfigurationCallback callback) {
@@ -61,7 +61,7 @@ public final class PushyNativeUpdate {
             public void run() {
                 Exception failure = null;
                 try {
-                    String config = NativeUpdateConfig.normalize(snapshot);
+                    String config = PushyConfiguration.normalize(snapshot);
                     UpdateContext.getInstance(applicationContext).setNativeConfig(config);
                 } catch (Exception e) {
                     failure = e;
@@ -79,7 +79,7 @@ public final class PushyNativeUpdate {
         });
     }
 
-    private PushyNativeUpdate() {
+    private PushyRuntime() {
     }
 
     /**
@@ -91,7 +91,7 @@ public final class PushyNativeUpdate {
      * this method: bundle resolution consumes first-load/rollback markers.
      * Missing persisted configuration and debug builds are reported as skipped.
      */
-    public static void checkAndUpdate(Context context, final Callback callback) {
+    public static void prepareBundle(Context context, final Callback callback) {
         if (context == null || callback == null) {
             throw new IllegalArgumentException("context and callback are required");
         }
@@ -99,22 +99,22 @@ public final class PushyNativeUpdate {
         WORKER.execute(new Runnable() {
             @Override
             public void run() {
-                NativeUpdateResult outcome;
+                BundlePreparationResult outcome;
                 try {
                     if (BuildConfig.DEBUG) {
-                        outcome = NativeUpdateResult.of(NativeUpdateResult.SKIPPED, "debug");
+                        outcome = BundlePreparationResult.of(BundlePreparationResult.SKIPPED, "debug");
                     } else {
-                        outcome = NativeCheckOrchestrator.checkAndUpdate(
+                        outcome = NativeCheckOrchestrator.prepareBundle(
                             UpdateContext.getInstance(applicationContext));
                     }
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
-                    outcome = NativeUpdateResult.of(NativeUpdateResult.CANCELLED, "interrupted");
+                    outcome = BundlePreparationResult.of(BundlePreparationResult.CANCELLED, "interrupted");
                 } catch (Exception | LinkageError e) {
                     Log.w("react-native-update", "native host check failed", e);
-                    outcome = NativeUpdateResult.of(NativeUpdateResult.FAILED, "internal_error");
+                    outcome = BundlePreparationResult.of(BundlePreparationResult.FAILED, "internal_error");
                 }
-                final NativeUpdateResult result = outcome;
+                final BundlePreparationResult result = outcome;
                 new Handler(Looper.getMainLooper()).post(new Runnable() {
                     @Override
                     public void run() {

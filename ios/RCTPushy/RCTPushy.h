@@ -3,7 +3,7 @@
 
 typedef void (^RCTPushyNativeConfigurationCompletion)(NSError * _Nullable error);
 
-typedef void (^RCTPushyNativeUpdateCompletion)(NSDictionary<NSString *, id> * _Nonnull result);
+typedef void (^RCTPushyBundlePreparationCompletion)(NSDictionary<NSString *, id> * _Nonnull result);
 
 @interface RCTPushy : RCTEventEmitter<RCTBridgeModule>
 
@@ -27,7 +27,7 @@ typedef void (^RCTPushyNativeUpdateCompletion)(NSDictionary<NSString *, id> * _N
  * hash (empty when nothing was installed), activated (selected for NEXT
  * launch, not a reload of the running instance).
  */
-+ (void)checkAndUpdateWithCompletion:(RCTPushyNativeUpdateCompletion _Nullable)completion
-    NS_SWIFT_NAME(checkAndUpdate(completion:));
++ (void)prepareBundleWithCompletion:(RCTPushyBundlePreparationCompletion _Nullable)completion
+    NS_SWIFT_NAME(prepareBundle(completion:));
 
 @end

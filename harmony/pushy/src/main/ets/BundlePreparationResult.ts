@@ -1,5 +1,5 @@
 /** A native round snapshot, not the current state of the running RN instance. */
-export interface NativeUpdateResult {
+export interface BundlePreparationResult {
   /** skipped, noUpdate, downloaded, failed, or cancelled. */
   status: string;
   reason: string;
@@ -8,20 +8,20 @@ export interface NativeUpdateResult {
   activated: boolean;
 }
 
-export function nativeUpdateResult(
+export function bundlePreparationResult(
   status: string,
   reason: string = '',
   hash: string = '',
   activated: boolean = false,
-): NativeUpdateResult {
+): BundlePreparationResult {
   return { status, reason, hash, activated };
 }
 
 /** Internal gate shared by the delayed check and the native host API. */
 export class NativeUpdateRound {
-  private task: Promise<NativeUpdateResult> | undefined;
+  private task: Promise<BundlePreparationResult> | undefined;
 
-  run(operation: () => Promise<NativeUpdateResult>): Promise<NativeUpdateResult> {
+  run(operation: () => Promise<BundlePreparationResult>): Promise<BundlePreparationResult> {
     if (this.task !== undefined) {
       return this.task;
     }

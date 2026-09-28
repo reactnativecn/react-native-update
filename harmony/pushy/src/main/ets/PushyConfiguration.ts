@@ -1,5 +1,5 @@
 /** Options accepted by PushyFileJSBundleProvider.configure(). */
-export interface NativeUpdateConfig {
+export interface PushyConfiguration {
   appKey: string;
   /** Omitted: Pushy's built-in endpoints. Custom endpoints never inherit discovery URLs. */
   endpoints?: string[];
@@ -67,7 +67,7 @@ function configUrls(values: string[], name: string, base: boolean): string[] {
 }
 
 /** Pure validation, before any native state is touched. Does not mutate options. */
-export function normalizeNativeUpdateConfig(options: NativeUpdateConfig): string {
+export function normalizePushyConfiguration(options: PushyConfiguration): string {
   if (!options || typeof options !== 'object' || Array.isArray(options)) {
     throw new Error('Invalid native configuration: expected an object');
   }

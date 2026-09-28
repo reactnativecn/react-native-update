@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-import type { NativeUpdateResult } from '../../harmony/pushy/src/main/ets/NativeUpdateResult';
+import type { BundlePreparationResult } from '../../harmony/pushy/src/main/ets/BundlePreparationResult';
 import {
+  bundlePreparationResult,
   NativeUpdateRound,
-  nativeUpdateResult,
-} from '../../harmony/pushy/src/main/ets/NativeUpdateResult';
+} from '../../harmony/pushy/src/main/ets/BundlePreparationResult';
 
 // Evaluate the actual Harmony orchestrator in an isolated VM per test. Only
 // platform imports, HTTP and download IO are substituted; entry points,
@@ -68,10 +68,10 @@ function harness() {
     },
   };
   const runtime = runInNewContext(
-    `${javascript}\nrunCheckRequest = mockCheck;\nperformAttempts = mockDownload;\n({ check: checkAndUpdateNative, schedule: scheduleNativeCheck });`,
+    `${javascript}\nrunCheckRequest = mockCheck;\nperformAttempts = mockDownload;\n({ check: prepareBundleNative, schedule: scheduleNativeCheck });`,
     {
       NativeUpdateRound,
-      nativeUpdateResult,
+      bundlePreparationResult,
       logger: { info() {}, warn() {}, error() {} },
       deviceInfo: { osFullName: 'test-os' },
       setTimeout: (callback: () => void) => timers.push(callback),
@@ -93,7 +93,7 @@ function harness() {
       },
     }
   ) as {
-    check: (ctx: typeof context) => Promise<NativeUpdateResult>;
+    check: (ctx: typeof context) => Promise<BundlePreparationResult>;
     schedule: (ctx: typeof context, rollback: string) => void;
   };
   return {
@@ -138,7 +138,7 @@ describe('native host API orchestration', () => {
     for (const timer of h.timers) timer();
     const results = await Promise.all([first, second]);
     expect(results[0]).toEqual(
-      nativeUpdateResult('downloaded', '', 'v2', true)
+      bundlePreparationResult('downloaded', '', 'v2', true)
     );
     expect(results[1]).toEqual(results[0]);
     results[0].hash = 'caller-mutated';
@@ -153,7 +153,9 @@ describe('native host API orchestration', () => {
     const h = harness();
     h.initialize();
     h.state.decision = { action: 'download', hash: 'v2', activate: false };
-    expect(await h.check()).toEqual(nativeUpdateResult('downloaded', '', 'v2'));
+    expect(await h.check()).toEqual(
+      bundlePreparationResult('downloaded', '', 'v2')
+    );
   });
 
   test('an installed version skips transfer but still reports activation', async () => {
@@ -170,14 +172,14 @@ describe('native host API orchestration', () => {
     offline.initialize();
     offline.state.reachable = false;
     expect(await offline.check()).toEqual(
-      nativeUpdateResult('failed', 'check_failed')
+      bundlePreparationResult('failed', 'check_failed')
     );
     const h = harness();
     h.initialize();
     h.state.decision = { action: 'download', hash: 'v2' };
     h.state.downloadOK = false;
     expect(await h.check()).toEqual(
-      nativeUpdateResult('failed', 'download_failed')
+      bundlePreparationResult('failed', 'download_failed')
     );
     await h.check();
     expect(h.state.downloads).toBe(1);
@@ -189,7 +191,9 @@ describe('native host API orchestration', () => {
     h.state.beforeResponse = async () => {
       h.state.generation += 1;
     };
-    expect(await h.check()).toEqual(nativeUpdateResult('cancelled', 'reset'));
+    expect(await h.check()).toEqual(
+      bundlePreparationResult('cancelled', 'reset')
+    );
   });
 
   test('reset and configuration changes invalidate completed snapshots', async () => {
@@ -235,6 +239,6 @@ test('configuration replacement during an update cancels its returned snapshot',
     h.state.generation += 1;
   };
   expect(await h.check()).toEqual(
-    nativeUpdateResult('cancelled', 'config_changed')
+    bundlePreparationResult('cancelled', 'config_changed')
   );
 });

@@ -1,18 +1,18 @@
 import { describe, expect, test } from 'bun:test';
-import type { NativeUpdateResult } from '../../harmony/pushy/src/main/ets/NativeUpdateResult';
+import type { BundlePreparationResult } from '../../harmony/pushy/src/main/ets/BundlePreparationResult';
 import {
+  bundlePreparationResult,
   NativeUpdateRound,
-  nativeUpdateResult,
-} from '../../harmony/pushy/src/main/ets/NativeUpdateResult';
+} from '../../harmony/pushy/src/main/ets/BundlePreparationResult';
 
 describe('native host update round', () => {
   test('concurrent callers share the same in-flight operation', async () => {
     const round = new NativeUpdateRound();
     let calls = 0;
-    let complete: (result: NativeUpdateResult) => void = () => {};
+    let complete: (result: BundlePreparationResult) => void = () => {};
     const operation = () => {
       calls += 1;
-      return new Promise<NativeUpdateResult>((resolve) => {
+      return new Promise<BundlePreparationResult>((resolve) => {
         complete = resolve;
       });
     };
@@ -21,7 +21,7 @@ describe('native host update round', () => {
     expect(second).toBe(first);
     await Promise.resolve();
     expect(calls).toBe(1);
-    const result = nativeUpdateResult('downloaded', '', 'version-1', true);
+    const result = bundlePreparationResult('downloaded', '', 'version-1', true);
     complete(result);
     expect(await first).toEqual(result);
     expect(await second).toEqual(result);
@@ -31,12 +31,12 @@ describe('native host update round', () => {
 
   test('the promise is published before a reentrant caller runs', async () => {
     const round = new NativeUpdateRound();
-    let nested: Promise<NativeUpdateResult> | undefined;
+    let nested: Promise<BundlePreparationResult> | undefined;
     const first = round.run(async () => {
       nested = round.run(async () => {
         throw new Error('a second operation must not execute');
       });
-      return nativeUpdateResult('noUpdate', 'up_to_date');
+      return bundlePreparationResult('noUpdate', 'up_to_date');
     });
     await first;
     expect(nested).toBe(first);
@@ -47,7 +47,7 @@ describe('native host update round', () => {
     let calls = 0;
     const operation = async () => {
       calls += 1;
-      return nativeUpdateResult('failed', 'download_failed');
+      return bundlePreparationResult('failed', 'download_failed');
     };
     expect((await round.run(operation)).status).toBe('failed');
     expect((await round.run(operation)).reason).toBe('download_failed');
@@ -57,7 +57,7 @@ describe('native host update round', () => {
   test('unexpected rejection also cannot start a second round', async () => {
     const round = new NativeUpdateRound();
     let calls = 0;
-    const operation = async (): Promise<NativeUpdateResult> => {
+    const operation = async (): Promise<BundlePreparationResult> => {
       calls += 1;
       throw new Error('transport unavailable');
     };
@@ -68,16 +68,16 @@ describe('native host update round', () => {
   });
 
   test('download and activation are separate facts', () => {
-    expect(nativeUpdateResult('downloaded', '', 'version-1')).toEqual({
+    expect(bundlePreparationResult('downloaded', '', 'version-1')).toEqual({
       status: 'downloaded',
       reason: '',
       hash: 'version-1',
       activated: false,
     });
     expect(
-      nativeUpdateResult('downloaded', '', 'version-1', true).activated
+      bundlePreparationResult('downloaded', '', 'version-1', true).activated
     ).toBe(true);
-    expect(nativeUpdateResult('skipped', 'not_configured')).toEqual({
+    expect(bundlePreparationResult('skipped', 'not_configured')).toEqual({
       status: 'skipped',
       reason: 'not_configured',
       hash: '',

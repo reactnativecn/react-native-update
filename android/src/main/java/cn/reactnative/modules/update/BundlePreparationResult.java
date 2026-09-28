@@ -4,7 +4,7 @@ package cn.reactnative.modules.update;
  * Snapshot of a native check-and-update round. A downloaded result does not
  * mean that the running React Native instance has been reloaded.
  */
-public final class NativeUpdateResult {
+public final class BundlePreparationResult {
     public static final String SKIPPED = "skipped";
     public static final String NO_UPDATE = "noUpdate";
     public static final String DOWNLOADED = "downloaded";
@@ -16,19 +16,19 @@ public final class NativeUpdateResult {
     private final String hash;
     private final boolean activated;
 
-    private NativeUpdateResult(String status, String reason, String hash, boolean activated) {
+    private BundlePreparationResult(String status, String reason, String hash, boolean activated) {
         this.status = status;
         this.reason = reason;
         this.hash = hash;
         this.activated = activated;
     }
 
-    static NativeUpdateResult of(String status, String reason) {
-        return new NativeUpdateResult(status, reason, "", false);
+    static BundlePreparationResult of(String status, String reason) {
+        return new BundlePreparationResult(status, reason, "", false);
     }
 
-    static NativeUpdateResult downloaded(String hash, boolean activated) {
-        return new NativeUpdateResult(DOWNLOADED, "", hash, activated);
+    static BundlePreparationResult downloaded(String hash, boolean activated) {
+        return new BundlePreparationResult(DOWNLOADED, "", hash, activated);
     }
 
     public String getStatus() {

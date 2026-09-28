@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-import type { NativeUpdateConfig } from '../../harmony/pushy/src/main/ets/NativeUpdateConfig';
-import { normalizeNativeUpdateConfig } from '../../harmony/pushy/src/main/ets/NativeUpdateConfig';
+import type { PushyConfiguration } from '../../harmony/pushy/src/main/ets/PushyConfiguration';
+import { normalizePushyConfiguration } from '../../harmony/pushy/src/main/ets/PushyConfiguration';
 
 function runtimeSource(relativePath: string): string {
   const source = readFileSync(new URL(relativePath, import.meta.url), 'utf8')
@@ -96,7 +96,7 @@ function clientHarness(native: boolean) {
 describe('native configuration normalization', () => {
   test('appKey alone supplies Pushy endpoints without automatically activating', () => {
     const config = JSON.parse(
-      normalizeNativeUpdateConfig({ appKey: 'test-app' })
+      normalizePushyConfiguration({ appKey: 'test-app' })
     );
     expect(config.endpoints).toEqual([
       'https://update.react-native.cn/api',
@@ -109,7 +109,7 @@ describe('native configuration normalization', () => {
   });
 
   test('custom endpoints do not inherit public discovery, and are deduplicated', () => {
-    const options: NativeUpdateConfig = {
+    const options: PushyConfiguration = {
       appKey: 'test-app',
       endpoints: [
         'https://updates.example/api/',
@@ -118,7 +118,7 @@ describe('native configuration normalization', () => {
       afterDownload: 'setNeedUpdate',
     };
     const original = JSON.stringify(options);
-    const config = JSON.parse(normalizeNativeUpdateConfig(options));
+    const config = JSON.parse(normalizePushyConfiguration(options));
     expect(config.endpoints).toEqual(['https://updates.example/api']);
     expect(config.queryUrls).toEqual([]);
     expect(config.afterDownload).toBe('setNeedUpdate');
@@ -127,7 +127,7 @@ describe('native configuration normalization', () => {
 
   test('allows explicit discovery URLs and version identity overrides', () => {
     const config = JSON.parse(
-      normalizeNativeUpdateConfig({
+      normalizePushyConfiguration({
         appKey: 'test-app',
         endpoints: ['http://localhost:8080/api'],
         queryUrls: ['https://updates.example/endpoints.json?v=1'],
@@ -164,7 +164,7 @@ describe('native configuration normalization', () => {
   ] as const) {
     test(`rejects ${name} before storage is touched`, () => {
       expect(() =>
-        normalizeNativeUpdateConfig(options as unknown as NativeUpdateConfig)
+        normalizePushyConfiguration(options as unknown as PushyConfiguration)
       ).toThrow();
     });
   }

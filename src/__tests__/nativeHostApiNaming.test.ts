@@ -7,7 +7,8 @@ const harmony = 'harmony/pushy/src/main/ets/';
 const source = (path: string) => readFileSync(new URL(path, root), 'utf8');
 
 // These are forbidden host API identifiers, not backend paths or JS bridge names.
-const oldNames = /\b(?:PushyNativeUpdate|NativeUpdateResult|NativeUpdateConfig|RCTPushyNativeUpdateCompletion|checkAndUpdate(?:WithCompletion|Native)?)\b/;
+const oldNames =
+  /\b(?:PushyNativeUpdate|NativeUpdateResult|NativeUpdateConfig|RCTPushyNativeUpdateCompletion|checkAndUpdate(?:WithCompletion|Native)?)\b/;
 
 describe('native host API naming', () => {
   test('Android exposes prepareBundle through PushyRuntime', () => {
@@ -16,9 +17,17 @@ describe('native host API naming', () => {
     expect(entry).toContain('public static void prepareBundle(');
     expect(entry).toContain('NativeCheckOrchestrator.prepareBundle(');
     expect(entry).toContain('void onComplete(BundlePreparationResult result)');
-    expect(source(`${android}BundlePreparationResult.java`)).toContain('class BundlePreparationResult');
-    expect(source(`${android}PushyConfiguration.java`)).toContain('class PushyConfiguration');
-    for (const name of ['PushyNativeUpdate', 'NativeUpdateResult', 'NativeUpdateConfig']) {
+    expect(source(`${android}BundlePreparationResult.java`)).toContain(
+      'class BundlePreparationResult'
+    );
+    expect(source(`${android}PushyConfiguration.java`)).toContain(
+      'class PushyConfiguration'
+    );
+    for (const name of [
+      'PushyNativeUpdate',
+      'NativeUpdateResult',
+      'NativeUpdateConfig',
+    ]) {
       expect(existsSync(new URL(`${android}${name}.java`, root))).toBe(false);
     }
   });
@@ -38,8 +47,12 @@ describe('native host API naming', () => {
   test('Harmony exports the renamed result and configuration types', () => {
     const provider = source(`${harmony}PushyFileJSBundleProvider.ets`);
     const exports = source('harmony/pushy/index.ets');
-    expect(provider).toContain('prepareBundle(): Promise<BundlePreparationResult>');
-    expect(provider).toContain('return prepareBundleNative(this.updateContext)');
+    expect(provider).toContain(
+      'prepareBundle(): Promise<BundlePreparationResult>'
+    );
+    expect(provider).toContain(
+      'return prepareBundleNative(this.updateContext)'
+    );
     expect(provider).toContain('configure(options: PushyConfiguration)');
     expect(exports).toContain('export type { BundlePreparationResult }');
     expect(exports).toContain('export type { PushyConfiguration }');
