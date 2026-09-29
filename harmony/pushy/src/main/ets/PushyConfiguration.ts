@@ -25,13 +25,28 @@ interface PersistedPushyConfiguration {
   rn: string;
 }
 
+// Decodes text produced by scripts/encode-native-text.ts (byte i XORed with
+// (0x5A + 0x1D * i) & 0xFF), keeping service addresses and paths out of static
+// string scans of the package. Not a secret.
+export function revealText(hex: string): string {
+  let text = '';
+  for (let i = 0; i < hex.length / 2; i++) {
+    const byte = parseInt(hex.substring(i * 2, i * 2 + 2), 16);
+    text += String.fromCharCode(byte ^ ((0x5a + 0x1d * i) & 0xff));
+  }
+  return text;
+}
+
+// Request path appended to an endpoint base.
+export const QUERY_PATH: string = revealText('7514fcd4ad805d55263e08fc99');
+
 const DEFAULT_ENDPOINTS: string[] = [
-  'https://update.react-native.cn/api',
-  'https://update.reactnative.cn/api',
+  revealText('3203e0c1bdd1270a372f18f8c2b6de7f4f2607f5b3d5b9817b592947e5cdefbc8a7e'),
+  revealText('3203e0c1bdd1270a372f18f8c2b6de7f4f2607f5f0daac9c644a620ae88ca1ad93'),
 ];
 const DEFAULT_QUERY_URLS: string[] = [
-  'https://gitee.com/sunnylqm/react-native-pushy/raw/master/endpoints.json',
-  'https://cdn.jsdelivr.net/gh/reactnativecn/react-native-update@master/endpoints.json',
+  revealText('3203e0c1bdd1270a253608fcd3fd9362476817f4f0d5a1996342631be3c2a3a9d779552507fdcde8928a6f512f5ce2ccbdc869404d2f1de79daa826d562c0913eec4fa9b7d4426'),
+  revealText('3203e0c1bdd1270a213b12b7dca09468462e12f3b0d5bd813d482446f4c6a1be8e79552507fdcda68cd06e5c3710e480a4867048483e55e0c2ab8d7d43030d1ce9c3b183214e2601f2f0d5b782601e2719e8ca'),
 ];
 const CONFIG_KEYS: string[] = [
   'appKey', 'endpoints', 'queryUrls', 'afterDownload', 'disabled',

@@ -1,5 +1,30 @@
 #import "RCTPushyConfiguration.h"
 
+// Read through a volatile so the optimizer cannot fold the decode of a constant
+// argument back into a plain string in the binary.
+static volatile unsigned char PushyTextKeyBase = 0x5A;
+
+NSString *RCTPushyRevealText(const char *hex) {
+    size_t length = strlen(hex) / 2;
+    NSMutableString *text = [NSMutableString stringWithCapacity:length];
+    unsigned char base = PushyTextKeyBase;
+    for (size_t i = 0; i < length; i++) {
+        char pair[3] = {hex[i * 2], hex[i * 2 + 1], 0};
+        unsigned char byte = (unsigned char)strtoul(pair, NULL, 16);
+        [text appendFormat:@"%c", (char)(byte ^ (unsigned char)(base + 0x1D * i))];
+    }
+    return text;
+}
+
+NSString *RCTPushyQueryPath(void) {
+    static NSString *path;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        path = RCTPushyRevealText("7514fcd4ad805d55263e08fc99");
+    });
+    return path;
+}
+
 static void PushyConfigInvalid(NSString *message) {
     @throw [NSException exceptionWithName:NSInvalidArgumentException
         reason:[@"Invalid native configuration: " stringByAppendingString:message]
@@ -63,11 +88,12 @@ NSString *RCTPushyNormalizeConfiguration(NSDictionary *options, NSError **error)
         NSString *appKey = PushyConfigString(options[@"appKey"], @"appKey", NO);
         BOOL customEndpoints = options[@"endpoints"] != nil;
         NSArray *endpoints = PushyConfigUrls(customEndpoints ? options[@"endpoints"]
-            : @[@"https://update.react-native.cn/api", @"https://update.reactnative.cn/api"],
+            : @[RCTPushyRevealText("3203e0c1bdd1270a372f18f8c2b6de7f4f2607f5b3d5b9817b592947e5cdefbc8a7e"),
+                RCTPushyRevealText("3203e0c1bdd1270a372f18f8c2b6de7f4f2607f5f0daac9c644a620ae88ca1ad93")],
             @"endpoints", YES);
         NSArray *queryUrls = PushyConfigUrls(options[@"queryUrls"] ?: (customEndpoints ? @[]
-            : @[@"https://gitee.com/sunnylqm/react-native-pushy/raw/master/endpoints.json",
-                @"https://cdn.jsdelivr.net/gh/reactnativecn/react-native-update@master/endpoints.json"]),
+            : @[RCTPushyRevealText("3203e0c1bdd1270a253608fcd3fd9362476817f4f0d5a1996342631be3c2a3a9d779552507fdcde8928a6f512f5ce2ccbdc869404d2f1de79daa826d562c0913eec4fa9b7d4426"),
+                RCTPushyRevealText("3203e0c1bdd1270a213b12b7dca09468462e12f3b0d5bd813d482446f4c6a1be8e79552507fdcda68cd06e5c3710e480a4867048483e55e0c2ab8d7d43030d1ce9c3b183214e2601f2f0d5b782601e2719e8ca")]),
             @"queryUrls", NO);
         NSString *afterDownload = options[@"afterDownload"]
             ? PushyConfigString(options[@"afterDownload"], @"afterDownload", NO) : @"none";

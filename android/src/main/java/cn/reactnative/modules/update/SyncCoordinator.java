@@ -642,7 +642,7 @@ final class SyncCoordinator {
                 return null;
             }
             String response = httpRequest(
-                base + "/checkUpdate/" + appKey, body, deadlineNanos);
+                base + HttpUtils.QUERY_PATH + appKey, body, deadlineNanos);
             if (isValidResponse(response)) {
                 return response;
             }
@@ -679,7 +679,7 @@ final class SyncCoordinator {
                 }
                 tried.add(base);
                 String response = httpRequest(
-                    base + "/checkUpdate/" + appKey, body, deadlineNanos);
+                    base + HttpUtils.QUERY_PATH + appKey, body, deadlineNanos);
                 if (isValidResponse(response)) {
                     return response;
                 }

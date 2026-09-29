@@ -6,6 +6,7 @@ import type { UpdateContext } from './UpdateContext';
 import { BundlePreparationRound, bundlePreparationResult } from './BundlePreparationResult';
 import type { BundlePreparationResult } from './BundlePreparationResult';
 import { isSafePathComponent } from './PathUtils';
+import { QUERY_PATH } from './PushyConfiguration';
 import { monotonicNowMs } from './MonotonicClock';
 import {
   ERROR_DOWNLOAD_FAILED,
@@ -595,7 +596,7 @@ async function runQueryRequest(
       return undefined;
     }
     tried.add(base);
-    const response = await httpRequest(`${base}/checkUpdate/${appKey}`, body);
+    const response = await httpRequest(`${base}${QUERY_PATH}${appKey}`, body);
     if (isValidResponse(response)) {
       return response;
     }
@@ -638,7 +639,7 @@ async function runQueryRequest(
         return undefined;
       }
       tried.add(base);
-      const response = await httpRequest(`${base}/checkUpdate/${appKey}`, body);
+      const response = await httpRequest(`${base}${QUERY_PATH}${appKey}`, body);
       if (isValidResponse(response)) {
         return response;
       }

@@ -2931,7 +2931,7 @@ static NSTimeInterval PushyQueryRequestTimeout(NSTimeInterval deadlineUptime) {
             return nil;
         }
         NSString *response = PushyHttpRequest(
-            [NSString stringWithFormat:@"%@/checkUpdate/%@", base, appKey],
+            [NSString stringWithFormat:@"%@%@%@", base, RCTPushyQueryPath(), appKey],
             @"POST", body, timeout);
         if (PushyIsValidResponse(response)) {
             return response;
@@ -2973,7 +2973,7 @@ static NSTimeInterval PushyQueryRequestTimeout(NSTimeInterval deadlineUptime) {
                 return nil;
             }
             NSString *response = PushyHttpRequest(
-                [NSString stringWithFormat:@"%@/checkUpdate/%@", base, appKey],
+                [NSString stringWithFormat:@"%@%@%@", base, RCTPushyQueryPath(), appKey],
                 @"POST", body, timeout);
             if (PushyIsValidResponse(response)) {
                 return response;

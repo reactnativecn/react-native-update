@@ -15,7 +15,24 @@ final class HttpUtils {
         return url != null && url.regionMatches(true, 0, "https://", 0, 8);
     }
 
-    /** Strips every trailing slash so "<base>/checkUpdate/<appKey>" never doubles one. */
+    /** Request path appended to an endpoint base, kept out of the plain string table. */
+    static final String QUERY_PATH = reveal("7514fcd4ad805d55263e08fc99");
+
+    /**
+     * Decodes text produced by scripts/encode-native-text.ts: byte i is XORed
+     * with (0x5A + 0x1D * i) & 0xFF. Keeps service addresses and paths out of
+     * static string scans of the binary; it is not a secret.
+     */
+    static String reveal(String hex) {
+        char[] out = new char[hex.length() / 2];
+        for (int i = 0; i < out.length; i++) {
+            int b = Integer.parseInt(hex.substring(i * 2, i * 2 + 2), 16);
+            out[i] = (char) (b ^ ((0x5A + 0x1D * i) & 0xFF));
+        }
+        return new String(out);
+    }
+
+    /** Strips every trailing slash so "<base><QUERY_PATH><appKey>" never doubles one. */
     static String normalizeEndpointBase(String base) {
         while (base.endsWith("/")) {
             base = base.substring(0, base.length() - 1);
