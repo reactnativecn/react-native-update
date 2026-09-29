@@ -35,23 +35,55 @@ def parseMajorVersion(String versionString) {
     return null
 }
 
+// Parses the version range declared in package.json. Protocol specs such as
+// pnpm's "catalog:v2" / "workspace:*", or "link:", "file:", git URLs, carry no
+// usable version (digits in them are names, not majors), so they yield null;
+// "npm:expo@^52.0.0" aliases are parsed after the last '@'.
+def parseDeclaredMajorVersion(String declared) {
+    if (!declared) {
+        return null
+    }
+    String spec = declared.trim()
+    if (spec.startsWith('npm:')) {
+        return parseMajorVersion(spec.substring(spec.lastIndexOf('@') + 1))
+    }
+    if (spec =~ /^[A-Za-z][\w+.-]*:/ || spec.contains('/')) {
+        return null
+    }
+    return parseMajorVersion(spec)
+}
+
 def resolveInstalledExpoMajorVersion(File projectDir) {
+    def nodeArgs = ['node', '--print', "require('expo/package.json').version"]
     try {
-        def stdout = new ByteArrayOutputStream()
-        def stderr = new ByteArrayOutputStream()
-        def result = project.exec {
-            workingDir projectDir
-            commandLine 'node', '--print', "require('expo/package.json').version"
-            standardOutput = stdout
-            errorOutput = stderr
-            ignoreExitValue true
+        String stdout
+        if (GradleVersion.current() >= GradleVersion.version('7.5')) {
+            // providers.exec exists since Gradle 7.5; Project.exec is gone in 9.
+            def output = providers.exec {
+                workingDir projectDir
+                commandLine nodeArgs
+                ignoreExitValue = true
+            }
+            if (output.result.get().exitValue != 0) {
+                return null
+            }
+            stdout = output.standardOutput.asText.get()
+        } else {
+            def out = new ByteArrayOutputStream()
+            def result = project.exec {
+                workingDir projectDir
+                commandLine nodeArgs
+                standardOutput = out
+                errorOutput = new ByteArrayOutputStream()
+                ignoreExitValue true
+            }
+            if (result.exitValue != 0) {
+                return null
+            }
+            stdout = out.toString()
         }
 
-        if (result.exitValue != 0) {
-            return null
-        }
-
-        return parseMajorVersion(stdout.toString().trim())
+        return parseMajorVersion(stdout.trim())
     } catch (Exception ignored) {
         return null
     }
@@ -98,7 +130,7 @@ def checkProjectInfo() {
             // not numeric: prefer the installed package, then the declaration,
             // and spawn `node` only as the last resort.
             expoMajorVersion = readInstalledExpoMajorVersion(packageJsonFile.parentFile)
-                ?: parseMajorVersion(expoVersionString)
+                ?: parseDeclaredMajorVersion(expoVersionString)
                 ?: resolveInstalledExpoMajorVersion(packageJsonFile.parentFile)
         }
 
