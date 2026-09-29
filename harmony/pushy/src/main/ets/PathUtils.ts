@@ -1,4 +1,4 @@
-import { ERROR_INVALID_OPTIONS, createUpdateError } from './ErrorCodes';
+import { ERROR_INVALID_OPTIONS, createPushyError } from './ErrorCodes';
 
 // Server-controlled identifiers are used as children of the update root. Keep
 // validation in a dependency-light module (ErrorCodes.ts has no imports) so
@@ -18,7 +18,7 @@ export function isSafePathComponent(name: string): boolean {
 
 export function assertSafePathComponent(name: string): string {
   if (!isSafePathComponent(name)) {
-    throw createUpdateError(
+    throw createPushyError(
       ERROR_INVALID_OPTIONS,
       `Invalid path component: ${name}`,
     );

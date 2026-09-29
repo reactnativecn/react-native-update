@@ -20,9 +20,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * waits with a hard timeout, so even a deadlocked rescue (a thread that died
  * holding a lock) can only delay the process death, never prevent it.
  */
-final class CrashRescue {
+final class CrashHold {
     private static final AtomicBoolean installed = new AtomicBoolean(false);
-    private static final AtomicBoolean rescueAttempted = new AtomicBoolean(false);
+    private static final AtomicBoolean holdAttempted = new AtomicBoolean(false);
     // ≈ process start: install() runs during the first bundle resolution.
     // Deliberately not Process.getStartElapsedRealtime(), which is API 24+
     // while the module's minSdk floor is lower — a NoSuchMethodError here
@@ -33,7 +33,7 @@ final class CrashRescue {
     // A held main thread stops input dispatch; stay under the ~5s ANR window.
     private static final long BUDGET_MAIN_THREAD_MILLIS = 3500;
 
-    private CrashRescue() {
+    private CrashHold() {
     }
 
     static void install() {
@@ -47,7 +47,7 @@ final class CrashRescue {
             @Override
             public void uncaughtException(Thread thread, Throwable error) {
                 try {
-                    maybeHoldForRescue(thread);
+                    maybeHold(thread);
                 } catch (Throwable ignored) {
                     // The dying process owes the previous handler its turn no
                     // matter what the rescue did.
@@ -64,16 +64,16 @@ final class CrashRescue {
         });
     }
 
-    private static void maybeHoldForRescue(Thread crashedThread) {
+    private static void maybeHold(Thread crashedThread) {
         // Once per process; a second crashing thread passes straight through
         // instead of waiting behind the first (§11.3: prefer under-rescuing
         // over wedging the teardown).
-        if (!rescueAttempted.compareAndSet(false, true)) {
+        if (!holdAttempted.compareAndSet(false, true)) {
             return;
         }
         long uptimeMillis =
             SystemClock.elapsedRealtime() - installedAtElapsedRealtime;
-        boolean roundInFlight = NativeCheckOrchestrator.isRoundInFlight();
+        boolean roundInFlight = SyncCoordinator.isRoundInFlight();
         // Early crashes are the brick signature; a crash with an in-flight
         // round is worth finishing regardless of uptime. Everything else is
         // an ordinary crash whose UX must not be delayed.
@@ -86,7 +86,7 @@ final class CrashRescue {
             : BUDGET_BACKGROUND_THREAD_MILLIS;
         final long deadlineNanos =
             System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(budgetMillis);
-        Log.i(UpdateContext.TAG, "crash rescue: holding process for up to "
+        Log.i(Texts.LOG_TAG, "crash hold: holding process for up to "
             + budgetMillis + "ms (uptime " + uptimeMillis + "ms)");
 
         final CountDownLatch done = new CountDownLatch(1);
@@ -94,19 +94,19 @@ final class CrashRescue {
             @Override
             public void run() {
                 try {
-                    NativeCheckOrchestrator.runRescue(deadlineNanos);
+                    SyncCoordinator.runHoldRound(deadlineNanos);
                 } catch (Throwable e) {
-                    Log.w(UpdateContext.TAG, "crash rescue failed: " + e);
+                    Log.w(Texts.LOG_TAG, "crash hold failed: " + e);
                 } finally {
                     done.countDown();
                 }
             }
-        }, "pushy-crash-rescue");
+        }, "pushy-crash-hold");
         worker.setDaemon(true);
         worker.start();
         try {
             if (!done.await(budgetMillis, TimeUnit.MILLISECONDS)) {
-                Log.w(UpdateContext.TAG, "crash rescue: budget exhausted, letting go");
+                Log.w(Texts.LOG_TAG, "crash hold: budget exhausted, letting go");
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();

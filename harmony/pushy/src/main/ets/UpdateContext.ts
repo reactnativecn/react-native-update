@@ -14,9 +14,9 @@ import logger from './Logger';
 import {
   KEY_CONFIG,
   KEY_RESP_CACHE,
-  markJsCheckCompleted,
-  scheduleNativeCheck,
-} from './NativeCheckOrchestrator';
+  recordJsRound,
+  scheduleNativeSync,
+} from './SyncCoordinator';
 import NativePatchCore, {
   STATE_OP_CLEAR_FIRST_TIME,
   STATE_OP_CLEAR_ROLLBACK_MARK,
@@ -29,14 +29,15 @@ import NativePatchCore, {
 import { assertSafePathComponent } from './PathUtils';
 import {
   ERROR_SWITCH_VERSION_FAILED,
-  createUpdateError,
+  createPushyError,
   getErrorMessage,
-  toUpdateError,
+  toPushyError,
 } from './ErrorCodes';
+import { APP_DELTA_SUFFIX, PPK_DELTA_SUFFIX, PREFERENCES_NAME, STORAGE_DIR_NAME } from './Texts';
 
 export { isSafePathComponent } from './PathUtils';
 
-const TAG = 'UpdateContext';
+const TAG = 'PushyContext';
 // 常规清理保留最近 3 天内触碰过的条目(续传 partial、staging 同样按 mtime)。
 const CLEANUP_MAX_AGE_DAYS = 3;
 
@@ -101,7 +102,7 @@ export class UpdateContext {
 
   private constructor(context: common.UIAbilityContext) {
     this.context = context;
-    this.rootDir = context.filesDir + '/_update';
+    this.rootDir = `${context.filesDir}/${STORAGE_DIR_NAME}`;
     this.instanceId = `uc#${++UpdateContext.instanceCounter}`;
 
     try {
@@ -145,7 +146,7 @@ export class UpdateContext {
   private initPreferences() {
     try {
       this.preferences = preferences.getPreferencesSync(this.context, {
-        name: 'update',
+        name: PREFERENCES_NAME,
       });
     } catch (e) {
       // Fail fast: a missing preferences store means no state can be persisted,
@@ -447,7 +448,7 @@ export class UpdateContext {
 
     logger.info(
       TAG,
-      `binary version changed, resetting update state id=${this.instanceId}`,
+      `binary version changed, resetting state id=${this.instanceId}`,
     );
     UpdateContext.ignoreRollback = false;
     this.cleanUp();
@@ -477,7 +478,7 @@ export class UpdateContext {
       UpdateContext.nativeConfigGeneration += 1;
       this.preferences.putSync(KEY_CONFIG, config);
       this.preferences.deleteSync(KEY_RESP_CACHE);
-      markJsCheckCompleted('');
+      recordJsRound('');
     }
     // Flush even an equal value so a retry after a storage error can succeed.
     return this.flushPreferences('persist configuration');
@@ -614,7 +615,7 @@ export class UpdateContext {
    * 可插入 reset 的窗口(iOS/Android 用锁达到同一效果)。三项写入以一次
    * flush 落盘,失败拒绝。返回是否提交成功。
    */
-  public async commitNativeCheckResult(
+  public async commitSyncResult(
     expectedGeneration: number,
     hash: string,
     hashInfoJson: string,
@@ -646,7 +647,7 @@ export class UpdateContext {
         this.preferences.putSync(KEY_RESP_CACHE, responseCacheJson);
       }
     } finally {
-      flushed = this.endFlushBatch('commit native check result');
+      flushed = this.endFlushBatch('commit sync result');
     }
     await flushed;
     return true;
@@ -668,7 +669,7 @@ export class UpdateContext {
       params.deadlineUptimeMs = deadlineUptimeMs;
       await this.executeTask(params);
     } catch (e) {
-      logger.error(TAG, `Failed to download full update: ${getErrorMessage(e)}`);
+      logger.error(TAG, `Failed to download full package: ${getErrorMessage(e)}`);
       throw e;
     }
   }
@@ -685,7 +686,7 @@ export class UpdateContext {
       hash,
     );
     params.originHash = assertSafePathComponent(originHash);
-    params.targetFile = `${this.rootDir}/${originHash}_${hash}.ppk.patch`;
+    params.targetFile = `${this.rootDir}/${originHash}_${hash}${PPK_DELTA_SUFFIX}`;
     params.unzipDirectory = `${this.rootDir}/${hash}`;
     params.originDirectory = `${this.rootDir}/${params.originHash}`;
     params.deadlineUptimeMs = deadlineUptimeMs;
@@ -703,14 +704,14 @@ export class UpdateContext {
         url,
         hash,
       );
-      params.targetFile = `${this.rootDir}/${hash}.app.patch`;
+      params.targetFile = `${this.rootDir}/${hash}${APP_DELTA_SUFFIX}`;
       params.unzipDirectory = `${this.rootDir}/${hash}`;
       params.deadlineUptimeMs = deadlineUptimeMs;
       return await this.executeTask(params);
     } catch (e) {
       logger.error(
         TAG,
-        `Failed to download package patch: ${getErrorMessage(e)}`,
+        `Failed to download package delta: ${getErrorMessage(e)}`,
       );
       throw e;
     }
@@ -732,7 +733,7 @@ export class UpdateContext {
     }
   }
 
-  // 原生冷启动检测(NativeCheckOrchestrator)用来跳过已就绪版本的重复下载
+  // 原生冷启动检测(SyncCoordinator)用来跳过已就绪版本的重复下载
   // ——alert 类策略下版本已下载但未激活,若不判在这里会每次冷启动重下一遍。
   public hasDownloadedVersion(hash: string): boolean {
     try {
@@ -752,7 +753,7 @@ export class UpdateContext {
    */
   private assertActivatable(safeHash: string): boolean {
     if (!fileIo.accessSync(this.getBundlePath(safeHash))) {
-      throw createUpdateError(
+      throw createPushyError(
         ERROR_SWITCH_VERSION_FAILED,
         `Bundle version ${safeHash} not found.`,
       );
@@ -761,7 +762,7 @@ export class UpdateContext {
       this.readString('currentVersion') === safeHash ||
       this.readString('lastVersion') === safeHash;
     if (!this.hasDownloadedVersion(safeHash) && !legacyActivated) {
-      throw createUpdateError(
+      throw createPushyError(
         ERROR_SWITCH_VERSION_FAILED,
         `Bundle version ${safeHash} is incomplete.`,
       );
@@ -801,7 +802,7 @@ export class UpdateContext {
       await this.flushPreferences(`switch version ${safeHash}`);
     } catch (e) {
       logger.error(TAG, `Failed to switch version: ${getErrorMessage(e)}`);
-      throw toUpdateError(e, ERROR_SWITCH_VERSION_FAILED);
+      throw toPushyError(e, ERROR_SWITCH_VERSION_FAILED);
     }
   }
 
@@ -818,7 +819,7 @@ export class UpdateContext {
   public getBundleUrl() {
     UpdateContext.isUsingBundleUrl = true;
     this.trace('getBundleUrl:enter');
-    let nativeCheckRolledBackVersion = '';
+    let syncRolledBackVersion = '';
     try {
       const stateBeforeLaunch = this.getStateSnapshot();
       const launchState = NativePatchCore.runStateCore(
@@ -828,7 +829,7 @@ export class UpdateContext {
         UpdateContext.ignoreRollback,
         true,
       );
-      nativeCheckRolledBackVersion = launchState.rolledBackVersion || '';
+      syncRolledBackVersion = launchState.rolledBackVersion || '';
       if (launchState.didRollback) {
         // The crash-protection rollback: the new version never called
         // markSuccess. Keep this visible in release logs.
@@ -865,24 +866,24 @@ export class UpdateContext {
           if (!fileIo.accessSync(bundleFile)) {
             logger.error(TAG, `Bundle version ${version} not found.`);
             version = this.rollBack();
-            nativeCheckRolledBackVersion = this.rolledBackVersion();
+            syncRolledBackVersion = this.rolledBackVersion();
             continue;
           }
           UpdateContext.launchVersion = version;
-          nativeCheckRolledBackVersion = this.rolledBackVersion();
+          syncRolledBackVersion = this.rolledBackVersion();
           return bundleFile;
         } catch (e) {
           logger.error(TAG, `Failed to access bundle file: ${getErrorMessage(e)}`);
           version = this.rollBack();
-          nativeCheckRolledBackVersion = this.rolledBackVersion();
+          syncRolledBackVersion = this.rolledBackVersion();
         }
       }
-      nativeCheckRolledBackVersion = this.rolledBackVersion();
+      syncRolledBackVersion = this.rolledBackVersion();
       return '';
     } finally {
       // State corruption is exactly when the native rescue check is needed;
       // schedule even if state parsing/rollback throws before a normal exit.
-      scheduleNativeCheck(this, nativeCheckRolledBackVersion);
+      scheduleNativeSync(this, syncRolledBackVersion);
     }
   }
 
@@ -936,7 +937,7 @@ export class UpdateContext {
   // 安装的二进制,每次(覆盖)安装 updateTime 都会变,每个安装只算一次。
   private static readonly KEY_BUNDLE_HASH_CACHE = 'bundleHashCache';
 
-  private getBundleUpdateTime(): number {
+  private getBundleModifiedTime(): number {
     try {
       const bundleInfo = bundleManager.getBundleInfoForSelfSync(
         this.getBundleFlags(),
@@ -945,7 +946,7 @@ export class UpdateContext {
     } catch (error) {
       logger.error(
         TAG,
-        `Failed to get bundle update time: ${getErrorMessage(error)}`,
+        `Failed to get bundle modification time: ${getErrorMessage(error)}`,
       );
       return 0;
     }
@@ -962,7 +963,7 @@ export class UpdateContext {
       // debug 下 bundle 由 metro 提供,与 dev 删 buildTime 的行为对齐。
       return '';
     }
-    const cachePrefix = `${this.getPackageVersion()}|${this.getBundleUpdateTime()}|`;
+    const cachePrefix = `${this.getPackageVersion()}|${this.getBundleModifiedTime()}|`;
     const cached = this.readString(UpdateContext.KEY_BUNDLE_HASH_CACHE);
     if (cached.startsWith(cachePrefix)) {
       return cached.slice(cachePrefix.length);

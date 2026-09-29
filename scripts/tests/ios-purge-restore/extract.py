@@ -75,7 +75,7 @@ GLOBALS = [
     'keyHashInfo', 'keyFirstLoadMarked', 'keyRolledBackMarked',
     'KeyPackageUpdatedMarked', 'keyNativeCheckCache', 'BUNDLE_FILE_NAME',
     'pushyStateLock', 'ignoreRollback', 'pushyIsUsingBundleUrl',
-    'pushyResetGeneration', 'pushyLaunchVersion', 'pushyCrashRescueActive',
+    'pushyResetGeneration', 'pushyLaunchVersion', 'pushyCrashHoldActive',
     'pushyPurgeRestoreActive', 'pushyPurgeRestoreWindowOpen',
     'pushyHostRoundResult', 'kPushyPurgeRestoreBudget',
 ]

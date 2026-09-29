@@ -6,13 +6,14 @@ import {
   BundlePreparationRound,
   bundlePreparationResult,
 } from '../../harmony/pushy/src/main/ets/BundlePreparationResult';
+import { STATUS_NONE } from '../../harmony/pushy/src/main/ets/Texts';
 
 // Evaluate the actual Harmony orchestrator in an isolated VM per test. Only
 // platform imports, HTTP and download IO are substituted; entry points,
 // scheduling, configuration gates, result mapping and reset checks are real.
 const source = readFileSync(
   new URL(
-    '../../harmony/pushy/src/main/ets/NativeCheckOrchestrator.ts',
+    '../../harmony/pushy/src/main/ets/SyncCoordinator.ts',
     import.meta.url
   ),
   'utf8'
@@ -62,13 +63,13 @@ function harness() {
     getBundleUrl: () => {
       throw new Error('host checks must not resolve the launch bundle again');
     },
-    commitNativeCheckResult: async (generation: number) => {
+    commitSyncResult: async (generation: number) => {
       state.commits += 1;
       return generation === state.generation && state.commitOK;
     },
   };
   const runtime = runInNewContext(
-    `${javascript}\nrunCheckRequest = mockCheck;\nperformAttempts = mockDownload;\n({ check: prepareBundleNative, schedule: scheduleNativeCheck });`,
+    `${javascript}\nrunQueryRequest = mockCheck;\nperformAttempts = mockDownload;\n({ check: prepareBundleNative, schedule: scheduleNativeSync });`,
     {
       BundlePreparationRound,
       bundlePreparationResult,
@@ -77,10 +78,11 @@ function harness() {
       setTimeout: (callback: () => void) => timers.push(callback),
       isSafePathComponent: (hash: string) => /^[a-zA-Z0-9_-]+$/.test(hash),
       getErrorMessage: (error: unknown) => String(error),
+      STATUS_NONE,
       NativePatchCore: {
         getSupportedDiffVersion: () => 2,
-        buildCheckRequestBody: (input: string) => input,
-        handleCheckResponse: (response: string) => response,
+        buildRequestBody: (input: string) => input,
+        handleResponse: (response: string) => response,
       },
       mockCheck: async () => {
         state.checks += 1;

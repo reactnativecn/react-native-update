@@ -98,7 +98,7 @@ const config = {
     strict: true,
     forceConsistentCasingInFileNames: true,
     paths: {
-      // @rnoh and librnupdate.so are stubbed in types/ (see comments there);
+      // @rnoh and librnpushy.so are stubbed in types/ (see comments there);
       // @ohos/@kit resolve to the real SDK declarations.
       '@ohos.*': [path.join(sdkEts, 'api', '@ohos.*')],
       '@kit.*': [path.join(sdkEts, 'kits', '@kit.*')],

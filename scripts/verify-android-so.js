@@ -2,7 +2,7 @@
 /**
  * Verify the prebuilt Android native libraries shipped in android/lib/ are
  * present for every ABI and export the JNI symbols the Java layer binds. This
- * guards against publishing an npm package whose committed librnupdate.so is
+ * guards against publishing an npm package whose committed librnpushy.so is
  * stale/missing after a cpp/patch_core change (which would crash consumers at
  * runtime with UnsatisfiedLinkError while CI stays green).
  *
@@ -27,21 +27,10 @@ const ABI_MACHINE = {
   x86_64: 0x3e, // EM_X86_64
 };
 
-// JNI entry points the Java `native` declarations bind to. Keep in sync with
-// the native methods in android/src/main/java/cn/reactnative/modules/update/.
-const REQUIRED_SYMBOLS = [
-  'Java_cn_reactnative_modules_update_DownloadTask_applyPatchFromFileSource',
-  'Java_cn_reactnative_modules_update_DownloadTask_cleanupOldEntries',
-  'Java_cn_reactnative_modules_update_DownloadTask_buildArchivePatchPlan',
-  'Java_cn_reactnative_modules_update_DownloadTask_buildCopyGroups',
-  'Java_cn_reactnative_modules_update_UpdateContext_syncStateWithBinaryVersion',
-  'Java_cn_reactnative_modules_update_UpdateContext_runStateCore',
-  'Java_cn_reactnative_modules_update_NativeUpdateCore_getSupportedDiffVersion',
-  'Java_cn_reactnative_modules_update_NativeUpdateFlow_buildCheckRequestBody',
-  'Java_cn_reactnative_modules_update_NativeUpdateFlow_orderEndpointCandidates',
-  'Java_cn_reactnative_modules_update_NativeUpdateFlow_handleCheckResponse',
-  'Java_cn_reactnative_modules_update_NativeUpdateFlow_isValidCheckResponse',
-];
+// Native methods are registered from JNI_OnLoad (cpp/patch_core/
+// jni_registration.cpp), so JNI_OnLoad must be the library's only JNI export.
+// A leftover Java_* export means a stale .so built before that change.
+const REQUIRED_SYMBOLS = ['JNI_OnLoad'];
 
 const SHT_DYNSYM = 11;
 const SHN_UNDEF = 0;
@@ -158,7 +147,7 @@ function readDynamicSymbols(buffer, expectedMachine) {
 
 let failed = false;
 for (const abi of ABIS) {
-  const soPath = path.join(LIB_DIR, abi, 'librnupdate.so');
+  const soPath = path.join(LIB_DIR, abi, 'librnpushy.so');
   let stat;
   try {
     stat = fs.statSync(soPath);
@@ -205,6 +194,16 @@ for (const abi of ABIS) {
     }
   }
 
+  const staticJni = [...symbols].filter((symbol) => symbol.startsWith('Java_'));
+  if (staticJni.length) {
+    for (const symbol of staticJni) {
+      console.error(
+        `error: ${soPath} still exports ${symbol}; natives must be registered in JNI_OnLoad (stale .so? rebuild with 'npm run build:so')`
+      );
+    }
+    failed = true;
+  }
+
   const missing = REQUIRED_SYMBOLS.filter((symbol) => !symbols.has(symbol));
   if (missing.length) {
     for (const symbol of missing) {
@@ -214,7 +213,7 @@ for (const abi of ABIS) {
     }
     failed = true;
   } else {
-    console.log(`ok: ${abi} librnupdate.so exports all required symbols`);
+    console.log(`ok: ${abi} librnpushy.so exports all required symbols`);
   }
 }
 

@@ -12,6 +12,7 @@
 #include "cpp/patch_core/state_core.h"
 #include "cpp/patch_core/patch_core.h"
 #include "cpp/patch_core/error_codes.h"
+#include "ios/RCTPushy/RCTPushyConfiguration.h"
 
 #undef TARGET_OS_TV
 #define TARGET_OS_TV 1
@@ -143,7 +144,7 @@ static void PushyRejectError(RCTPromiseRejectBlock reject, NSError *error) {
 
 // Filesystem cleanup is not under test. Keep the real declaration/return type;
 // the real reset body (including its asynchronous completion) still executes.
-namespace pushy { namespace patch {
+namespace pushy { namespace delta {
 Status CleanupOldEntries(const std::string&, const std::vector<std::string>&,
                          int max_age_days, std::time_t) {
     Expect(max_age_days == 0, "reset requests a full cleanup");
@@ -337,7 +338,7 @@ static void SetUp(Order selected) {
         ignoreRollback.store(false);
         pushyIsUsingBundleUrl.store(false);
         pushyLaunchVersion = nil;
-        pushyCrashRescueActive.store(false);
+        pushyCrashHoldActive.store(false);
         pushyPurgeRestoreActive.store(false);
         pushyPurgeRestoreWindowOpen = false;
         pushyHostRoundResult = nil;

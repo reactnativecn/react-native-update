@@ -5,8 +5,11 @@
 #include <string>
 #include <vector>
 
+// Keep the core internal to whichever binary links it (see podspec Core).
+#pragma GCC visibility push(hidden)
+
 namespace pushy {
-namespace patch {
+namespace delta {
 
 struct Status {
   bool ok;
@@ -51,22 +54,22 @@ struct FileSourcePatchOptions {
   std::string bundle_hbc_transform_meta;
 };
 
-class BundlePatcher {
+class BundleRebuilder {
  public:
-  virtual ~BundlePatcher() = default;
+  virtual ~BundleRebuilder() = default;
   virtual Status Apply(
       const std::string& origin_bundle_path,
       const std::string& bundle_patch_path,
       const std::string& destination_bundle_path) const = 0;
 };
 
-const BundlePatcher& DefaultBundlePatcher();
+const BundleRebuilder& DefaultBundleRebuilder();
 
 Status ValidateManifest(const PatchManifest& manifest);
 
 Status ApplyPatchFromFileSource(
     const FileSourcePatchOptions& options,
-    const BundlePatcher& bundle_patcher = DefaultBundlePatcher());
+    const BundleRebuilder& bundle_patcher = DefaultBundleRebuilder());
 
 // Removes every non-dot entry under root_dir older than max_age_days whose
 // name is not in keep_names. Callers must include every version that may
@@ -94,5 +97,7 @@ namespace internal {
 extern bool g_disable_hard_links;
 }  // namespace internal
 
-}  // namespace patch
+}  // namespace delta
 }  // namespace pushy
+
+#pragma GCC visibility pop

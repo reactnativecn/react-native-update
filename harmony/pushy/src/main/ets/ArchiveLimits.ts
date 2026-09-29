@@ -2,8 +2,8 @@ import fileIo from '@ohos.file.fs';
 import statvfs from '@ohos.file.statvfs';
 import {
   ERROR_FILE_OPERATION_FAILED,
-  ERROR_PATCH_FAILED,
-  createUpdateError,
+  ERROR_DELTA_FAILED,
+  createPushyError,
 } from './ErrorCodes';
 import { isReservedEntryName } from './InstallRecord';
 
@@ -32,8 +32,8 @@ export function checkUncompressedSize(
   uncompressedBytes: number,
 ): void {
   if (uncompressedBytes > MAX_TOTAL_UNCOMPRESSED_BYTES) {
-    throw createUpdateError(
-      ERROR_PATCH_FAILED,
+    throw createPushyError(
+      ERROR_DELTA_FAILED,
       `archive expands beyond ${MAX_TOTAL_UNCOMPRESSED_BYTES} bytes ` +
         `(${uncompressedBytes})`,
     );
@@ -43,8 +43,8 @@ export function checkUncompressedSize(
     archiveBytes > 0 &&
     uncompressedBytes > archiveBytes * MAX_COMPRESSION_RATIO
   ) {
-    throw createUpdateError(
-      ERROR_PATCH_FAILED,
+    throw createPushyError(
+      ERROR_DELTA_FAILED,
       `archive compression ratio exceeds ${MAX_COMPRESSION_RATIO}:1 ` +
         `(${uncompressedBytes}/${archiveBytes})`,
     );
@@ -78,7 +78,7 @@ export async function ensureFreeSpace(
   }
   const needed = Math.max(0, bytesToWrite) + FREE_DISK_MARGIN_BYTES;
   if (free < needed) {
-    throw createUpdateError(
+    throw createPushyError(
       ERROR_FILE_OPERATION_FAILED,
       `insufficient disk space: need ${needed} bytes, have ${free}`,
     );
@@ -103,8 +103,8 @@ export async function measureExtractedDirectory(
   );
   for (const name of names) {
     if (isReservedEntryName(name)) {
-      throw createUpdateError(
-        ERROR_PATCH_FAILED,
+      throw createPushyError(
+        ERROR_DELTA_FAILED,
         `archive contains reserved entry ${name}`,
       );
     }
@@ -112,8 +112,8 @@ export async function measureExtractedDirectory(
     const stat = await fileIo.stat(path);
     acc.entries += 1;
     if (acc.entries > MAX_ENTRIES) {
-      throw createUpdateError(
-        ERROR_PATCH_FAILED,
+      throw createPushyError(
+        ERROR_DELTA_FAILED,
         `archive has too many entries (> ${MAX_ENTRIES})`,
       );
     }
@@ -122,15 +122,15 @@ export async function measureExtractedDirectory(
       continue;
     }
     if (stat.size > MAX_ENTRY_BYTES) {
-      throw createUpdateError(
-        ERROR_PATCH_FAILED,
+      throw createPushyError(
+        ERROR_DELTA_FAILED,
         `archive entry too large: ${name} (${stat.size} bytes)`,
       );
     }
     acc.bytes += stat.size;
     if (acc.bytes > MAX_TOTAL_UNCOMPRESSED_BYTES) {
-      throw createUpdateError(
-        ERROR_PATCH_FAILED,
+      throw createPushyError(
+        ERROR_DELTA_FAILED,
         `archive expands beyond ${MAX_TOTAL_UNCOMPRESSED_BYTES} bytes`,
       );
     }

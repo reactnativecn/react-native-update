@@ -2,8 +2,8 @@ package cn.reactnative.modules.update;
 
 /**
  * Pure string helpers for the HTTP paths (no Android or OkHttp types), kept
- * apart from DownloadTask / NativeCheckOrchestrator so they stay testable on
- * a plain JVM: DownloadTask loads librnupdate.so in its static initializer
+ * apart from DownloadTask / SyncCoordinator so they stay testable on
+ * a plain JVM: DownloadTask loads librnpushy.so in its static initializer
  * and both pull in OkHttp.
  */
 final class HttpUtils {
@@ -15,7 +15,10 @@ final class HttpUtils {
         return url != null && url.regionMatches(true, 0, "https://", 0, 8);
     }
 
-    /** Strips every trailing slash so "<base>/checkUpdate/<appKey>" never doubles one. */
+    /** Request path appended to an endpoint base, kept out of the plain string table. */
+    static final String QUERY_PATH = Texts.reveal("7514fcd4ad805d55263e08fc99");
+
+    /** Strips every trailing slash so "<base><QUERY_PATH><appKey>" never doubles one. */
     static String normalizeEndpointBase(String base) {
         while (base.endsWith("/")) {
             base = base.substring(0, base.length() - 1);

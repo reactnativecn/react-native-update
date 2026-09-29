@@ -1,7 +1,7 @@
 import fileIo from '@ohos.file.fs';
 import { util } from '@kit.ArkTS';
 import NativePatchCore from './NativePatchCore';
-import { ERROR_SWITCH_VERSION_FAILED, createUpdateError } from './ErrorCodes';
+import { ERROR_SWITCH_VERSION_FAILED, createPushyError } from './ErrorCodes';
 
 // ArkTS mirror of cpp/patch_core/install_record.h — keep in sync by hand
 // (harmony/pushy/src/test/check-constant-parity.js asserts the values match).
@@ -141,7 +141,7 @@ export function expectedBundleSha256ForActivation(
   versionHash: string,
 ): string {
   if (record === null) {
-    throw createUpdateError(
+    throw createPushyError(
       ERROR_SWITCH_VERSION_FAILED,
       `Bundle version ${versionHash} has no valid completion record.`,
     );
@@ -153,7 +153,7 @@ export function expectedBundleSha256ForActivation(
     record.schema !== INSTALL_RECORD_SCHEMA ||
     record.versionHash !== versionHash
   ) {
-    throw createUpdateError(
+    throw createPushyError(
       ERROR_SWITCH_VERSION_FAILED,
       `Bundle version ${versionHash} completion record mismatch.`,
     );
@@ -179,7 +179,7 @@ export async function verifyInstallForActivation(
   }
   const actual = await NativePatchCore.sha256HexFileAsync(bundlePath);
   if (actual.toLowerCase() !== expected.toLowerCase()) {
-    throw createUpdateError(
+    throw createPushyError(
       ERROR_SWITCH_VERSION_FAILED,
       `Bundle version ${versionHash} bundle digest mismatch.`,
     );

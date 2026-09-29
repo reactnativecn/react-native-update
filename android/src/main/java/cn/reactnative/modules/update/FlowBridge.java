@@ -6,20 +6,20 @@ package cn.reactnative.modules.update;
  * the decision layer's own boundary and keeps this surface trivially stable.
  * A null return means the input did not parse; callers skip the check round.
  */
-final class NativeUpdateFlow {
+final class FlowBridge {
     static {
-        NativeUpdateCore.ensureLoaded();
+        NativeCore.ensureLoaded();
     }
 
-    private NativeUpdateFlow() {
+    private FlowBridge() {
     }
 
-    static native String buildCheckRequestBody(String inputJson);
+    static native String buildRequestBody(String inputJson);
 
     static native String orderEndpointCandidates(String endpointsJson, double randomSample);
 
-    static native boolean isValidCheckResponse(String responseText);
+    static native boolean isValidResponse(String responseText);
 
-    static native String handleCheckResponse(
+    static native String handleResponse(
         String responseText, String identityJson, String afterDownload);
 }

@@ -23,6 +23,9 @@
 //   - harmony/pushy/src/main/ets/InstallRecord.ts
 // iOS (RCTPushy.mm) includes this header directly.
 
+// Keep the core internal to whichever binary links it (see podspec Core).
+#pragma GCC visibility push(hidden)
+
 namespace pushy {
 namespace install_record {
 
@@ -32,5 +35,7 @@ constexpr const char* kStagingSuffix = ".staging";
 
 }  // namespace install_record
 }  // namespace pushy
+
+#pragma GCC visibility pop
 
 #endif  // PUSHY_PATCH_CORE_INSTALL_RECORD_H_

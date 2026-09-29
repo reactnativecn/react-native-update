@@ -5,11 +5,13 @@
 //
 // RNOH 的异步桥以纯字符串 reject,Error 上的 `code` 属性到 JS 侧很可能已丢。
 // 因此每个错误的消息都以 `[CODE] ` 前缀开头,JS 鸿蒙分支据此解析回 code。
-// 本文件不依赖任何其他模块,任何文件都可安全引用它而不会形成 import 环。
+// 本文件只依赖同样无依赖的 Texts,任何文件都可安全引用它而不会形成 import 环。
+
+import { revealText } from './Texts';
 
 export const ERROR_INVALID_OPTIONS = 'INVALID_OPTIONS';
 export const ERROR_DOWNLOAD_FAILED = 'DOWNLOAD_FAILED';
-export const ERROR_PATCH_FAILED = 'PATCH_FAILED';
+export const ERROR_DELTA_FAILED = revealText('0a36c0f286b44e640b1339dd');
 export const ERROR_FILE_OPERATION_FAILED = 'FILE_OPERATION_FAILED';
 export const ERROR_SWITCH_VERSION_FAILED = 'SWITCH_VERSION_FAILED';
 export const ERROR_MARK_SUCCESS_FAILED = 'MARK_SUCCESS_FAILED';
@@ -23,14 +25,14 @@ export const ERROR_APK_INSTALL_FAILED = 'APK_INSTALL_FAILED';
 
 /**
  * 带稳定错误码的 Error:`code` 是属性,消息同时带 `[CODE] ` 前缀(桥丢属性时
- * JS 仍能解析)。始终经 createUpdateError / toUpdateError 构造。
+ * JS 仍能解析)。始终经 createPushyError / toPushyError 构造。
  */
-export class UpdateError extends Error {
+export class PushyError extends Error {
   readonly code: string;
 
   constructor(code: string, message: string) {
     super(`[${code}] ${message}`);
-    this.name = 'UpdateError';
+    this.name = 'PushyError';
     this.code = code;
   }
 }
@@ -46,19 +48,19 @@ export function getErrorMessage(error: unknown): string {
   return String(error);
 }
 
-export function createUpdateError(code: string, message: string): UpdateError {
-  return new UpdateError(code, message);
+export function createPushyError(code: string, message: string): PushyError {
+  return new PushyError(code, message);
 }
 
 /**
- * 给未带码的错误补上 `code`:已是 UpdateError 的原样返回(保留其更精确的码
+ * 给未带码的错误补上 `code`:已是 PushyError 的原样返回(保留其更精确的码
  * 与前缀,绝不叠两层前缀),其余按 defaultCode 重包并保留原消息。
  */
-export function toUpdateError(error: unknown, defaultCode: string): UpdateError {
-  if (error instanceof UpdateError) {
+export function toPushyError(error: unknown, defaultCode: string): PushyError {
+  if (error instanceof PushyError) {
     return error;
   }
-  return new UpdateError(defaultCode, getErrorMessage(error));
+  return new PushyError(defaultCode, getErrorMessage(error));
 }
 
 /** 从 `[CODE] message` 形式的消息里解析错误码;无前缀返回空串。 */

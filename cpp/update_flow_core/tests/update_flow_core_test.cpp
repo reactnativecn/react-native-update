@@ -23,39 +23,39 @@ namespace {
 Value Dispatch(const std::string& fn, const Value& args, bool* known) {
   *known = true;
   if (fn == "murmurhash3_32_gc") {
-    return Value::Number(updateflow::Murmur3_32(args.At(0).AsString()));
+    return Value::Number(flowcore::Murmur3_32(args.At(0).AsString()));
   }
   if (fn == "isInRollout") {
     return Value::Bool(
-        updateflow::IsInRollout(args.At(0).AsNumber(), args.At(1).AsString()));
+        flowcore::IsInRollout(args.At(0).AsNumber(), args.At(1).AsString()));
   }
   if (fn == "isMirrorRetryableCode") {
     return Value::Bool(
-        updateflow::IsMirrorRetryableCode(args.At(0).AsString()));
+        flowcore::IsMirrorRetryableCode(args.At(0).AsString()));
   }
   if (fn == "joinUrls") {
-    return updateflow::JoinUrls(args.At(0), args.At(1));
+    return flowcore::JoinUrls(args.At(0), args.At(1));
   }
   if (fn == "orderEndpointCandidates") {
-    return updateflow::OrderEndpointCandidates(args.At(0),
+    return flowcore::OrderEndpointCandidates(args.At(0),
                                                args.At(1).AsNumber());
   }
   if (fn == "buildCheckRequestBody") {
-    return updateflow::BuildCheckRequestBody(args.At(0));
+    return flowcore::BuildRequestBody(args.At(0));
   }
   if (fn == "resolveCheckResult") {
-    return updateflow::ResolveCheckResult(args.At(0), args.At(1));
+    return flowcore::ResolveResult(args.At(0), args.At(1));
   }
   if (fn == "decideDownload") {
-    return updateflow::DecideDownload(args.At(0), args.At(1),
+    return flowcore::DecideDownload(args.At(0), args.At(1),
                                       args.At(2).Truthy());
   }
   if (fn == "isValidCheckResponse") {
     return Value::Bool(
-        updateflow::IsValidCheckResponse(args.At(0).AsString()));
+        flowcore::IsValidResponse(args.At(0).AsString()));
   }
   if (fn == "shouldActivateAfterDownload") {
-    return Value::Bool(updateflow::ShouldActivateAfterDownload(
+    return Value::Bool(flowcore::ShouldActivateAfterDownload(
         args.At(0), args.At(1).AsString()));
   }
   *known = false;
@@ -302,7 +302,7 @@ int RunInputCaps() {
     // Through the pipeline an oversized body is an invalid response.
     std::string body = "{\"update\":true,\"hash\":\"h\",\"pad\":\"" +
                        std::string(flowjson::kMaxInputBytes, 'x') + "\"}";
-    Value decision = updateflow::HandleCheckResponse(body, Value::Object(),
+    Value decision = flowcore::HandleResponse(body, Value::Object(),
                                                      false, "none");
     if (decision.Get("reason").AsString() != "invalidResponse") {
       std::fprintf(stderr, "caps: oversized body must yield invalidResponse\n");
@@ -312,7 +312,7 @@ int RunInputCaps() {
   return failures;
 }
 
-// HandleCheckResponse is pure composition (no decision logic of its own), so
+// HandleResponse is pure composition (no decision logic of its own), so
 // it is tested directly here instead of via TS-generated vectors: response
 // text in, canonical decision out.
 int RunHandleCheckResponse() {
@@ -404,12 +404,12 @@ int RunHandleCheckResponse() {
        "\"config\":{\"forceBoot\":true}}}"},
   };
   for (const auto& c : cases) {
-    Value decision = updateflow::HandleCheckResponse(c.response, identity,
+    Value decision = flowcore::HandleResponse(c.response, identity,
                                                      false, c.afterDownload);
     std::string actual = Stringify(decision);
     if (actual != c.expected) {
       std::fprintf(stderr,
-                   "handleCheckResponse %s MISMATCH\n  expected: %s\n"
+                   "handleResponse %s MISMATCH\n  expected: %s\n"
                    "  actual:   %s\n",
                    c.name, c.expected, actual.c_str());
       failures++;

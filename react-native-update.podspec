@@ -166,9 +166,12 @@ Pod::Spec.new do |s|
     s.dependency 'ExpoModulesCore'
   end
 
-  s.subspec 'RCTPushy' do |ss|
-    ss.source_files = ['ios/RCTPushy/*.{h,m,mm}',
-                       'cpp/update_flow_core/flow_json.{h,cpp}',
+  # Shared C/C++ core. Built with hidden visibility so none of its symbols are
+  # exported when the pod is linked as a dynamic framework. Per-file flags: the
+  # Objective-C classes in the RCTPushy subspec keep default visibility, which
+  # the host app and the Expo module need to link against RCTPushy.
+  s.subspec 'Core' do |ss|
+    ss.source_files = ['cpp/update_flow_core/flow_json.{h,cpp}',
                        'cpp/update_flow_core/update_flow_core.{h,cpp}',
                        'cpp/patch_core/archive_patch_core.{h,cpp}',
                        'cpp/patch_core/digest.{h,cpp}',
@@ -181,6 +184,15 @@ Pod::Spec.new do |s|
                        'android/jni/HDiffPatch/file_for_patch.{h,c}',
                        'android/jni/lzma/C/LzmaDec.{h,c}',
                        'android/jni/lzma/C/Lzma2Dec.{h,c}']
+    ss.private_header_files = ['cpp/**/*.h', 'android/jni/**/*.h']
+    # NDEBUG matches the prebuilt Android library and keeps third-party assertion
+    # text (file and expression strings) out of the binary.
+    ss.compiler_flags = '-DNDEBUG -fvisibility=hidden -fvisibility-inlines-hidden'
+  end
+
+  s.subspec 'RCTPushy' do |ss|
+    ss.dependency 'react-native-update/Core'
+    ss.source_files = ['ios/RCTPushy/*.{h,m,mm}']
     ss.public_header_files = ['ios/RCTPushy/*.h']
   end
 

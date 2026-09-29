@@ -14,6 +14,11 @@
 // Human-readable messages are NOT part of this contract: they may differ per
 // platform and locale. Only the codes are stable.
 
+#include "obscured_text.h"
+
+// Keep the core internal to whichever binary links it (see podspec Core).
+#pragma GCC visibility push(hidden)
+
 namespace pushy {
 namespace error_codes {
 
@@ -22,7 +27,7 @@ constexpr const char* kInvalidOptions = "INVALID_OPTIONS";
 // Native download failed (network error, bad HTTP status, truncated body).
 constexpr const char* kDownloadFailed = "DOWNLOAD_FAILED";
 // Unzip or hdiff patch application failed.
-constexpr const char* kPatchFailed = "PATCH_FAILED";
+inline const char* const kDeltaFailed = text::RevealStatic("0a36c0f286b44e640b1339dd");
 // Local file or state persistence operation failed.
 constexpr const char* kFileOperationFailed = "FILE_OPERATION_FAILED";
 // switchVersion / setNeedUpdate state transition failed.
@@ -48,5 +53,7 @@ constexpr const char* kApkInstallFailed = "APK_INSTALL_FAILED";
 
 }  // namespace error_codes
 }  // namespace pushy
+
+#pragma GCC visibility pop
 
 #endif  // PUSHY_PATCH_CORE_ERROR_CODES_H_

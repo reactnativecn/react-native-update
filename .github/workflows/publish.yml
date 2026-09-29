@@ -45,7 +45,7 @@ jobs:
             exit 0
           fi
           echo "Previous tag is $PREV_TAG"
-          # The HAR embeds librnupdate.so compiled from cpp/patch_core,
+          # The HAR embeds librnpushy.so compiled from cpp/patch_core,
           # cpp/update_flow_core, android/jni/hpatch.c and the HDiffPatch/lzma
           # submodules (harmony/pushy/src/main/cpp/CMakeLists.txt), so any of
           # those changing must rebuild it too — reusing the previous HAR
@@ -60,7 +60,7 @@ jobs:
           fi
 
   # Rebuild the Android native libraries from source so the published package
-  # can never ship a stale librnupdate.so after a cpp/patch_core change (the
+  # can never ship a stale librnpushy.so after a cpp/patch_core change (the
   # committed binaries are for local dev / git installs only).
   build_android_so:
     runs-on: ubuntu-latest  # npm --provenance requires a GitHub-hosted runner

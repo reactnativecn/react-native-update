@@ -19,10 +19,10 @@ import java.util.concurrent.ThreadFactory;
 
 public class UpdateContext {
     static {
-        NativeUpdateCore.ensureLoaded();
+        NativeCore.ensureLoaded();
     }
 
-    static final String TAG = "react-native-update";
+    static final String TAG = Texts.LOG_TAG;
     static final boolean DEBUG = BuildConfig.DEBUG;
 
     private final Context context;
@@ -107,13 +107,13 @@ public class UpdateContext {
             }
         });
 
-        this.rootDir = new File(this.context.getFilesDir(), "_update");
+        this.rootDir = new File(this.context.getFilesDir(), Texts.reveal("0502e4d5af9f6d"));
 
         if (!rootDir.exists() && !rootDir.mkdirs() && !rootDir.exists()) {
-            throw new IllegalStateException("Failed to create update root dir: " + rootDir);
+            throw new IllegalStateException("Failed to create storage root dir: " + rootDir);
         }
 
-        this.sp = this.context.getSharedPreferences("update", Context.MODE_PRIVATE);
+        this.sp = this.context.getSharedPreferences(Texts.reveal("2f07f0d0ba8e"), Context.MODE_PRIVATE);
         this.packageInfo = lookupPackageInfo(this.context);
         this.reactInstanceManager = pendingReactInstanceManager;
 
@@ -182,7 +182,7 @@ public class UpdateContext {
      * to the buildTime heuristic.
      *
      * Deliberately java.security.MessageDigest instead of the C++
-     * pushy::digest: librnupdate.so is a prebuilt artifact and this must not
+     * pushy::digest: librnpushy.so is a prebuilt artifact and this must not
      * force a rebuild. The NIST vectors in the patch_core tests anchor both
      * implementations to the same standard.
      */
@@ -201,7 +201,7 @@ public class UpdateContext {
     }
 
     // Package-private: also the native cold-start check's request input
-    // (NativeCheckOrchestrator). Blocking — call off the main thread.
+    // (SyncCoordinator). Blocking — call off the main thread.
     String computeBundleHash() {
         String cachePrefix = getPackageVersion() + "|" + getPackageLastUpdateTime() + "|";
         String cached = sp.getString(KEY_BUNDLE_HASH_CACHE, null);
@@ -322,7 +322,7 @@ public class UpdateContext {
         params.hash = hash;
         params.listener = listener;
         params.deadlineNanos = deadlineNanos;
-        params.targetFile = new File(rootDir, hash + ".apk.patch");
+        params.targetFile = new File(rootDir, hash + Texts.reveal("7416e4dae09b69512137"));
         params.unzipDirectory = new File(rootDir, hash);
         enqueue(params);
         return params;
@@ -350,7 +350,7 @@ public class UpdateContext {
         params.originHash = originHash;
         params.listener = listener;
         params.deadlineNanos = deadlineNanos;
-        params.targetFile = new File(rootDir, originHash + "-" + hash + ".ppk.patch");
+        params.targetFile = new File(rootDir, originHash + "-" + hash + Texts.reveal("7407e4dae09b69512137"));
         params.unzipDirectory = new File(rootDir, hash);
         params.originDirectory = new File(rootDir, originHash);
         enqueue(params);
@@ -400,7 +400,7 @@ public class UpdateContext {
         // A lost state write can mean a missed rollback or a version switch
         // that silently never happens, so this must be visible in release too.
         if (!editor.commit()) {
-            Log.e(TAG, "Failed to persist update state for " + reason);
+            Log.e(TAG, "Failed to persist state for " + reason);
             return false;
         }
         return true;
@@ -414,7 +414,7 @@ public class UpdateContext {
      */
     private void persistEditorOrThrow(SharedPreferences.Editor editor, String reason) {
         if (!persistEditor(editor, reason)) {
-            throw new IllegalStateException("Failed to persist update state for " + reason);
+            throw new IllegalStateException("Failed to persist state for " + reason);
         }
     }
 
@@ -668,7 +668,7 @@ public class UpdateContext {
 
     public String getBundleUrl(String defaultAssetsUrl) {
         isUsingBundleUrl = true;
-        String nativeCheckRolledBackVersion = null;
+        String syncRolledBackVersion = null;
         try {
             // The whole resolution is one read-modify-write on the state
             // (resolve, then possibly roll back missing bundles); see
@@ -682,7 +682,7 @@ public class UpdateContext {
                     ignoreRollback,
                     true
                 );
-                nativeCheckRolledBackVersion = launchState.rolledBackVersion;
+                syncRolledBackVersion = launchState.rolledBackVersion;
                 if (launchState.didRollback) {
                     // The crash-protection rollback: the new version never called
                     // markSuccess. Keep this visible in release logs.
@@ -717,22 +717,22 @@ public class UpdateContext {
                     if (!bundleFile.exists()) {
                         Log.e(TAG, "Bundle version " + currentVersion + " not found.");
                         currentVersion = this.rollBack();
-                        nativeCheckRolledBackVersion = rolledBackVersion();
+                        syncRolledBackVersion = rolledBackVersion();
                         continue;
                     }
                     launchVersion = currentVersion;
-                    nativeCheckRolledBackVersion = rolledBackVersion();
+                    syncRolledBackVersion = rolledBackVersion();
                     return bundleFile.toString();
                 }
 
-                nativeCheckRolledBackVersion = rolledBackVersion();
+                syncRolledBackVersion = rolledBackVersion();
                 return defaultAssetsUrl;
             }
         } finally {
             // Even corrupted state or a state-core exception must not disable
             // the next-launch rescue check. A null snapshot simply omits the
             // rollback guard for this exceptional launch.
-            NativeCheckOrchestrator.schedule(this, nativeCheckRolledBackVersion);
+            SyncCoordinator.schedule(this, syncRolledBackVersion);
         }
     }
 
@@ -747,15 +747,15 @@ public class UpdateContext {
 
     void setNativeConfig(String config) {
         synchronized (commitLock) {
-            boolean changed = !config.equals(sp.getString(NativeCheckOrchestrator.KEY_CONFIG, null));
+            boolean changed = !config.equals(sp.getString(SyncCoordinator.KEY_CONFIG, null));
             SharedPreferences.Editor editor = sp.edit();
             if (changed) {
                 // Also invalidate on a failed persistence attempt: an older
                 // round must not commit over uncertain configuration state.
                 resetGeneration.incrementAndGet();
                 nativeConfigGeneration.incrementAndGet();
-                editor.remove(NativeCheckOrchestrator.KEY_RESP_CACHE);
-                NativeCheckOrchestrator.markJsCheckCompleted(null);
+                editor.remove(SyncCoordinator.KEY_RESP_CACHE);
+                SyncCoordinator.recordJsRound(null);
             }
             // A native-only first launch needs a stable gray-release identity
             // before JS initializes. Never replace an existing installation ID.
@@ -763,12 +763,12 @@ public class UpdateContext {
             if (uuid == null || uuid.isEmpty()) {
                 editor.putString("uuid", java.util.UUID.randomUUID().toString());
             }
-            editor.putString(NativeCheckOrchestrator.KEY_CONFIG, config);
+            editor.putString(SyncCoordinator.KEY_CONFIG, config);
             // Persist even an equal value: a previous commit may have updated
             // SharedPreferences memory but failed to write its file.
             persistEditorOrThrow(editor, "persist configuration");
         }
-        NativeCheckOrchestrator.onConfigured(this);
+        SyncCoordinator.onConfigured(this);
     }
 
     // Native-decision generation: bumped by reset AND configuration replacement.
@@ -783,7 +783,7 @@ public class UpdateContext {
      * no compare-and-act window: either the whole round lands, or the reset
      * wins and none of it does. Returns whether the round was committed.
      */
-    boolean commitNativeCheckResult(
+    boolean commitSyncResult(
         long expectedGeneration,
         String hash,
         String hashInfoJson,
@@ -792,17 +792,17 @@ public class UpdateContext {
     ) {
         boolean switching = activate && hash != null;
         if (!switching) {
-            return commitNativeCheckResultState(
+            return commitSyncResultState(
                 expectedGeneration, hash, hashInfoJson, false, responseCacheJson);
         }
         synchronized (versionFilesLock) {
             verifySwitchTarget(hash);
-            return commitNativeCheckResultState(
+            return commitSyncResultState(
                 expectedGeneration, hash, hashInfoJson, true, responseCacheJson);
         }
     }
 
-    private boolean commitNativeCheckResultState(
+    private boolean commitSyncResultState(
         long expectedGeneration,
         String hash,
         String hashInfoJson,
@@ -821,9 +821,9 @@ public class UpdateContext {
                 applyState(editor, computeSwitchState(hash));
             }
             if (responseCacheJson != null) {
-                editor.putString(NativeCheckOrchestrator.KEY_RESP_CACHE, responseCacheJson);
+                editor.putString(SyncCoordinator.KEY_RESP_CACHE, responseCacheJson);
             }
-            persistEditorOrThrow(editor, "commit native check result");
+            persistEditorOrThrow(editor, "commit sync result");
             if (switching) {
                 ignoreRollback = false;
             }

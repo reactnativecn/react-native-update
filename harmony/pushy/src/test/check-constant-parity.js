@@ -20,7 +20,7 @@ const read = (relative) => fs.readFileSync(path.join(root, relative), 'utf8');
 // LL suffix.
 function parseCppConstants(source) {
   const re =
-    /constexpr\s+(?:const\s+)?(?:long\s+long|int|char\s*\*)\s+k([A-Za-z0-9]+)\s*=\s*([^;]+);/g;
+    /(?:constexpr|inline)\s+(?:const\s+)?(?:long\s+long|int|char\s*\*)\s*(?:const\s+)?k([A-Za-z0-9]+)\s*=\s*([^;]+);/g;
   const values = new Map();
   let match;
   while ((match = re.exec(source)) !== null) {
@@ -40,8 +40,23 @@ function parseArkTsConstants(source) {
   return values;
 }
 
+// Encoded text (obscured_text.h / Texts.ts, scripts/encode-native-text.ts):
+// byte i XORed with (0x5A + 0x1D * i) & 0xFF.
+function reveal(hex) {
+  let text = '';
+  for (let i = 0; i < hex.length / 2; i++) {
+    const byte = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+    text += String.fromCharCode(byte ^ ((0x5a + 0x1d * i) & 0xff));
+  }
+  return text;
+}
+
 function evaluate(expression, name) {
   const text = expression.replace(/\s+/g, ' ').trim();
+  const encoded = text.match(/^(?:text::RevealStatic|revealText)\((["'])([0-9a-f]+)\1\)$/);
+  if (encoded) {
+    return reveal(encoded[2]);
+  }
   const stringLiteral = text.match(/^(["'])((?:\\.|(?!\1).)*)\1$/);
   if (stringLiteral) {
     return stringLiteral[2];

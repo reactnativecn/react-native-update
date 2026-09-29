@@ -35,6 +35,7 @@ build() {
   xcrun clang++ -std=c++17 -fobjc-arc -fblocks $WARNING_FLAGS $SANITIZE_FLAGS \
     -I"$ROOT_DIR" -I"$destination" \
     "$TEST_DIR/purge_restore_test.mm" "$ROOT_DIR/cpp/patch_core/state_core.cpp" \
+    "$ROOT_DIR/ios/RCTPushy/RCTPushyConfiguration.mm" \
     -framework Foundation -o "$destination/purge_restore_test"
 }
 

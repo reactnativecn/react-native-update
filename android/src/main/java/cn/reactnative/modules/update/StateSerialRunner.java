@@ -56,7 +56,7 @@ final class StateSerialRunner {
                     if (promise != null) {
                         promise.reject(errorCode, operationName + " failed", error);
                     } else {
-                        Log.e(UpdateContext.TAG, operationName + " failed", error);
+                        Log.e(Texts.LOG_TAG, operationName + " failed", error);
                     }
                 }
             }

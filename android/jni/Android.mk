@@ -2,7 +2,7 @@ LOCAL_PATH := $(call my-dir)
 
 include $(CLEAR_VARS)
 
-LOCAL_MODULE := rnupdate
+LOCAL_MODULE := rnpushy
 LOCAL_CPPFLAGS += -std=c++17
 LOCAL_LDFLAGS += -Wl,--exclude-libs,ALL
 LOCAL_C_INCLUDES := \
@@ -25,6 +25,7 @@ LOCAL_SRC_FILES := \
 	../../cpp/patch_core/digest.cpp \
 	../../cpp/patch_core/hbc_transform.cpp \
 	../../cpp/patch_core/hbc_transform_wire.cpp \
+	../../cpp/patch_core/jni_registration.cpp \
 	../../cpp/patch_core/patch_core.cpp \
 	../../cpp/patch_core/patch_core_android.cpp \
 	../../cpp/patch_core/state_core.cpp \

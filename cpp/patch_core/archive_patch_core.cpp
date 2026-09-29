@@ -1,5 +1,7 @@
 #include "archive_patch_core.h"
 
+#include "obscured_text.h"
+
 namespace pushy {
 namespace archive_patch {
 namespace {
@@ -15,6 +17,11 @@ bool HasEntry(const std::vector<std::string>& entry_names, const std::string& na
 }
 
 }  // namespace
+
+const std::string& DefaultBundleDeltaEntryName() {
+  static const std::string name = text::Reveal("3319f0d4b6c56a502c3b10fcdca0de7d4b3307e9");
+  return name;
+}
 
 EntryAction ClassifyEntry(
     ArchivePatchType type,
@@ -41,17 +48,17 @@ bool TryParseArchivePatchType(int value, ArchivePatchType* out) {
   }
 }
 
-patch::Status BuildArchivePatchPlan(
+delta::Status BuildArchivePatchPlan(
     ArchivePatchType type,
-    const patch::PatchManifest& manifest,
+    const delta::PatchManifest& manifest,
     const std::vector<std::string>& entry_names,
     ArchivePatchPlan* out_plan,
     const std::string& bundle_patch_entry_name) {
   if (out_plan == nullptr) {
-    return patch::Status::Error("Archive patch plan output is required");
+    return delta::Status::Error("Archive plan output is required");
   }
 
-  patch::Status manifest_status = patch::ValidateManifest(manifest);
+  delta::Status manifest_status = delta::ValidateManifest(manifest);
   if (!manifest_status.ok) {
     return manifest_status;
   }
@@ -63,38 +70,38 @@ patch::Status BuildArchivePatchPlan(
 
   switch (type) {
     case ArchivePatchType::kFull:
-      return patch::Status::Ok();
+      return delta::Status::Ok();
     case ArchivePatchType::kPatchFromPackage:
     case ArchivePatchType::kPatchFromPpk:
       if (!HasEntry(entry_names, kManifestEntryName)) {
-        return patch::Status::Error("diff.json not found");
+        return delta::Status::Error("diff.json not found");
       }
       if (!HasEntry(entry_names, bundle_patch_entry_name)) {
-        return patch::Status::Error("bundle patch not found");
+        return delta::Status::Error("bundle delta not found");
       }
       out_plan->merge_source_subdir =
           type == ArchivePatchType::kPatchFromPackage ? "assets" : "";
       out_plan->enable_merge = true;
-      return patch::Status::Ok();
+      return delta::Status::Ok();
   }
 
-  return patch::Status::Error("Unknown archive patch type");
+  return delta::Status::Error("Unknown archive delta type");
 }
 
-patch::Status BuildCopyGroups(
-    const patch::PatchManifest& manifest,
+delta::Status BuildCopyGroups(
+    const delta::PatchManifest& manifest,
     std::vector<CopyGroup>* out_groups) {
   if (out_groups == nullptr) {
-    return patch::Status::Error("Copy groups output is required");
+    return delta::Status::Error("Copy groups output is required");
   }
 
-  patch::Status manifest_status = patch::ValidateManifest(manifest);
+  delta::Status manifest_status = delta::ValidateManifest(manifest);
   if (!manifest_status.ok) {
     return manifest_status;
   }
 
   out_groups->clear();
-  for (const patch::CopyOperation& copy : manifest.copies) {
+  for (const delta::CopyOperation& copy : manifest.copies) {
     bool appended = false;
     for (CopyGroup& group : *out_groups) {
       if (group.from == copy.from) {
@@ -111,19 +118,19 @@ patch::Status BuildCopyGroups(
     }
   }
 
-  return patch::Status::Ok();
+  return delta::Status::Ok();
 }
 
-patch::Status BuildFileSourcePatchOptions(
+delta::Status BuildFileSourcePatchOptions(
     const ArchivePatchPlan& plan,
     const std::string& source_root,
     const std::string& target_root,
     const std::string& origin_bundle_path,
     const std::string& bundle_patch_path,
     const std::string& bundle_output_path,
-    patch::FileSourcePatchOptions* out_options) {
+    delta::FileSourcePatchOptions* out_options) {
   if (out_options == nullptr) {
-    return patch::Status::Error("Patch options output is required");
+    return delta::Status::Error("Delta options output is required");
   }
 
   out_options->manifest = plan.manifest;
@@ -134,7 +141,7 @@ patch::Status BuildFileSourcePatchOptions(
   out_options->bundle_output_path = bundle_output_path;
   out_options->merge_source_subdir = plan.merge_source_subdir;
   out_options->enable_merge = plan.enable_merge;
-  return patch::Status::Ok();
+  return delta::Status::Ok();
 }
 
 }  // namespace archive_patch

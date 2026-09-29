@@ -55,8 +55,8 @@ final class ReactReloadManager {
                 reloadReactHost(reactHost, createBundleLoader(application, updateBundlePath, true));
                 return;
             } catch (Throwable err) {
-                Log.e(UpdateContext.TAG,
-                    "Failed to reload via ReactHost, trying ReactInstanceManager", err);
+                Log.e(Texts.LOG_TAG,
+                    "Failed to restart via ReactHost, trying ReactInstanceManager", err);
             }
         }
 
@@ -123,7 +123,7 @@ final class ReactReloadManager {
                 return (String) resolvedBundleAssetName;
             }
         } catch (Exception e) {
-            Log.e(UpdateContext.TAG, "Failed to get default asset name from ReactNativeHost", e);
+            Log.e(Texts.LOG_TAG, "Failed to get default asset name from ReactNativeHost", e);
         }
 
         return bundleAssetName;
@@ -170,7 +170,7 @@ final class ReactReloadManager {
                     }
                 }
             } catch (Throwable ignored) {
-                Log.w(UpdateContext.TAG, "getReactHost via ReactDelegate reflection failed", ignored);
+                Log.w(Texts.LOG_TAG, "getReactHost via ReactDelegate reflection failed", ignored);
             }
         }
 
@@ -178,7 +178,7 @@ final class ReactReloadManager {
             Method getReactHostMethod = application.getClass().getMethod("getReactHost");
             return getReactHostMethod.invoke(application);
         } catch (Throwable ignored) {
-            Log.w(UpdateContext.TAG, "getReactHost via Application.getReactHost() failed", ignored);
+            Log.w(Texts.LOG_TAG, "getReactHost via Application.getReactHost() failed", ignored);
         }
 
         return null;
@@ -252,8 +252,8 @@ final class ReactReloadManager {
         jsBundleLoaderField.setAccessible(true);
         jsBundleLoaderField.set(reactHostDelegate, loader);
 
-        Method reloadMethod = reactHost.getClass().getMethod("reload", String.class);
-        reloadMethod.invoke(reactHost, "react-native-update");
+        Method reloadMethod = reactHost.getClass().getMethod(Texts.reveal("2812f8deaf8f"), String.class);
+        reloadMethod.invoke(reactHost, Texts.LOG_TAG);
     }
 
     private static ReactInstanceManager resolveReactInstanceManager(

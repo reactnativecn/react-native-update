@@ -3,6 +3,9 @@
 #include <cstddef>
 #include <cstdint>
 
+// Keep the core internal to whichever binary links it (see podspec Core).
+#pragma GCC visibility push(hidden)
+
 namespace pushy {
 namespace hbc {
 
@@ -51,3 +54,5 @@ bool TransformHbcInPlace(
 
 } // namespace hbc
 } // namespace pushy
+
+#pragma GCC visibility pop

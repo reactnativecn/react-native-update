@@ -5,6 +5,9 @@
 
 #include "patch_core.h"
 
+// Keep the core internal to whichever binary links it (see podspec Core).
+#pragma GCC visibility push(hidden)
+
 namespace pushy {
 namespace archive_patch {
 
@@ -26,7 +29,7 @@ struct CopyGroup {
 
 struct ArchivePatchPlan {
   ArchivePatchType type = ArchivePatchType::kFull;
-  patch::PatchManifest manifest;
+  delta::PatchManifest manifest;
   std::string merge_source_subdir;
   bool enable_merge = false;
 };
@@ -40,25 +43,31 @@ EntryAction ClassifyEntry(
 // incremental patch as a full package (which would skip validation).
 bool TryParseArchivePatchType(int value, ArchivePatchType* out);
 
-patch::Status BuildArchivePatchPlan(
+// Name of the bundle delta entry inside a patch archive (index.bundlejs.patch),
+// stored encoded (see obscured_text.h).
+const std::string& DefaultBundleDeltaEntryName();
+
+delta::Status BuildArchivePatchPlan(
     ArchivePatchType type,
-    const patch::PatchManifest& manifest,
+    const delta::PatchManifest& manifest,
     const std::vector<std::string>& entry_names,
     ArchivePatchPlan* out_plan,
-    const std::string& bundle_patch_entry_name = "index.bundlejs.patch");
+    const std::string& bundle_patch_entry_name = DefaultBundleDeltaEntryName());
 
-patch::Status BuildCopyGroups(
-    const patch::PatchManifest& manifest,
+delta::Status BuildCopyGroups(
+    const delta::PatchManifest& manifest,
     std::vector<CopyGroup>* out_groups);
 
-patch::Status BuildFileSourcePatchOptions(
+delta::Status BuildFileSourcePatchOptions(
     const ArchivePatchPlan& plan,
     const std::string& source_root,
     const std::string& target_root,
     const std::string& origin_bundle_path,
     const std::string& bundle_patch_path,
     const std::string& bundle_output_path,
-    patch::FileSourcePatchOptions* out_options);
+    delta::FileSourcePatchOptions* out_options);
 
 }  // namespace archive_patch
 }  // namespace pushy
+
+#pragma GCC visibility pop

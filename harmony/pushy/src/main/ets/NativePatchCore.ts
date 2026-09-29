@@ -1,4 +1,4 @@
-import NativeUpdateCore from 'librnupdate.so';
+import NativeCore from 'librnpushy.so';
 
 export const STATE_OP_SWITCH_VERSION = 1;
 export const STATE_OP_MARK_SUCCESS = 2;
@@ -43,7 +43,7 @@ export interface FileSourcePatchRequest {
   sourceRoot: string;
   targetRoot: string;
   originBundlePath: string;
-  bundlePatchPath: string;
+  bundleDeltaPath: string;
   bundleOutputPath: string;
   mergeSourceSubdir?: string;
   enableMerge?: boolean;
@@ -64,7 +64,7 @@ interface NativePatchCoreBindings {
     flagA?: boolean,
     flagB?: boolean,
   ): StateCoreResult;
-  buildArchivePatchPlan(
+  buildArchivePlan(
     patchType: number,
     entryNames: string[],
     copyFroms: string[],
@@ -73,7 +73,7 @@ interface NativePatchCoreBindings {
     bundlePatchEntryName?: string,
   ): ArchivePatchPlanResult;
   buildCopyGroups(copyFroms: string[], copyTos: string[]): CopyGroupResult[];
-  applyPatchFromFileSource(options: FileSourcePatchRequest): Promise<void>;
+  applyDeltaFromSource(options: FileSourcePatchRequest): Promise<void>;
   /**
    * 删除 rootDir 下超过 maxAgeDays 且名字不在 keepNames 里的条目(native
    * 工作线程)。keepNames 必须包含所有可能仍在使用的版本:持久化的
@@ -99,19 +99,19 @@ interface NativePatchCoreBindings {
   // 更新流程决策层(cpp/update_flow_core,NATIVE_CHECKUPDATE_DESIGN §10):
   // JSON 字符串进出,与决策层自身的边界一致。返回 undefined = 输入未通过
   // 解析,编排器跳过本轮检测。
-  buildCheckRequestBody(inputJson: string): string | undefined;
+  buildRequestBody(inputJson: string): string | undefined;
   orderEndpointCandidates(
     endpointsJson: string,
     randomSample: number,
   ): string | undefined;
-  handleCheckResponse(
+  handleResponse(
     responseText: string,
     identityJson: string,
     afterDownload: string,
   ): string | undefined;
-  // 响应 schema 门槛(update_flow_core::IsValidCheckResponse):200 但只带
+  // 响应 schema 门槛(update_flow_core::IsValidResponse):200 但只带
   // `{"error":...}` 的节点算失败,不得阻止继续 fallback。
-  isValidCheckResponse(responseText: string): boolean;
+  isValidResponse(responseText: string): boolean;
 }
 
-export default NativeUpdateCore as unknown as NativePatchCoreBindings;
+export default NativeCore as unknown as NativePatchCoreBindings;
