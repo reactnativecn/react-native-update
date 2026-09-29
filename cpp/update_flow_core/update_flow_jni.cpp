@@ -1,5 +1,5 @@
 // JNI surface of the update-flow decision layer for the Android orchestrator
-// (NativeCheckOrchestrator.java). Pure string-in/string-out: every payload is
+// (SyncCoordinator.java). Pure string-in/string-out: every payload is
 // JSON, matching the decision layer's own boundary. A null return means
 // "input did not parse" and the caller skips the check round; a C++ exception
 // (bad_alloc/length_error from an oversized body) maps onto that same path —
@@ -82,7 +82,7 @@ jstring ToJString(JNIEnv* env, const std::string& value) {
 }  // namespace
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_cn_reactnative_modules_update_NativeUpdateFlow_buildCheckRequestBody(
+Java_cn_reactnative_modules_update_FlowBridge_buildRequestBody(
     JNIEnv* env, jclass, jstring inputJson) {
   try {
     bool ok = false;
@@ -92,14 +92,14 @@ Java_cn_reactnative_modules_update_NativeUpdateFlow_buildCheckRequestBody(
       return nullptr;
     }
     return ToJString(
-        env, flowjson::Stringify(updateflow::BuildCheckRequestBody(input)));
+        env, flowjson::Stringify(flowcore::BuildRequestBody(input)));
   } catch (...) {
     return nullptr;
   }
 }
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_cn_reactnative_modules_update_NativeUpdateFlow_orderEndpointCandidates(
+Java_cn_reactnative_modules_update_FlowBridge_orderEndpointCandidates(
     JNIEnv* env, jclass, jstring endpointsJson, jdouble randomSample) {
   try {
     bool ok = false;
@@ -108,7 +108,7 @@ Java_cn_reactnative_modules_update_NativeUpdateFlow_orderEndpointCandidates(
     if (!ok || !endpoints.IsArray()) {
       return nullptr;
     }
-    return ToJString(env, flowjson::Stringify(updateflow::OrderEndpointCandidates(
+    return ToJString(env, flowjson::Stringify(flowcore::OrderEndpointCandidates(
                               endpoints, randomSample)));
   } catch (...) {
     return nullptr;
@@ -116,13 +116,13 @@ Java_cn_reactnative_modules_update_NativeUpdateFlow_orderEndpointCandidates(
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_cn_reactnative_modules_update_NativeUpdateFlow_isValidCheckResponse(
+Java_cn_reactnative_modules_update_FlowBridge_isValidResponse(
     JNIEnv* env, jclass, jstring responseText) {
   if (responseText == nullptr) {
     return JNI_FALSE;
   }
   try {
-    return updateflow::IsValidCheckResponse(
+    return flowcore::IsValidResponse(
                pushy::jni_util::JStringToString(env, responseText))
                ? JNI_TRUE
                : JNI_FALSE;
@@ -132,7 +132,7 @@ Java_cn_reactnative_modules_update_NativeUpdateFlow_isValidCheckResponse(
 }
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_cn_reactnative_modules_update_NativeUpdateFlow_handleCheckResponse(
+Java_cn_reactnative_modules_update_FlowBridge_handleResponse(
     JNIEnv* env, jclass, jstring responseText, jstring identityJson,
     jstring afterDownload) {
   try {
@@ -142,7 +142,7 @@ Java_cn_reactnative_modules_update_NativeUpdateFlow_handleCheckResponse(
     if (!ok || !identity.IsObject()) {
       return nullptr;
     }
-    return ToJString(env, flowjson::Stringify(updateflow::HandleCheckResponse(
+    return ToJString(env, flowjson::Stringify(flowcore::HandleResponse(
                               pushy::jni_util::JStringToString(env, responseText),
                               identity, false,
                               pushy::jni_util::JStringToString(env, afterDownload))));

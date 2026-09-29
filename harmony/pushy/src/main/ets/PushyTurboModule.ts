@@ -10,9 +10,9 @@ import { UpdateContext } from './UpdateContext';
 import { EventHub } from './EventHub';
 import {
   KEY_CONFIG,
-  markJsCheckCompleted,
+  recordJsRound,
   KEY_RESP_CACHE,
-} from './NativeCheckOrchestrator';
+} from './SyncCoordinator';
 import {
   ERROR_FILE_OPERATION_FAILED,
   ERROR_INVALID_HASH_INFO,
@@ -22,9 +22,9 @@ import {
   ERROR_RESTART_FAILED,
   ERROR_SWITCH_VERSION_FAILED,
   ERROR_UNSUPPORTED_PLATFORM,
-  createUpdateError,
+  createPushyError,
   getErrorMessage,
-  toUpdateError,
+  toPushyError,
 } from './ErrorCodes';
 
 export { getErrorMessage } from './ErrorCodes';
@@ -41,13 +41,13 @@ interface RestartableApplicationContext {
   restartApp?: (want: RestartWant) => void;
 }
 
-interface ReloadEventEmitter {
+interface RestartEventEmitter {
   emit(event: string, payload: Object): void;
 }
 
 // RNOH 的 devToolsController 不在公开的 UITurboModuleContext 类型里。
 interface DevToolsControllerHolder {
-  devToolsController?: { eventEmitter: ReloadEventEmitter };
+  devToolsController?: { eventEmitter: RestartEventEmitter };
 }
 
 export function validateHashInfo(info: string): void {
@@ -59,7 +59,7 @@ export function validateHashInfo(info: string): void {
     valid = false;
   }
   if (!valid) {
-    throw createUpdateError(ERROR_INVALID_HASH_INFO, 'invalid json string');
+    throw createPushyError(ERROR_INVALID_HASH_INFO, 'invalid json string');
   }
 }
 
@@ -96,7 +96,7 @@ export class PushyTurboModule extends UITurboModule {
 
   private requireHash(hash: string, methodName: string): string {
     if (!hash) {
-      throw createUpdateError(
+      throw createPushyError(
         ERROR_INVALID_OPTIONS,
         `${methodName}: empty hash`,
       );
@@ -104,7 +104,7 @@ export class PushyTurboModule extends UITurboModule {
     return hash;
   }
 
-  private softReload(): void {
+  private softRestart(): void {
     const holder = this.ctx as unknown as DevToolsControllerHolder;
     const devToolsController = holder.devToolsController;
     if (devToolsController) {
@@ -147,7 +147,7 @@ export class PushyTurboModule extends UITurboModule {
   private async reloadBridge(): Promise<void> {
     if (this.ctx.isDebugModeEnabled) {
       logger.debug(TAG, 'reloadBridge via devToolsController RELOAD (debug mode)');
-      this.softReload();
+      this.softRestart();
     } else {
       logger.debug(TAG, 'reloadBridge via restartAbility (release mode)');
       // If the process truly restarts, this timer dies with it. It only fires
@@ -158,7 +158,7 @@ export class PushyTurboModule extends UITurboModule {
       // path, only in the catch branch where the soft reload runs immediately.
       const fallbackTimer = setTimeout(() => {
         logger.warn(TAG, 'restartAbility did not restart the app within 1.5s, triggering soft reload fallback');
-        this.softReload();
+        this.softRestart();
       }, 1500);
 
       try {
@@ -166,7 +166,7 @@ export class PushyTurboModule extends UITurboModule {
       } catch (error) {
         clearTimeout(fallbackTimer);
         logger.error(TAG, `restartAbility failed: ${getErrorMessage(error)}, triggering soft reload fallback`);
-        this.softReload();
+        this.softRestart();
       }
     }
   }
@@ -232,7 +232,7 @@ export class PushyTurboModule extends UITurboModule {
     try {
       await this.context.setKv(`hash_${hash}`, info);
     } catch (error) {
-      throw toUpdateError(error, ERROR_FILE_OPERATION_FAILED);
+      throw toPushyError(error, ERROR_FILE_OPERATION_FAILED);
     }
   }
 
@@ -253,7 +253,7 @@ export class PushyTurboModule extends UITurboModule {
     try {
       await this.context.setKv('uuid', uuid);
     } catch (error) {
-      throw toUpdateError(error, ERROR_FILE_OPERATION_FAILED);
+      throw toPushyError(error, ERROR_FILE_OPERATION_FAILED);
     }
   }
 
@@ -267,7 +267,7 @@ export class PushyTurboModule extends UITurboModule {
     try {
       JSON.parse(config);
     } catch (e) {
-      throw createUpdateError(
+      throw createPushyError(
         ERROR_INVALID_OPTIONS,
         `syncNativeConfig: config is not valid JSON: ${getErrorMessage(e)}`,
       );
@@ -275,7 +275,7 @@ export class PushyTurboModule extends UITurboModule {
     try {
       await this.context.setNativeConfig(config);
     } catch (error) {
-      throw toUpdateError(error, ERROR_FILE_OPERATION_FAILED);
+      throw toPushyError(error, ERROR_FILE_OPERATION_FAILED);
     }
   }
 
@@ -283,12 +283,12 @@ export class PushyTurboModule extends UITurboModule {
   async markJsCheckCompleted(config: string): Promise<void> {
     logger.debug(TAG, ',call markJsCheckCompleted');
     if (typeof config !== 'string' || config.length === 0) {
-      throw createUpdateError(
+      throw createPushyError(
         ERROR_INVALID_OPTIONS,
         'config must be a non-empty string',
       );
     }
-    markJsCheckCompleted(config);
+    recordJsRound(config);
   }
 
   // 原生冷启动检测落盘的原始响应缓存,JS 侧新鲜期内直接复用免二次请求
@@ -307,14 +307,14 @@ export class PushyTurboModule extends UITurboModule {
     try {
       await this.context.switchVersion(hash);
     } catch (error) {
-      logger.error(TAG, `reloadUpdate switch failed: ${getErrorMessage(error)}`);
-      throw toUpdateError(error, ERROR_SWITCH_VERSION_FAILED);
+      logger.error(TAG, `switch failed: ${getErrorMessage(error)}`);
+      throw toPushyError(error, ERROR_SWITCH_VERSION_FAILED);
     }
     try {
       await this.reloadBridge();
     } catch (error) {
-      logger.error(TAG, `reloadUpdate restart failed: ${getErrorMessage(error)}`);
-      throw toUpdateError(error, ERROR_RESTART_FAILED);
+      logger.error(TAG, `restart failed: ${getErrorMessage(error)}`);
+      throw toPushyError(error, ERROR_RESTART_FAILED);
     }
   }
 
@@ -324,7 +324,7 @@ export class PushyTurboModule extends UITurboModule {
       await this.reloadBridge();
     } catch (error) {
       logger.error(TAG, `restartApp failed: ${getErrorMessage(error)}`);
-      throw toUpdateError(error, ERROR_RESTART_FAILED);
+      throw toPushyError(error, ERROR_RESTART_FAILED);
     }
   }
 
@@ -336,7 +336,7 @@ export class PushyTurboModule extends UITurboModule {
       await this.context.switchVersion(hash);
     } catch (error) {
       logger.error(TAG, `setNeedUpdate failed: ${getErrorMessage(error)}`);
-      throw toUpdateError(error, ERROR_SWITCH_VERSION_FAILED);
+      throw toPushyError(error, ERROR_SWITCH_VERSION_FAILED);
     }
   }
 
@@ -346,7 +346,7 @@ export class PushyTurboModule extends UITurboModule {
       await this.context.markSuccess();
     } catch (error) {
       logger.error(TAG, `markSuccess failed: ${getErrorMessage(error)}`);
-      throw toUpdateError(error, ERROR_MARK_SUCCESS_FAILED);
+      throw toPushyError(error, ERROR_MARK_SUCCESS_FAILED);
     }
   }
 
@@ -367,7 +367,7 @@ export class PushyTurboModule extends UITurboModule {
       await this.context.resetToPackagedBundle();
     } catch (error) {
       logger.error(TAG, `resetToPackagedBundle failed: ${getErrorMessage(error)}`);
-      throw toUpdateError(error, ERROR_RESET_FAILED);
+      throw toPushyError(error, ERROR_RESET_FAILED);
     }
   }
 
@@ -409,7 +409,7 @@ export class PushyTurboModule extends UITurboModule {
     hash: string;
   }): Promise<void> {
     logger.debug(TAG, ',call downloadAndInstallApk');
-    throw createUpdateError(
+    throw createPushyError(
       ERROR_UNSUPPORTED_PLATFORM,
       'downloadAndInstallApk is only supported on Android',
     );

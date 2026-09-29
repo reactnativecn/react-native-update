@@ -531,7 +531,7 @@ class DownloadTask implements Runnable {
 
                 if (name.equals("__diff.json")) {
                     if (entry.getSize() > ArchiveLimits.MAX_MANIFEST_BYTES) {
-                        throw new IOException("patch manifest too large: " + entry.getSize());
+                        throw new IOException("delta manifest too large: " + entry.getSize());
                     }
                     byte[] bytes = readBytes(
                         zipFile.getInputStream(entry), ArchiveLimits.MAX_MANIFEST_BYTES);
@@ -786,7 +786,7 @@ class DownloadTask implements Runnable {
             || taskType == DownloadTaskParams.TASK_TYPE_PATCH_FROM_PPK;
     }
 
-    private boolean hasCompletedPatchDirectory() {
+    private boolean hasCompletedDeltaDirectory() {
         return params.unzipDirectory != null
             && params.hash != null
             && new File(params.unzipDirectory, "index.bundlejs").isFile()
@@ -828,7 +828,7 @@ class DownloadTask implements Runnable {
         int taskType = params.type;
         final boolean runningVersion = isPatchTask(taskType) && targetsRunningVersion();
         final boolean alreadyCompleted = isPatchTask(taskType)
-            && hasCompletedPatchDirectory();
+            && hasCompletedDeltaDirectory();
         try {
             if (params.isCancelled()) {
                 throw new IOException("download task cancelled before it started");
@@ -869,7 +869,7 @@ class DownloadTask implements Runnable {
             // A duplicate task must never delete a version completed by an
             // earlier queued task. The marker + bundle pair is the ownership
             // handoff: once present, this failure did not create that install.
-            if (!hasCompletedPatchDirectory()) {
+            if (!hasCompletedDeltaDirectory()) {
                 cleanUpAfterFailure(taskType);
             }
 

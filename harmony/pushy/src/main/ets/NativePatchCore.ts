@@ -99,19 +99,19 @@ interface NativePatchCoreBindings {
   // 更新流程决策层(cpp/update_flow_core,NATIVE_CHECKUPDATE_DESIGN §10):
   // JSON 字符串进出,与决策层自身的边界一致。返回 undefined = 输入未通过
   // 解析,编排器跳过本轮检测。
-  buildCheckRequestBody(inputJson: string): string | undefined;
+  buildRequestBody(inputJson: string): string | undefined;
   orderEndpointCandidates(
     endpointsJson: string,
     randomSample: number,
   ): string | undefined;
-  handleCheckResponse(
+  handleResponse(
     responseText: string,
     identityJson: string,
     afterDownload: string,
   ): string | undefined;
-  // 响应 schema 门槛(update_flow_core::IsValidCheckResponse):200 但只带
+  // 响应 schema 门槛(update_flow_core::IsValidResponse):200 但只带
   // `{"error":...}` 的节点算失败,不得阻止继续 fallback。
-  isValidCheckResponse(responseText: string): boolean;
+  isValidResponse(responseText: string): boolean;
 }
 
 export default NativeUpdateCore as unknown as NativePatchCoreBindings;

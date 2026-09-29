@@ -10,7 +10,7 @@ import {
   parseInstallRecord,
   stagingDirectoryFor,
 } from '../main/ets/InstallRecord';
-import { ERROR_SWITCH_VERSION_FAILED, UpdateError } from '../main/ets/ErrorCodes';
+import { ERROR_SWITCH_VERSION_FAILED, PushyError } from '../main/ets/ErrorCodes';
 
 // 两阶段安装的完成记录(cpp/patch_core/install_record.h 的 ArkTS 镜像):
 // 纯逻辑部分,不碰磁盘。
@@ -84,11 +84,11 @@ export default function installRecordTest() {
 
   describe('InstallRecord.expectedBundleSha256ForActivation', () => {
     it('throws SWITCH_VERSION_FAILED without a record', 0, () => {
-      let caught: UpdateError | null = null;
+      let caught: PushyError | null = null;
       try {
         expectedBundleSha256ForActivation(null, 'abc');
       } catch (e) {
-        caught = e as UpdateError;
+        caught = e as PushyError;
       }
       expect(caught !== null).assertTrue();
       expect(caught!.code).assertEqual(ERROR_SWITCH_VERSION_FAILED);

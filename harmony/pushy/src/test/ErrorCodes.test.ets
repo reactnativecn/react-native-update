@@ -2,38 +2,38 @@ import { describe, it, expect } from '@ohos/hypium';
 import {
   ERROR_DOWNLOAD_FAILED,
   ERROR_PATCH_FAILED,
-  UpdateError,
-  createUpdateError,
+  PushyError,
+  createPushyError,
   getErrorMessage,
   parseErrorCodePrefix,
-  toUpdateError,
+  toPushyError,
 } from '../main/ets/ErrorCodes';
 
 // 稳定错误码:`code` 属性 + `[CODE] ` 消息前缀(RNOH 桥丢属性时 JS 解析前缀)。
 export default function errorCodesTest() {
-  describe('ErrorCodes.createUpdateError', () => {
+  describe('ErrorCodes.createPushyError', () => {
     it('sets the code and prefixes the message', 0, () => {
-      const error = createUpdateError(ERROR_PATCH_FAILED, 'boom');
+      const error = createPushyError(ERROR_PATCH_FAILED, 'boom');
       expect(error instanceof Error).assertTrue();
       expect(error.code).assertEqual(ERROR_PATCH_FAILED);
       expect(error.message).assertEqual('[PATCH_FAILED] boom');
     });
   });
 
-  describe('ErrorCodes.toUpdateError', () => {
+  describe('ErrorCodes.toPushyError', () => {
     it('keeps an existing code and never double-prefixes', 0, () => {
-      const original = createUpdateError(ERROR_PATCH_FAILED, 'boom');
-      const wrapped = toUpdateError(original, ERROR_DOWNLOAD_FAILED);
+      const original = createPushyError(ERROR_PATCH_FAILED, 'boom');
+      const wrapped = toPushyError(original, ERROR_DOWNLOAD_FAILED);
       expect(wrapped === original).assertTrue();
       expect(wrapped.message).assertEqual('[PATCH_FAILED] boom');
     });
 
     it('assigns the default code to plain errors and values', 0, () => {
-      const fromError = toUpdateError(new Error('plain'), ERROR_DOWNLOAD_FAILED);
+      const fromError = toPushyError(new Error('plain'), ERROR_DOWNLOAD_FAILED);
       expect(fromError.code).assertEqual(ERROR_DOWNLOAD_FAILED);
       expect(fromError.message).assertEqual('[DOWNLOAD_FAILED] plain');
-      const fromString = toUpdateError('raw', ERROR_DOWNLOAD_FAILED);
-      expect(fromString instanceof UpdateError).assertTrue();
+      const fromString = toPushyError('raw', ERROR_DOWNLOAD_FAILED);
+      expect(fromString instanceof PushyError).assertTrue();
       expect(fromString.message).assertEqual('[DOWNLOAD_FAILED] raw');
     });
   });

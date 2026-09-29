@@ -18,11 +18,11 @@ public final class PushyRuntime {
     }
 
     // A single waiting worker, not one thread per caller. The actual round is
-    // shared with cold start and crash rescue by NativeCheckOrchestrator.
+    // shared with cold start and crash rescue by SyncCoordinator.
     private static final Executor WORKER = Executors.newSingleThreadExecutor(new ThreadFactory() {
         @Override
         public Thread newThread(Runnable runnable) {
-            Thread thread = new Thread(runnable, "pushy-host-check");
+            Thread thread = new Thread(runnable, "pushy-host-sync");
             thread.setDaemon(true);
             return thread;
         }
@@ -104,14 +104,14 @@ public final class PushyRuntime {
                     if (BuildConfig.DEBUG) {
                         outcome = BundlePreparationResult.of(BundlePreparationResult.SKIPPED, "debug");
                     } else {
-                        outcome = NativeCheckOrchestrator.prepareBundle(
+                        outcome = SyncCoordinator.prepareBundle(
                             UpdateContext.getInstance(applicationContext));
                     }
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     outcome = BundlePreparationResult.of(BundlePreparationResult.CANCELLED, "interrupted");
                 } catch (Exception | LinkageError e) {
-                    Log.w("react-native-update", "native host check failed", e);
+                    Log.w("react-native-update", "native host sync failed", e);
                     outcome = BundlePreparationResult.of(BundlePreparationResult.FAILED, "internal_error");
                 }
                 final BundlePreparationResult result = outcome;

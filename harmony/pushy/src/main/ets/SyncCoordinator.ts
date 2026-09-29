@@ -9,7 +9,7 @@ import { isSafePathComponent } from './PathUtils';
 import { monotonicNowMs } from './MonotonicClock';
 import {
   ERROR_DOWNLOAD_FAILED,
-  createUpdateError,
+  createPushyError,
   getErrorMessage,
 } from './ErrorCodes';
 
@@ -20,7 +20,7 @@ import {
 // 风暴,不拉黑版本。
 // 鸿蒙的 debug 门控由触发点天然承担:dev 走 MetroJSBundleProvider,
 // PushyFileJSBundleProvider.getBundleUrl 不会被调用。
-const TAG = 'NativeCheck';
+const TAG = 'NativeSync';
 export const KEY_CONFIG = 'nativeConfig';
 // 供 JS 侧复用的原始响应缓存(§10.3),同时记录请求与配置指纹以限定命中范围。
 export const KEY_RESP_CACHE = 'nativeCheckResp';
@@ -31,7 +31,7 @@ export const KEY_RESP_CACHE = 'nativeCheckResp';
 export const KEY_ROUND_INCOMPLETE = 'nativeCheckIncomplete';
 const REQUEST_TIMEOUT_MS = 10000;
 const REQUEST_CALL_TIMEOUT_MS = 15000;
-const MAX_CHECK_HTTP_ATTEMPTS = 8;
+const MAX_QUERY_HTTP_ATTEMPTS = 8;
 const START_DELAY_MS = 5000;
 const DOWNLOAD_PHASE_TIMEOUT_MS = 10 * 60 * 1000;
 const DOWNLOAD_TYPE_DIFF = 'diff';
@@ -62,7 +62,7 @@ interface FlowCInfo {
   uuid: string;
 }
 
-interface FlowCheckInput {
+interface FlowInput {
   packageVersion: string;
   currentVersion?: string;
   buildTime: string;
@@ -129,7 +129,7 @@ function startNativeRound(
     try {
       await runOnce(context, launchRolledBackVersion);
     } catch (e) {
-      logger.error(TAG, `native check failed: ${getErrorMessage(e)}`);
+      logger.error(TAG, `native sync failed: ${getErrorMessage(e)}`);
       roundResult = bundlePreparationResult('failed', 'internal_error');
     }
     return roundResult;
@@ -200,20 +200,20 @@ export async function prepareBundleNative(
 // 进程级:下次启动无信号,冷启动轮次照常运行。
 let jsCompletedConfig: string | undefined;
 
-export function markJsCheckCompleted(config: string): void {
+export function recordJsRound(config: string): void {
   jsCompletedConfig = config;
 }
 
 // JS 已用与原生完全相同的配置拿到有效响应(§10.3):延迟轮次就是一次重复请求。
 // 只有计划内的轮次会问这个问题——JS 没起来、启动即崩、检查失败时都不会有信号。
-function isJsCheckCompleted(context: UpdateContext): boolean {
+function hasJsRound(context: UpdateContext): boolean {
   return (
     jsCompletedConfig !== undefined &&
     jsCompletedConfig === context.getKv(KEY_CONFIG)
   );
 }
 
-export function scheduleNativeCheck(
+export function scheduleNativeSync(
   context: UpdateContext,
   launchRolledBackVersion: string,
 ): void {
@@ -227,16 +227,16 @@ export function scheduleNativeCheck(
   // 除非上个进程死于轮中(残留标记),那时每一秒启动时间都要用来续传。
   const delayMs = context.getKv(KEY_ROUND_INCOMPLETE) ? 0 : START_DELAY_MS;
   setTimeout(() => {
-    if (isJsCheckCompleted(context)) {
+    if (hasJsRound(context)) {
       logger.info(
         TAG,
-        'native check skipped: JS check completed in this process',
+        'native sync skipped: JS already queried in this process',
       );
       return;
     }
     startNativeRound(context, launchRolledBackVersion).catch((e: Object) => {
       // 救援路径自身绝不能把应用拖垮。
-      logger.error(TAG, `native check failed: ${getErrorMessage(e)}`);
+      logger.error(TAG, `native sync failed: ${getErrorMessage(e)}`);
     });
   }, delayMs);
 }
@@ -361,7 +361,7 @@ async function runConfiguredRound(
     uuid,
   };
 
-  const input: FlowCheckInput = {
+  const input: FlowInput = {
     packageVersion: identity.packageVersion,
     currentVersion,
     buildTime: context.getBuildTime(),
@@ -369,14 +369,14 @@ async function runConfiguredRound(
     supportedDiffVersion: NativePatchCore.getSupportedDiffVersion(),
     bundleHash: await context.getBundleHash(),
   };
-  const body = NativePatchCore.buildCheckRequestBody(JSON.stringify(input));
+  const body = NativePatchCore.buildRequestBody(JSON.stringify(input));
   if (!body) {
     roundResult = bundlePreparationResult('failed', 'invalid_request');
     return;
   }
 
   const httpsOnly = isHttpsOnly(config);
-  const responseText = await runCheckRequest(config, appKey, body, httpsOnly);
+  const responseText = await runQueryRequest(config, appKey, body, httpsOnly);
   if (!responseText) {
     logger.warn(TAG, 'no endpoint reachable, giving up until next launch');
     return;
@@ -384,7 +384,7 @@ async function runConfiguredRound(
   // Anchor cache freshness to response arrival, before download/patch work.
   const responseAtSeconds = Math.floor(Date.now() / 1000);
 
-  const decisionJson = NativePatchCore.handleCheckResponse(
+  const decisionJson = NativePatchCore.handleResponse(
     responseText,
     JSON.stringify(identity),
     config.afterDownload ?? '',
@@ -395,7 +395,7 @@ async function runConfiguredRound(
   }
   const decision = JSON.parse(decisionJson) as Decision;
   if (decision.action !== 'download') {
-    const committed = await context.commitNativeCheckResult(
+    const committed = await context.commitSyncResult(
       resetGeneration,
       '',
       '',
@@ -430,7 +430,7 @@ async function runConfiguredRound(
   }
   if (!downloaded) {
     logger.warn(TAG, `all download attempts for ${hash} failed`);
-    const committed = await context.commitNativeCheckResult(
+    const committed = await context.commitSyncResult(
       resetGeneration,
       '',
       '',
@@ -466,13 +466,13 @@ async function runConfiguredRound(
     hashInfoJson = JSON.stringify(hashInfo);
   }
 
-  // 版本元信息、激活与响应缓存一次性原子提交(见 commitNativeCheckResult);
+  // 版本元信息、激活与响应缓存一次性原子提交(见 commitSyncResult);
   // 缓存只在原生文件/状态工作结束后公开,避免 JS 观察到响应后并发下载。
   // 静默策略、或服务端按版本标记的 forceBoot(远程覆盖,救砖指令)才激活。
   const activate = decision.activate === true;
   let committed = false;
   try {
-    committed = await context.commitNativeCheckResult(
+    committed = await context.commitSyncResult(
       resetGeneration,
       hash,
       hashInfoJson,
@@ -511,12 +511,12 @@ function buildResponseCacheJson(
   return JSON.stringify(cacheEntry);
 }
 
-function isValidCheckResponse(responseText: string | undefined): boolean {
+function isValidResponse(responseText: string | undefined): boolean {
   if (responseText === undefined) {
     return false;
   }
   try {
-    return NativePatchCore.isValidCheckResponse(responseText);
+    return NativePatchCore.isValidResponse(responseText);
   } catch (e) {
     return false;
   }
@@ -570,7 +570,7 @@ async function httpRequest(
 // 顺序回退(§5.1):按纯层给出的候选序逐个请求,单请求超时;整轮失败后经
 // queryUrls 发现远程候选(排除已试过的)再来一轮。刻意不做 hedged race——
 // 该路径对延迟不敏感。
-async function runCheckRequest(
+async function runQueryRequest(
   config: NativeConfig,
   appKey: string,
   body: string,
@@ -591,12 +591,12 @@ async function runCheckRequest(
     if (!base || tried.has(base)) {
       continue;
     }
-    if (httpAttempts++ >= MAX_CHECK_HTTP_ATTEMPTS) {
+    if (httpAttempts++ >= MAX_QUERY_HTTP_ATTEMPTS) {
       return undefined;
     }
     tried.add(base);
     const response = await httpRequest(`${base}/checkUpdate/${appKey}`, body);
-    if (isValidCheckResponse(response)) {
+    if (isValidResponse(response)) {
       return response;
     }
   }
@@ -604,7 +604,7 @@ async function runCheckRequest(
     if (!listUrl) {
       continue;
     }
-    if (httpAttempts++ >= MAX_CHECK_HTTP_ATTEMPTS) {
+    if (httpAttempts++ >= MAX_QUERY_HTTP_ATTEMPTS) {
       return undefined;
     }
     const listText = await httpRequest(listUrl);
@@ -634,12 +634,12 @@ async function runCheckRequest(
         logger.warn(TAG, `ignoring non-https remote endpoint ${base}`);
         continue;
       }
-      if (httpAttempts++ >= MAX_CHECK_HTTP_ATTEMPTS) {
+      if (httpAttempts++ >= MAX_QUERY_HTTP_ATTEMPTS) {
         return undefined;
       }
       tried.add(base);
       const response = await httpRequest(`${base}/checkUpdate/${appKey}`, body);
-      if (isValidCheckResponse(response)) {
+      if (isValidResponse(response)) {
         return response;
       }
     }
@@ -659,7 +659,7 @@ async function runWithinDeadline(
 ): Promise<void> {
   const remainingMs = deadlineUptimeMs - monotonicNowMs();
   if (remainingMs <= 0) {
-    throw createUpdateError(
+    throw createPushyError(
       ERROR_DOWNLOAD_FAILED,
       'Download phase deadline expired before start',
     );
@@ -668,7 +668,7 @@ async function runWithinDeadline(
   const deadlinePromise = new Promise<void>((_, reject) => {
     deadlineTimer = setTimeout(() => {
       reject(
-        createUpdateError(
+        createPushyError(
           ERROR_DOWNLOAD_FAILED,
           'Download phase deadline exceeded',
         ),

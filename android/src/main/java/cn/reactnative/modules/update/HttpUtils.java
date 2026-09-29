@@ -2,7 +2,7 @@ package cn.reactnative.modules.update;
 
 /**
  * Pure string helpers for the HTTP paths (no Android or OkHttp types), kept
- * apart from DownloadTask / NativeCheckOrchestrator so they stay testable on
+ * apart from DownloadTask / SyncCoordinator so they stay testable on
  * a plain JVM: DownloadTask loads librnupdate.so in its static initializer
  * and both pull in OkHttp.
  */

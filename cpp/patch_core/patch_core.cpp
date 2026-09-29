@@ -636,7 +636,7 @@ Status ApplyBundlePatchWithHbcTransform(
   }
   if (rename(temp_patched.c_str(), options.bundle_output_path.c_str()) != 0) {
     Status rename_status = MakeErrnoStatus(
-        "Failed to move patched bundle into place " + options.bundle_output_path);
+        "Failed to move rebuilt bundle into place " + options.bundle_output_path);
     remove(temp_patched.c_str());
     return rename_status;
   }

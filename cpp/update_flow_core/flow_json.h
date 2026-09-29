@@ -100,7 +100,7 @@ std::string Stringify(const Value& v);
 // and the divergence is deliberate: this parser runs inside the native
 // orchestrators on the raw checkUpdate body, and with sizeof(Value) ~ 96 a
 // 1 MB "[0,0,...]" balloons to ~100 MB of heap. A response over either cap is
-// treated as malformed (HandleCheckResponse -> invalidResponse). Real
+// treated as malformed (HandleResponse -> invalidResponse). Real
 // responses are a few KB and a few hundred nodes.
 constexpr size_t kMaxInputBytes = 1024 * 1024;
 constexpr size_t kMaxNodes = 65536;

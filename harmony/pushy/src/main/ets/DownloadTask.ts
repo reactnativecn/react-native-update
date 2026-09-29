@@ -32,9 +32,9 @@ import {
   ERROR_FILE_OPERATION_FAILED,
   ERROR_INVALID_OPTIONS,
   ERROR_PATCH_FAILED,
-  createUpdateError,
+  createPushyError,
   getErrorMessage,
-  toUpdateError,
+  toPushyError,
 } from './ErrorCodes';
 
 const TAG = 'DownloadTask';
@@ -108,7 +108,7 @@ export function parseManifestToArrays(
   };
 }
 
-interface PatchInputs {
+interface DeltaInputs {
   entryNames: string[];
   manifestArrays: PatchManifestArrays;
 }
@@ -196,7 +196,7 @@ export class DownloadTask {
     const work = this.stagingDirectory(params);
     const bundlePath = `${work}/${HARMONY_BUNDLE_FILE_NAME}`;
     if (!fileIo.accessSync(bundlePath)) {
-      throw createUpdateError(
+      throw createPushyError(
         ERROR_PATCH_FAILED,
         `bundle missing after install: ${bundlePath}`,
       );
@@ -293,7 +293,7 @@ export class DownloadTask {
       }
     } catch (error) {
       logger.error(TAG, `Failed to delete ${path}: ${getErrorMessage(error)}`);
-      throw toUpdateError(error, ERROR_FILE_OPERATION_FAILED);
+      throw toPushyError(error, ERROR_FILE_OPERATION_FAILED);
     }
   }
 
@@ -337,13 +337,13 @@ export class DownloadTask {
     try {
       size = await zlib.getOriginalSize(archiveFile);
     } catch (e) {
-      throw createUpdateError(
+      throw createPushyError(
         ERROR_PATCH_FAILED,
         `cannot determine archive expansion size: ${getErrorMessage(e)}`,
       );
     }
     if (typeof size !== 'number' || !Number.isFinite(size) || size < 0) {
-      throw createUpdateError(
+      throw createPushyError(
         ERROR_PATCH_FAILED,
         `cannot determine archive expansion size: ${String(size)}`,
       );
@@ -364,7 +364,7 @@ export class DownloadTask {
   ): Promise<void> {
     const archiveStat = await fileIo.stat(archiveFile);
     if (archiveStat.size > MAX_ARCHIVE_BYTES) {
-      throw createUpdateError(
+      throw createPushyError(
         ERROR_PATCH_FAILED,
         `archive too large: ${archiveStat.size} bytes`,
       );
@@ -375,7 +375,7 @@ export class DownloadTask {
     try {
       await zlib.decompressFile(archiveFile, unzipDirectory);
     } catch (e) {
-      throw toUpdateError(e, ERROR_PATCH_FAILED);
+      throw toPushyError(e, ERROR_PATCH_FAILED);
     }
     await measureExtractedDirectory(unzipDirectory);
   }
@@ -468,9 +468,9 @@ export class DownloadTask {
 
     const manifestStat = await fileIo.stat(manifestPath);
     if (manifestStat.size > MAX_MANIFEST_BYTES) {
-      throw createUpdateError(
+      throw createPushyError(
         ERROR_PATCH_FAILED,
-        `patch manifest too large: ${manifestStat.size} bytes`,
+        `delta manifest too large: ${manifestStat.size} bytes`,
       );
     }
     return parseManifestToArrays(
@@ -503,9 +503,9 @@ export class DownloadTask {
         bundleHbcTransformMeta: hbcTransformMeta,
       });
     } catch (error) {
-      throw createUpdateError(
+      throw createPushyError(
         ERROR_PATCH_FAILED,
-        `Failed to process bundle patch: ${getErrorMessage(error)}`,
+        `Failed to process bundle delta: ${getErrorMessage(error)}`,
       );
     } finally {
       if (fileIo.accessSync(originBundlePath)) {
@@ -570,7 +570,7 @@ export class DownloadTask {
       await this.deleteArchiveAndSidecar(params.targetFile);
       const retry = await this.transferArchive(params, false);
       if (retry !== 'done') {
-        throw createUpdateError(
+        throw createPushyError(
           ERROR_DOWNLOAD_FAILED,
           `Server rejected the download range for ${params.url}`,
         );
@@ -607,7 +607,7 @@ export class DownloadTask {
       ? params.deadlineUptimeMs
       : monotonicNowMs() + DOWNLOAD_CALL_TIMEOUT_MS;
     if (deadlineUptimeMs <= monotonicNowMs()) {
-      throw createUpdateError(
+      throw createPushyError(
         ERROR_DOWNLOAD_FAILED,
         'Download deadline expired before start',
       );
@@ -684,7 +684,7 @@ export class DownloadTask {
       received += data.byteLength;
       if (!writeError && baseOffset + received > MAX_ARCHIVE_BYTES) {
         // 未知长度/分块传输的兜底:超过上限即停写,请求在下面结算时失败。
-        writeError = createUpdateError(
+        writeError = createPushyError(
           ERROR_PATCH_FAILED,
           `archive too large: exceeded ${MAX_ARCHIVE_BYTES}`,
         );
@@ -735,7 +735,7 @@ export class DownloadTask {
       watchdogTimer = setTimeout(() => {
         if (inactivityReject) {
           inactivityReject(
-            createUpdateError(
+            createPushyError(
               ERROR_DOWNLOAD_FAILED,
               `Download stalled: no data received for ${INACTIVITY_TIMEOUT_MS}ms`,
             ),
@@ -855,7 +855,7 @@ export class DownloadTask {
       const deadlinePromise = new Promise<never>((_, reject) => {
         deadlineTimer = setTimeout(() => {
           reject(
-            createUpdateError(
+            createPushyError(
               ERROR_DOWNLOAD_FAILED,
               'Download exceeded its whole-call deadline',
             ),
@@ -894,7 +894,7 @@ export class DownloadTask {
         // 响应体从未落盘,partial + sidecar 原样保留——那就是续传状态。
         discardBody = true;
         pendingChunks = null;
-        throw createUpdateError(
+        throw createPushyError(
           ERROR_DOWNLOAD_FAILED,
           `Server error: ${responseCode}`,
         );
@@ -945,7 +945,7 @@ export class DownloadTask {
         );
       }
       if (totalAll > MAX_ARCHIVE_BYTES) {
-        writeError = createUpdateError(
+        writeError = createPushyError(
           ERROR_PATCH_FAILED,
           `archive too large: ${totalAll} bytes`,
         );
@@ -997,13 +997,13 @@ export class DownloadTask {
       const stats = await fileIo.stat(params.targetFile);
       if (!finalEncoded) {
         if (contentLength > 0 && received !== contentLength) {
-          throw createUpdateError(
+          throw createPushyError(
             ERROR_DOWNLOAD_FAILED,
             `Download incomplete: expected ${contentLength} bytes but got ${received} bytes`,
           );
         }
         if (totalAll > 0 && stats.size !== totalAll) {
-          throw createUpdateError(
+          throw createPushyError(
             ERROR_DOWNLOAD_FAILED,
             `Download incomplete: expected ${totalAll} total bytes but got ${stats.size} bytes`,
           );
@@ -1026,7 +1026,7 @@ export class DownloadTask {
       return 'done';
     } catch (error) {
       logger.error(TAG, `Download failed: ${getErrorMessage(error)}`);
-      throw toUpdateError(error, ERROR_DOWNLOAD_FAILED);
+      throw toPushyError(error, ERROR_DOWNLOAD_FAILED);
     } finally {
       clearWatchdog();
       if (deadlineTimer !== null) {
@@ -1075,10 +1075,10 @@ export class DownloadTask {
   }
 
   /** 解压目录里的条目名 + __diff.json 解析结果,供 patch plan 使用。 */
-  private async readPatchInputs(
+  private async readDeltaInputs(
     work: string,
     normalizeResourceCopies: boolean,
-  ): Promise<PatchInputs> {
+  ): Promise<DeltaInputs> {
     const results = await Promise.all([
       this.listEntryNames(work),
       this.readManifestArrays(work, normalizeResourceCopies),
@@ -1093,7 +1093,7 @@ export class DownloadTask {
 
   private async doPatchFromApp(params: DownloadTaskParams): Promise<void> {
     const work = await this.downloadAndExtract(params);
-    const inputs = await this.readPatchInputs(work, true);
+    const inputs = await this.readDeltaInputs(work, true);
     const manifestArrays = inputs.manifestArrays;
 
     NativePatchCore.buildArchivePatchPlan(
@@ -1107,7 +1107,7 @@ export class DownloadTask {
 
     const bundlePatchPath = `${work}/${HARMONY_BUNDLE_PATCH_ENTRY}`;
     if (!fileIo.accessSync(bundlePatchPath)) {
-      throw createUpdateError(ERROR_PATCH_FAILED, 'bundle patch not found');
+      throw createPushyError(ERROR_PATCH_FAILED, 'bundle patch not found');
     }
     const resourceManager = this.context.resourceManager;
     const originContent = await resourceManager.getRawFileContent(
@@ -1142,7 +1142,7 @@ export class DownloadTask {
 
   private async doPatchFromPpk(params: DownloadTaskParams): Promise<void> {
     const work = await this.downloadAndExtract(params);
-    const inputs = await this.readPatchInputs(work, false);
+    const inputs = await this.readDeltaInputs(work, false);
     const manifestArrays = inputs.manifestArrays;
 
     const plan = NativePatchCore.buildArchivePatchPlan(
@@ -1242,10 +1242,10 @@ export class DownloadTask {
         }
       }
     } catch (error) {
-      const coded = toUpdateError(error, ERROR_PATCH_FAILED);
+      const coded = toPushyError(error, ERROR_PATCH_FAILED);
       const message = `Copy from resource failed: ${currentFrom}, ${getErrorMessage(error)}`;
       logger.error(TAG, message);
-      throw createUpdateError(coded.code, message);
+      throw createPushyError(coded.code, message);
     }
   }
 
@@ -1275,7 +1275,7 @@ export class DownloadTask {
     }
     const actualCrc = NativePatchCore.crc32(content);
     if (actualCrc !== expectedCrc) {
-      throw createUpdateError(
+      throw createPushyError(
         ERROR_PATCH_FAILED,
         `resource content mismatch (crc32): ${from}`,
       );
@@ -1292,7 +1292,7 @@ export class DownloadTask {
     } catch (error) {
       const message = `Cleanup failed: ${getErrorMessage(error)}`;
       logger.error(TAG, message);
-      throw createUpdateError(ERROR_FILE_OPERATION_FAILED, message);
+      throw createPushyError(ERROR_FILE_OPERATION_FAILED, message);
     }
   }
 
@@ -1322,7 +1322,7 @@ export class DownloadTask {
           await this.deleteResumeSidecar(params.targetFile);
           break;
         default:
-          throw createUpdateError(
+          throw createPushyError(
             ERROR_INVALID_OPTIONS,
             `Unknown task type: ${params.type}`,
           );
@@ -1335,7 +1335,7 @@ export class DownloadTask {
       // (解压/hpatch/资源拷贝含 copiesCrc 校验/完成记录)一律 PATCH_FAILED,
       // JS 层 patch-health 遥测据此区分网络失败与补丁失败。已带码的错误
       // (磁盘空间、参数)原样保留。
-      const error = toUpdateError(
+      const error = toPushyError(
         rawError,
         this.downloadPhaseCompleted ? ERROR_PATCH_FAILED : ERROR_DOWNLOAD_FAILED,
       );

@@ -337,7 +337,7 @@ static void SetUp(Order selected) {
         ignoreRollback.store(false);
         pushyIsUsingBundleUrl.store(false);
         pushyLaunchVersion = nil;
-        pushyCrashRescueActive.store(false);
+        pushyCrashHoldActive.store(false);
         pushyPurgeRestoreActive.store(false);
         pushyPurgeRestoreWindowOpen = false;
         pushyHostRoundResult = nil;

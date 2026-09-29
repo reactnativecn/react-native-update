@@ -307,7 +307,7 @@ public class UpdateModuleImpl {
      * rejects.
      */
     public void getNativeCheckCache(final Promise promise) {
-        String cached = updateContext.getKv(NativeCheckOrchestrator.KEY_RESP_CACHE);
+        String cached = updateContext.getKv(SyncCoordinator.KEY_RESP_CACHE);
         promise.resolve(cached == null ? "" : cached);
     }
 
@@ -322,7 +322,7 @@ public class UpdateModuleImpl {
         if (requireNonEmpty(config, "config", promise) == null) {
             return;
         }
-        NativeCheckOrchestrator.markJsCheckCompleted(config);
+        SyncCoordinator.recordJsRound(config);
         promise.resolve(true);
     }
 

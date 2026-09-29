@@ -2,7 +2,7 @@
 
 #include <cmath>
 
-namespace updateflow {
+namespace flowcore {
 
 using flowjson::Value;
 
@@ -216,7 +216,7 @@ Value OrderEndpointCandidates(const Value& endpoints, double randomSample) {
   return ordered;
 }
 
-Value BuildCheckRequestBody(const Value& input) {
+Value BuildRequestBody(const Value& input) {
   Value body = Value::Object();
   // Caller extras go in FIRST: they may add fields but never override the
   // identity fields the server keys its decision on (mirrors the TS
@@ -258,7 +258,7 @@ Value BuildCheckRequestBody(const Value& input) {
   return body;
 }
 
-Value ResolveCheckResult(const Value& rootInfo, const Value& identity) {
+Value ResolveResult(const Value& rootInfo, const Value& identity) {
   Value rootResult = Value::Object();
   for (const auto& member : rootInfo.members()) {
     if (member.first != "expVersion") {
@@ -366,7 +366,7 @@ bool ShouldActivateAfterDownload(const Value& info,
          info.Get("config").Get("forceBoot").Truthy();
 }
 
-bool IsValidCheckResult(const Value& root) {
+bool IsValidResult(const Value& root) {
   if (!root.IsObject()) {
     return false;
   }
@@ -378,21 +378,21 @@ bool IsValidCheckResult(const Value& root) {
          paused.IsString();
 }
 
-bool IsValidCheckResponse(const std::string& responseText) {
+bool IsValidResponse(const std::string& responseText) {
   bool ok = false;
   Value root = flowjson::Parse(responseText, &ok);
-  return ok && IsValidCheckResult(root);
+  return ok && IsValidResult(root);
 }
 
-Value HandleCheckResponse(const std::string& responseText,
+Value HandleResponse(const std::string& responseText,
                           const Value& identity, bool isDev,
                           const std::string& afterDownload) {
   bool ok = false;
   Value root = flowjson::Parse(responseText, &ok);
-  if (!ok || !IsValidCheckResult(root)) {
+  if (!ok || !IsValidResult(root)) {
     return DeclineDownload("invalidResponse");
   }
-  Value resolved = ResolveCheckResult(root, identity);
+  Value resolved = ResolveResult(root, identity);
   Value decision = DecideDownload(resolved, identity, isDev);
   if (decision.Get("action").AsString() == "download") {
     decision.Set("activate", Value::Bool(ShouldActivateAfterDownload(
@@ -402,4 +402,4 @@ Value HandleCheckResponse(const std::string& responseText,
   return decision;
 }
 
-}  // namespace updateflow
+}  // namespace flowcore

@@ -39,7 +39,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   identity.Set("uuid", flowjson::Value::String("test1"));
   identity.Set("rolledBackVersion", flowjson::Value::String("bad"));
   flowjson::Stringify(
-      updateflow::HandleCheckResponse(text, identity, false, "none"));
-  updateflow::IsValidCheckResponse(text);
+      flowcore::HandleResponse(text, identity, false, "none"));
+  flowcore::IsValidResponse(text);
   return 0;
 }

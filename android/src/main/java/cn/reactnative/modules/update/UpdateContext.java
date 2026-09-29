@@ -201,7 +201,7 @@ public class UpdateContext {
     }
 
     // Package-private: also the native cold-start check's request input
-    // (NativeCheckOrchestrator). Blocking — call off the main thread.
+    // (SyncCoordinator). Blocking — call off the main thread.
     String computeBundleHash() {
         String cachePrefix = getPackageVersion() + "|" + getPackageLastUpdateTime() + "|";
         String cached = sp.getString(KEY_BUNDLE_HASH_CACHE, null);
@@ -668,7 +668,7 @@ public class UpdateContext {
 
     public String getBundleUrl(String defaultAssetsUrl) {
         isUsingBundleUrl = true;
-        String nativeCheckRolledBackVersion = null;
+        String syncRolledBackVersion = null;
         try {
             // The whole resolution is one read-modify-write on the state
             // (resolve, then possibly roll back missing bundles); see
@@ -682,7 +682,7 @@ public class UpdateContext {
                     ignoreRollback,
                     true
                 );
-                nativeCheckRolledBackVersion = launchState.rolledBackVersion;
+                syncRolledBackVersion = launchState.rolledBackVersion;
                 if (launchState.didRollback) {
                     // The crash-protection rollback: the new version never called
                     // markSuccess. Keep this visible in release logs.
@@ -717,22 +717,22 @@ public class UpdateContext {
                     if (!bundleFile.exists()) {
                         Log.e(TAG, "Bundle version " + currentVersion + " not found.");
                         currentVersion = this.rollBack();
-                        nativeCheckRolledBackVersion = rolledBackVersion();
+                        syncRolledBackVersion = rolledBackVersion();
                         continue;
                     }
                     launchVersion = currentVersion;
-                    nativeCheckRolledBackVersion = rolledBackVersion();
+                    syncRolledBackVersion = rolledBackVersion();
                     return bundleFile.toString();
                 }
 
-                nativeCheckRolledBackVersion = rolledBackVersion();
+                syncRolledBackVersion = rolledBackVersion();
                 return defaultAssetsUrl;
             }
         } finally {
             // Even corrupted state or a state-core exception must not disable
             // the next-launch rescue check. A null snapshot simply omits the
             // rollback guard for this exceptional launch.
-            NativeCheckOrchestrator.schedule(this, nativeCheckRolledBackVersion);
+            SyncCoordinator.schedule(this, syncRolledBackVersion);
         }
     }
 
@@ -747,15 +747,15 @@ public class UpdateContext {
 
     void setNativeConfig(String config) {
         synchronized (commitLock) {
-            boolean changed = !config.equals(sp.getString(NativeCheckOrchestrator.KEY_CONFIG, null));
+            boolean changed = !config.equals(sp.getString(SyncCoordinator.KEY_CONFIG, null));
             SharedPreferences.Editor editor = sp.edit();
             if (changed) {
                 // Also invalidate on a failed persistence attempt: an older
                 // round must not commit over uncertain configuration state.
                 resetGeneration.incrementAndGet();
                 nativeConfigGeneration.incrementAndGet();
-                editor.remove(NativeCheckOrchestrator.KEY_RESP_CACHE);
-                NativeCheckOrchestrator.markJsCheckCompleted(null);
+                editor.remove(SyncCoordinator.KEY_RESP_CACHE);
+                SyncCoordinator.recordJsRound(null);
             }
             // A native-only first launch needs a stable gray-release identity
             // before JS initializes. Never replace an existing installation ID.
@@ -763,12 +763,12 @@ public class UpdateContext {
             if (uuid == null || uuid.isEmpty()) {
                 editor.putString("uuid", java.util.UUID.randomUUID().toString());
             }
-            editor.putString(NativeCheckOrchestrator.KEY_CONFIG, config);
+            editor.putString(SyncCoordinator.KEY_CONFIG, config);
             // Persist even an equal value: a previous commit may have updated
             // SharedPreferences memory but failed to write its file.
             persistEditorOrThrow(editor, "persist configuration");
         }
-        NativeCheckOrchestrator.onConfigured(this);
+        SyncCoordinator.onConfigured(this);
     }
 
     // Native-decision generation: bumped by reset AND configuration replacement.
@@ -783,7 +783,7 @@ public class UpdateContext {
      * no compare-and-act window: either the whole round lands, or the reset
      * wins and none of it does. Returns whether the round was committed.
      */
-    boolean commitNativeCheckResult(
+    boolean commitSyncResult(
         long expectedGeneration,
         String hash,
         String hashInfoJson,
@@ -792,17 +792,17 @@ public class UpdateContext {
     ) {
         boolean switching = activate && hash != null;
         if (!switching) {
-            return commitNativeCheckResultState(
+            return commitSyncResultState(
                 expectedGeneration, hash, hashInfoJson, false, responseCacheJson);
         }
         synchronized (versionFilesLock) {
             verifySwitchTarget(hash);
-            return commitNativeCheckResultState(
+            return commitSyncResultState(
                 expectedGeneration, hash, hashInfoJson, true, responseCacheJson);
         }
     }
 
-    private boolean commitNativeCheckResultState(
+    private boolean commitSyncResultState(
         long expectedGeneration,
         String hash,
         String hashInfoJson,
@@ -821,9 +821,9 @@ public class UpdateContext {
                 applyState(editor, computeSwitchState(hash));
             }
             if (responseCacheJson != null) {
-                editor.putString(NativeCheckOrchestrator.KEY_RESP_CACHE, responseCacheJson);
+                editor.putString(SyncCoordinator.KEY_RESP_CACHE, responseCacheJson);
             }
-            persistEditorOrThrow(editor, "commit native check result");
+            persistEditorOrThrow(editor, "commit sync result");
             if (switching) {
                 ignoreRollback = false;
             }

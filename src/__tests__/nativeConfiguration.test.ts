@@ -20,7 +20,7 @@ const clientSource = runtimeSource('../client.ts');
 interface ConfigStore {
   setNativeConfig: (config: string) => Promise<void>;
   getResetGeneration: () => number;
-  commitNativeCheckResult: (
+  commitSyncResult: (
     generation: number,
     hash: string,
     info: string,
@@ -50,7 +50,7 @@ function storeHarness() {
       util: { generateRandomUUID: () => 'native-installation-id' },
       KEY_CONFIG: 'nativeConfig',
       KEY_RESP_CACHE: 'nativeCheckResp',
-      markJsCheckCompleted: (config: string) => clearedSignals.push(config),
+      recordJsRound: (config: string) => clearedSignals.push(config),
       logger: { error() {} },
       getErrorMessage: (error: unknown) => String(error),
     }
@@ -181,13 +181,7 @@ describe('actual native configuration store', () => {
     await h.store.setNativeConfig('A');
     expect(h.store.getResetGeneration()).toBe(oldGeneration + 2);
     expect(
-      await h.store.commitNativeCheckResult(
-        oldGeneration,
-        'old',
-        '{}',
-        true,
-        'stale'
-      )
+      await h.store.commitSyncResult(oldGeneration, 'old', '{}', true, 'stale')
     ).toBe(false);
     expect(h.values.has('hash_old')).toBe(false);
     expect(h.values.get('uuid')).toBe('native-installation-id');

@@ -6,7 +6,7 @@ import {
 import common from '@ohos.app.ability.common';
 import fs from '@ohos.file.fs';
 import { UpdateContext } from './UpdateContext';
-import { prepareBundleNative } from './NativeCheckOrchestrator';
+import { prepareBundleNative } from './SyncCoordinator';
 import type { BundlePreparationResult } from './BundlePreparationResult';
 import { normalizePushyConfiguration } from './PushyConfiguration';
 import type { PushyConfiguration } from './PushyConfiguration';

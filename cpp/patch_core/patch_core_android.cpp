@@ -68,7 +68,7 @@ Java_cn_reactnative_modules_update_DownloadTask_applyPatchFromFileSource(
   } catch (const std::exception& error) {
     ThrowRuntimeException(env, error.what());
   } catch (...) {
-    ThrowRuntimeException(env, "Unexpected native exception in applyPatchFromFileSource");
+    ThrowRuntimeException(env, "Unexpected native exception while applying delta");
   }
 }
 

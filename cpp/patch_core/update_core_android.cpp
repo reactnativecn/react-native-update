@@ -422,7 +422,7 @@ Java_cn_reactnative_modules_update_DownloadTask_buildArchivePatchPlan(
   } catch (const std::exception& error) {
     ThrowRuntimeException(env, error.what());
   } catch (...) {
-    ThrowRuntimeException(env, "Unexpected native exception in buildArchivePatchPlan");
+    ThrowRuntimeException(env, "Unexpected native exception while planning archive");
   }
   return nullptr;
 }

@@ -1108,12 +1108,12 @@ static napi_value MakeUtf8String(napi_env env, const std::string& value) {
   return result;
 }
 
-static napi_value FlowBuildCheckRequestBody(napi_env env,
+static napi_value FlowBuildRequestBody(napi_env env,
                                             napi_callback_info info) {
   size_t argc = 1;
   napi_value args[1] = {nullptr};
   if (!GetArgCount(env, info, &argc, args) || argc < 1) {
-    ThrowError(env, "buildCheckRequestBody: missing input argument");
+    ThrowError(env, "buildRequestBody: missing input argument");
     return nullptr;
   }
   bool ok = false;
@@ -1127,7 +1127,7 @@ static napi_value FlowBuildCheckRequestBody(napi_env env,
     return nullptr;
   }
   return MakeUtf8String(
-      env, flowjson::Stringify(updateflow::BuildCheckRequestBody(input)));
+      env, flowjson::Stringify(flowcore::BuildRequestBody(input)));
 }
 
 static napi_value FlowOrderEndpointCandidates(napi_env env,
@@ -1154,16 +1154,16 @@ static napi_value FlowOrderEndpointCandidates(napi_env env,
     return nullptr;
   }
   return MakeUtf8String(env,
-                        flowjson::Stringify(updateflow::OrderEndpointCandidates(
+                        flowjson::Stringify(flowcore::OrderEndpointCandidates(
                             endpoints, sample)));
 }
 
-static napi_value FlowIsValidCheckResponse(napi_env env,
+static napi_value FlowIsValidResponse(napi_env env,
                                            napi_callback_info info) {
   size_t argc = 1;
   napi_value args[1] = {nullptr};
   if (!GetArgCount(env, info, &argc, args) || argc < 1) {
-    ThrowError(env, "isValidCheckResponse: missing arguments");
+    ThrowError(env, "isValidResponse: missing arguments");
     return nullptr;
   }
   bool ok = false;
@@ -1174,17 +1174,17 @@ static napi_value FlowIsValidCheckResponse(napi_env env,
     return nullptr;
   }
   napi_value result = nullptr;
-  napi_get_boolean(env, updateflow::IsValidCheckResponse(response_text),
+  napi_get_boolean(env, flowcore::IsValidResponse(response_text),
                    &result);
   return result;
 }
 
-static napi_value FlowHandleCheckResponse(napi_env env,
+static napi_value FlowHandleResponse(napi_env env,
                                           napi_callback_info info) {
   size_t argc = 3;
   napi_value args[3] = {nullptr, nullptr, nullptr};
   if (!GetArgCount(env, info, &argc, args) || argc < 3) {
-    ThrowError(env, "handleCheckResponse: missing arguments");
+    ThrowError(env, "handleResponse: missing arguments");
     return nullptr;
   }
   bool ok = false;
@@ -1206,7 +1206,7 @@ static napi_value FlowHandleCheckResponse(napi_env env,
     return nullptr;
   }
   return MakeUtf8String(env,
-                        flowjson::Stringify(updateflow::HandleCheckResponse(
+                        flowjson::Stringify(flowcore::HandleResponse(
                             response_text, identity, false, after_download)));
 }
 
@@ -1222,10 +1222,10 @@ napi_value Init(napi_env env, napi_value exports) {
       !ExportFunction(env, exports, "sha256HexFileAsync", Sha256HexFileAsync) ||
       !ExportFunction(env, exports, "crc32", Crc32) ||
       !ExportFunction(env, exports, "getSupportedDiffVersion", GetSupportedDiffVersion) ||
-      !ExportFunction(env, exports, "buildCheckRequestBody", FlowBuildCheckRequestBody) ||
+      !ExportFunction(env, exports, "buildRequestBody", FlowBuildRequestBody) ||
       !ExportFunction(env, exports, "orderEndpointCandidates", FlowOrderEndpointCandidates) ||
-      !ExportFunction(env, exports, "isValidCheckResponse", FlowIsValidCheckResponse) ||
-      !ExportFunction(env, exports, "handleCheckResponse", FlowHandleCheckResponse)) {
+      !ExportFunction(env, exports, "isValidResponse", FlowIsValidResponse) ||
+      !ExportFunction(env, exports, "handleResponse", FlowHandleResponse)) {
     return nullptr;
   }
   return exports;

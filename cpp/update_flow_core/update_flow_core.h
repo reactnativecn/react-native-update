@@ -18,7 +18,7 @@
 // Like the TS side this layer is pure: no IO, no time, no randomness — the
 // random sample, identity and parsed JSON all arrive as parameters. The
 // orchestrators (per-platform HTTP/download/state glue) own all effects.
-namespace updateflow {
+namespace flowcore {
 
 uint32_t Murmur3_32(const std::string& key, uint32_t seed = 0);
 
@@ -45,10 +45,10 @@ flowjson::Value OrderEndpointCandidates(const flowjson::Value& endpoints,
 
 // input: { packageVersion, currentVersion, buildTime, cInfo,
 //          supportedDiffVersion?, bundleHash?, isDev?, extra? }
-flowjson::Value BuildCheckRequestBody(const flowjson::Value& input);
+flowjson::Value BuildRequestBody(const flowjson::Value& input);
 
 // identity: { packageVersion, currentVersion?, uuid }
-flowjson::Value ResolveCheckResult(const flowjson::Value& rootInfo,
+flowjson::Value ResolveResult(const flowjson::Value& rootInfo,
                                    const flowjson::Value& identity);
 
 // identity: { currentVersion?, rolledBackVersion? }
@@ -71,13 +71,13 @@ flowjson::Value DecideDownload(const flowjson::Value& info,
 // array, `{"error": "..."}`, an HTML page that happened to parse — is a
 // failed endpoint and must not stop the endpoint fallback. Mirrors
 // src/updateFlowCore.ts isValidCheckResult.
-bool IsValidCheckResult(const flowjson::Value& root);
-bool IsValidCheckResponse(const std::string& responseText);
+bool IsValidResult(const flowjson::Value& root);
+bool IsValidResponse(const std::string& responseText);
 
 bool ShouldActivateAfterDownload(const flowjson::Value& info,
                                  const std::string& afterDownload);
 
-// Composes Parse → ResolveCheckResult → DecideDownload: one call from the
+// Composes Parse → ResolveResult → DecideDownload: one call from the
 // raw checkUpdate response text to a download decision, so the platform
 // orchestrators contain no decision logic at all. identity is the union of
 // both composed functions' needs: { packageVersion, currentVersion?, uuid,
@@ -87,9 +87,9 @@ bool ShouldActivateAfterDownload(const flowjson::Value& info,
 // check result — so orchestrators can persist name/description/metaInfo
 // alongside a downloaded version (the JS side's setLocalHashInfo).
 // Malformed JSON yields { action: 'none', reason: 'invalidResponse' }.
-flowjson::Value HandleCheckResponse(const std::string& responseText,
+flowjson::Value HandleResponse(const std::string& responseText,
                                     const flowjson::Value& identity,
                                     bool isDev,
                                     const std::string& afterDownload);
 
-}  // namespace updateflow
+}  // namespace flowcore
