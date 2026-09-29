@@ -147,7 +147,7 @@ Pod::Spec.new do |s|
   # Privacy manifest (required-reason APIs: disk space, file timestamps,
   # system boot time, user defaults) delivered as its own resource bundle so
   # static and dynamic integrations both carry it.
-  s.resource_bundles = { 'react-native-update_privacy' => ['ios/PrivacyInfo.xcprivacy'] }
+  s.resource_bundles = { 'PushyPrivacy' => ['ios/PrivacyInfo.xcprivacy'] }
 
   s.dependency 'React'
   s.dependency "React-Core"

@@ -31,6 +31,12 @@
 
 #import <React/RCTConvert.h>
 #import <React/RCTLog.h>
+// RN's log macros pass __FILE__, which would embed this file's absolute build
+// path in the binary; log with the bare file name instead.
+#if RCTLOG_ENABLED
+#undef _RCTLog
+#define _RCTLog(lvl, ...) _RCTLogNativeInternal(lvl, __FILE_NAME__, __LINE__, __VA_ARGS__)
+#endif
 #import <objc/runtime.h>
 #import <os/lock.h>
 

@@ -78,6 +78,8 @@ endif()
 # keep exporting PushyTurboModule (JSI_EXPORT) for the host's PackageProvider.
 if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
     target_compile_options(rnpushy PRIVATE
+        # NAPI_MODULE records __FILE__; keep the build path out of the binary.
+        -fmacro-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}/=
         -ffunction-sections
         -fdata-sections
         -fvisibility=hidden

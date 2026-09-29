@@ -79,6 +79,15 @@ jobs:
       - name: Verify Harmony HAR artifact
         run: test -f harmony/pushy.har
 
+      - name: Verify the HAR native library carries no update wording
+        shell: bash
+        run: |
+          dir="$(mktemp -d)"
+          tar -xzf harmony/pushy.har -C "$dir"
+          libs="$(find "$dir" -path '*/libs/*' -name 'librnpushy.so')"
+          test -n "$libs"
+          node scripts/check-binary-strings.js $libs
+
       - name: Type-check Harmony TS sources (required)
         shell: bash
         run: |
