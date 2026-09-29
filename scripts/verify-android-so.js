@@ -14,6 +14,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const { findWording } = require('./check-binary-strings');
 
 const LIB_DIR = path.resolve(__dirname, '..', 'android', 'lib');
 const ABIS = ['arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64'];
@@ -192,6 +193,14 @@ for (const abi of ABIS) {
       );
       failed = true;
     }
+  }
+
+  const wording = findWording(soPath);
+  if (wording.length) {
+    for (const hit of wording) {
+      console.error(`error: ${soPath} contains ${JSON.stringify(hit)} in its strings`);
+    }
+    failed = true;
   }
 
   const staticJni = [...symbols].filter((symbol) => symbol.startsWith('Java_'));
