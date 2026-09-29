@@ -111,7 +111,7 @@ public final class PushyRuntime {
                     Thread.currentThread().interrupt();
                     outcome = BundlePreparationResult.of(BundlePreparationResult.CANCELLED, "interrupted");
                 } catch (Exception | LinkageError e) {
-                    Log.w("react-native-update", "native host sync failed", e);
+                    Log.w(Texts.LOG_TAG, "native host sync failed", e);
                     outcome = BundlePreparationResult.of(BundlePreparationResult.FAILED, "internal_error");
                 }
                 final BundlePreparationResult result = outcome;

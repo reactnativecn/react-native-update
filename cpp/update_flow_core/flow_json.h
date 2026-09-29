@@ -18,6 +18,9 @@
 //    falsy; empty arrays and objects are truthy);
 //  - StrictEquals() implements === for primitives only (never for
 //    arrays/objects — reference equality cannot hold across a parse).
+// Keep the core internal to whichever binary links it (see podspec Core).
+#pragma GCC visibility push(hidden)
+
 namespace flowjson {
 
 class Value;
@@ -114,3 +117,5 @@ constexpr size_t kMaxNodes = 65536;
 Value Parse(const std::string& text, bool* ok);
 
 }  // namespace flowjson
+
+#pragma GCC visibility pop

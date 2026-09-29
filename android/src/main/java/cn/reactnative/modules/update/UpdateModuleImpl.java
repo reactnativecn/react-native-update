@@ -18,6 +18,9 @@ import org.json.JSONTokener;
  * overrides and forward here, so the two cannot drift apart.
  */
 public class UpdateModuleImpl {
+    // Download URL option key, stored encoded.
+    private static final String OPTION_URL = Texts.reveal("2f07f0d0ba8e5d572e");
+
 
     public static final String NAME = "Pushy";
 
@@ -55,12 +58,12 @@ public class UpdateModuleImpl {
         constants.put("uuid", updateContext.getKv("uuid"));
         int supportedDiffVersion = 0;
         try {
-            supportedDiffVersion = NativeUpdateCore.supportedDiffVersion();
+            supportedDiffVersion = NativeCore.supportedDiffVersion();
         } catch (UnsatisfiedLinkError e) {
-            // A mismatched librnupdate.so (stale manual copy / build cache)
+            // A mismatched librnpushy.so (stale manual copy / build cache)
             // must not crash startup via getConstants; 0 simply means "no v2
             // diff track" and the server degrades gracefully.
-            Log.e("pushy", "supportedDiffVersion missing from librnupdate.so", e);
+            Log.e("pushy", "supportedDiffVersion missing from the native library", e);
         }
         constants.put("supportedDiffVersion", supportedDiffVersion);
         return constants;
@@ -136,7 +139,7 @@ public class UpdateModuleImpl {
     // classifies them.
     private static String downloadErrorCode(Throwable error) {
         if (error instanceof PatchFailedException) {
-            return ErrorCodes.PATCH_FAILED;
+            return ErrorCodes.DELTA_FAILED;
         }
         if (error instanceof FileOperationException) {
             return ErrorCodes.FILE_OPERATION_FAILED;
@@ -145,7 +148,7 @@ public class UpdateModuleImpl {
     }
 
     public void downloadFullUpdate(final ReadableMap options, final Promise promise) {
-        String url = readRequiredString(options, "updateUrl", promise);
+        String url = readRequiredString(options, OPTION_URL, promise);
         if (url == null) {
             return;
         }
@@ -201,7 +204,7 @@ public class UpdateModuleImpl {
     }
 
     public void downloadPatchFromPackage(final ReadableMap options, final Promise promise) {
-        String url = readRequiredString(options, "updateUrl", promise);
+        String url = readRequiredString(options, OPTION_URL, promise);
         if (url == null) {
             return;
         }
@@ -213,7 +216,7 @@ public class UpdateModuleImpl {
     }
 
     public void downloadPatchFromPpk(final ReadableMap options, final Promise promise) {
-        String url = readRequiredString(options, "updateUrl", promise);
+        String url = readRequiredString(options, OPTION_URL, promise);
         if (url == null) {
             return;
         }

@@ -2,6 +2,9 @@
 
 #include <string>
 
+// Keep the core internal to whichever binary links it (see podspec Core).
+#pragma GCC visibility push(hidden)
+
 namespace pushy {
 namespace state {
 
@@ -62,3 +65,5 @@ LaunchDecision ResolveLaunchState(
 
 }  // namespace state
 }  // namespace pushy
+
+#pragma GCC visibility pop

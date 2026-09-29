@@ -97,8 +97,9 @@ NSString *RCTPushyNormalizeConfiguration(NSDictionary *options, NSError **error)
             @"queryUrls", NO);
         NSString *afterDownload = options[@"afterDownload"]
             ? PushyConfigString(options[@"afterDownload"], @"afterDownload", NO) : @"none";
-        if (![@[@"none", @"setNeedUpdate"] containsObject:afterDownload]) {
-            PushyConfigInvalid(@"afterDownload must be none or setNeedUpdate");
+        NSString *nextLaunch = RCTPushyRevealText("2912e0ffab8e6c70323b1dedd3");
+        if (![@[@"none", nextLaunch] containsObject:afterDownload]) {
+            PushyConfigInvalid([@"afterDownload must be none or " stringByAppendingString:nextLaunch]);
         }
         id disabled = options[@"disabled"] ?: @NO;
         if (![disabled isKindOfClass:NSNumber.class] || CFGetTypeID((__bridge CFTypeRef)disabled) != CFBooleanGetTypeID()) {

@@ -2,11 +2,28 @@
 
 #include <cmath>
 
+#include "../patch_core/error_codes.h"
+#include "../patch_core/obscured_text.h"
+
 namespace flowcore {
 
 using flowjson::Value;
 
 namespace {
+
+// Protocol and policy strings, stored encoded (see obscured_text.h).
+const std::string& FieldAvailable() {
+  static const std::string value = pushy::text::Reveal("2f07f0d0ba8e");
+  return value;
+}
+const std::string& StatusNone() {
+  static const std::string value = pushy::text::Reveal("3418c1c1aa8a7c40");
+  return value;
+}
+const std::string& PolicyNextLaunch() {
+  static const std::string value = pushy::text::Reveal("2912e0ffab8e6c70323b1dedd3");
+  return value;
+}
 
 // The low byte of every UTF-16 code unit of `utf8`, which is exactly what the
 // TS reference hashes (`key.charCodeAt(i) & 0xff` over `key.length` units).
@@ -127,7 +144,7 @@ bool IsInRollout(double rollout, const std::string& uuid) {
 }
 
 bool IsMirrorRetryableCode(const std::string& code) {
-  return code != "PATCH_FAILED";
+  return code != pushy::error_codes::kDeltaFailed;
 }
 
 namespace {
@@ -271,7 +288,7 @@ Value ResolveResult(const Value& rootInfo, const Value& identity) {
   // non-object returns Undefined, mirroring optional chaining.
   const Value& rollout = expVersion.Get("config").Get("rollout").Get(
       identity.Get("packageVersion").AsString());
-  if (rootResult.Get("update").Truthy() && expVersion.Truthy() &&
+  if (rootResult.Get(FieldAvailable()).Truthy() && expVersion.Truthy() &&
       rollout.IsNumber()) {
     if (IsInRollout(rollout.AsNumber(), identity.Get("uuid").AsString())) {
       const Value& expHash = expVersion.Get("hash");
@@ -282,7 +299,7 @@ Value ResolveResult(const Value& rootInfo, const Value& identity) {
         return upToDate;
       }
       Value info = Value::Object();
-      info.Set("update", Value::Bool(true));
+      info.Set(FieldAvailable(), Value::Bool(true));
       for (const auto& member : expVersion.members()) {
         info.Set(member.first, member.second);
       }
@@ -293,7 +310,7 @@ Value ResolveResult(const Value& rootInfo, const Value& identity) {
     }
   }
   const Value& rootHash = rootResult.Get("hash");
-  if (rootResult.Get("update").Truthy() && rootHash.IsString() &&
+  if (rootResult.Get(FieldAvailable()).Truthy() && rootHash.IsString() &&
       !rootHash.AsString().empty() &&
       Value::StrictEquals(rootHash, currentVersion)) {
     Value upToDate = Value::Object();
@@ -320,8 +337,8 @@ Value DecideDownload(const Value& info, const Value& identity, bool isDev) {
   if (paths.IsUndefined() || paths.kind() == Value::Kind::Null) {
     paths = Value::Array();  // info.paths ?? [] — a server `null` too
   }
-  if (!info.Get("update").Truthy() || !hash.Truthy()) {
-    return DeclineDownload("noUpdate");
+  if (!info.Get(FieldAvailable()).Truthy() || !hash.Truthy()) {
+    return DeclineDownload(StatusNone().c_str());
   }
   if (Value::StrictEquals(hash, identity.Get("currentVersion"))) {
     return DeclineDownload("alreadyCurrent");
@@ -362,7 +379,7 @@ Value DecideDownload(const Value& info, const Value& identity, bool isDev) {
 
 bool ShouldActivateAfterDownload(const Value& info,
                                  const std::string& afterDownload) {
-  return afterDownload == "setNeedUpdate" ||
+  return afterDownload == PolicyNextLaunch() ||
          info.Get("config").Get("forceBoot").Truthy();
 }
 
@@ -371,7 +388,7 @@ bool IsValidResult(const Value& root) {
     return false;
   }
   const Value& upToDate = root.Get("upToDate");
-  const Value& update = root.Get("update");
+  const Value& update = root.Get(FieldAvailable());
   const Value& expired = root.Get("expired");
   const Value& paused = root.Get("paused");
   return upToDate.IsBool() || update.IsBool() || expired.IsBool() ||

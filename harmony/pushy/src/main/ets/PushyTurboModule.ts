@@ -26,6 +26,7 @@ import {
   getErrorMessage,
   toPushyError,
 } from './ErrorCodes';
+import { DEVTOOLS_RESTART_EVENT, DEVTOOLS_RESTART_REASON, STORAGE_DIR_NAME } from './Texts';
 
 export { getErrorMessage } from './ErrorCodes';
 
@@ -108,7 +109,7 @@ export class PushyTurboModule extends UITurboModule {
     const holder = this.ctx as unknown as DevToolsControllerHolder;
     const devToolsController = holder.devToolsController;
     if (devToolsController) {
-      devToolsController.eventEmitter.emit('RELOAD', { reason: 'HotReload2' });
+      devToolsController.eventEmitter.emit(DEVTOOLS_RESTART_EVENT, { reason: DEVTOOLS_RESTART_REASON });
     }
   }
 
@@ -146,10 +147,10 @@ export class PushyTurboModule extends UITurboModule {
 
   private async reloadBridge(): Promise<void> {
     if (this.ctx.isDebugModeEnabled) {
-      logger.debug(TAG, 'reloadBridge via devToolsController RELOAD (debug mode)');
+      logger.debug(TAG, 'restart via devToolsController (debug mode)');
       this.softRestart();
     } else {
-      logger.debug(TAG, 'reloadBridge via restartAbility (release mode)');
+      logger.debug(TAG, 'restart via restartAbility (release mode)');
       // If the process truly restarts, this timer dies with it. It only fires
       // when the app is still alive after 1.5s — i.e. restartApp resolved but
       // was silently suppressed (HarmonyOS rate-limits restarts within a few
@@ -157,7 +158,7 @@ export class PushyTurboModule extends UITurboModule {
       // soft reload must take over. So the timer is NOT cleared on the success
       // path, only in the catch branch where the soft reload runs immediately.
       const fallbackTimer = setTimeout(() => {
-        logger.warn(TAG, 'restartAbility did not restart the app within 1.5s, triggering soft reload fallback');
+        logger.warn(TAG, 'restartAbility did not restart the app within 1.5s, triggering soft restart fallback');
         this.softRestart();
       }, 1500);
 
@@ -165,7 +166,7 @@ export class PushyTurboModule extends UITurboModule {
         await this.restartAbility();
       } catch (error) {
         clearTimeout(fallbackTimer);
-        logger.error(TAG, `restartAbility failed: ${getErrorMessage(error)}, triggering soft reload fallback`);
+        logger.error(TAG, `restartAbility failed: ${getErrorMessage(error)}, triggering soft restart fallback`);
         this.softRestart();
       }
     }
@@ -193,7 +194,7 @@ export class PushyTurboModule extends UITurboModule {
     }
 
     const result = {
-      downloadRootDir: `${this.mUiCtx.filesDir}/_update`,
+      downloadRootDir: `${this.mUiCtx.filesDir}/${STORAGE_DIR_NAME}`,
       currentVersionInfo,
       currentBundleSha256,
       packageVersion,
@@ -299,8 +300,8 @@ export class PushyTurboModule extends UITurboModule {
   }
 
   async reloadUpdate(options: { hash: string }): Promise<void> {
-    logger.debug(TAG, ',call reloadUpdate');
-    const hash = this.requireHash(options.hash, 'reloadUpdate');
+    logger.debug(TAG, ',call switch and restart');
+    const hash = this.requireHash(options.hash, 'switch and restart');
 
     // 切换必须真正落盘(switchVersion 内 await flush)后才重启:重启会立刻
     // 杀进程,未落盘的切换就是"重启回旧 bundle"。
@@ -329,13 +330,13 @@ export class PushyTurboModule extends UITurboModule {
   }
 
   async setNeedUpdate(options: { hash: string }): Promise<void> {
-    logger.debug(TAG, ',call setNeedUpdate');
-    const hash = this.requireHash(options.hash, 'setNeedUpdate');
+    logger.debug(TAG, ',call select for next launch');
+    const hash = this.requireHash(options.hash, 'select for next launch');
 
     try {
       await this.context.switchVersion(hash);
     } catch (error) {
-      logger.error(TAG, `setNeedUpdate failed: ${getErrorMessage(error)}`);
+      logger.error(TAG, `select for next launch failed: ${getErrorMessage(error)}`);
       throw toPushyError(error, ERROR_SWITCH_VERSION_FAILED);
     }
   }
@@ -376,7 +377,7 @@ export class PushyTurboModule extends UITurboModule {
     hash: string;
     originHash: string;
   }): Promise<void> {
-    logger.debug(TAG, ',call downloadPatchFromPpk');
+    logger.debug(TAG, ',call fetch ppk delta');
     return this.context.downloadPatchFromPpk(
       options.updateUrl,
       options.hash,
@@ -388,7 +389,7 @@ export class PushyTurboModule extends UITurboModule {
     updateUrl: string;
     hash: string;
   }): Promise<void> {
-    logger.debug(TAG, ',call downloadPatchFromPackage');
+    logger.debug(TAG, ',call fetch package delta');
     return this.context.downloadPatchFromPackage(
       options.updateUrl,
       options.hash,
@@ -399,7 +400,7 @@ export class PushyTurboModule extends UITurboModule {
     updateUrl: string;
     hash: string;
   }): Promise<void> {
-    logger.debug(TAG, ',call downloadFullUpdate');
+    logger.debug(TAG, ',call fetch full package');
     return this.context.downloadFullUpdate(options.updateUrl, options.hash);
   }
 

@@ -1,9 +1,9 @@
 package cn.reactnative.modules.update;
 
-final class NativeUpdateCore {
+final class NativeCore {
     private static boolean loaded = false;
 
-    private NativeUpdateCore() {
+    private NativeCore() {
     }
 
     static synchronized void ensureLoaded() {
@@ -12,10 +12,10 @@ final class NativeUpdateCore {
         }
 
         try {
-            System.loadLibrary("rnupdate");
+            System.loadLibrary(Texts.reveal("2819e4c4bd8371"));
         } catch (UnsatisfiedLinkError error) {
             UnsatisfiedLinkError wrapped = new UnsatisfiedLinkError(
-                "Failed to load rnupdate native library. Original error: "
+                "Failed to load the native library. Original error: "
                     + error.getMessage());
             wrapped.initCause(error);
             throw wrapped;

@@ -8,7 +8,7 @@ package cn.reactnative.modules.update;
  */
 final class FlowBridge {
     static {
-        NativeUpdateCore.ensureLoaded();
+        NativeCore.ensureLoaded();
     }
 
     private FlowBridge() {

@@ -11,7 +11,8 @@ package cn.reactnative.modules.update;
 final class ErrorCodes {
     static final String INVALID_OPTIONS = "INVALID_OPTIONS";
     static final String DOWNLOAD_FAILED = "DOWNLOAD_FAILED";
-    static final String PATCH_FAILED = "PATCH_FAILED";
+    // Encoded (see Texts.reveal): the value is "PATCH_FAILED".
+    static final String DELTA_FAILED = Texts.reveal("0a36c0f286b44e640b1339dd");
     static final String FILE_OPERATION_FAILED = "FILE_OPERATION_FAILED";
     static final String SWITCH_VERSION_FAILED = "SWITCH_VERSION_FAILED";
     static final String MARK_SUCCESS_FAILED = "MARK_SUCCESS_FAILED";

@@ -18,13 +18,16 @@ final class PushyConfiguration {
         "^https?://(\\[[0-9a-fA-F:]+\\]|[a-zA-Z0-9.-]+)(:[0-9]+)?([/?#]|$)");
     // Default service addresses, encoded by scripts/encode-native-text.ts.
     private static final String[] ENDPOINTS = {
-        HttpUtils.reveal("3203e0c1bdd1270a372f18f8c2b6de7f4f2607f5b3d5b9817b592947e5cdefbc8a7e"),
-        HttpUtils.reveal("3203e0c1bdd1270a372f18f8c2b6de7f4f2607f5f0daac9c644a620ae88ca1ad93")
+        Texts.reveal("3203e0c1bdd1270a372f18f8c2b6de7f4f2607f5b3d5b9817b592947e5cdefbc8a7e"),
+        Texts.reveal("3203e0c1bdd1270a372f18f8c2b6de7f4f2607f5f0daac9c644a620ae88ca1ad93")
     };
     private static final String[] QUERY_URLS = {
-        HttpUtils.reveal("3203e0c1bdd1270a253608fcd3fd9362476817f4f0d5a1996342631be3c2a3a9d779552507fdcde8928a6f512f5ce2ccbdc869404d2f1de79daa826d562c0913eec4fa9b7d4426"),
-        HttpUtils.reveal("3203e0c1bdd1270a213b12b7dca09468462e12f3b0d5bd813d482446f4c6a1be8e79552507fdcda68cd06e5c3710e480a4867048483e55e0c2ab8d7d43030d1ce9c3b183214e2601f2f0d5b782601e2719e8ca")
+        Texts.reveal("3203e0c1bdd1270a253608fcd3fd9362476817f4f0d5a1996342631be3c2a3a9d779552507fdcde8928a6f512f5ce2ccbdc869404d2f1de79daa826d562c0913eec4fa9b7d4426"),
+        Texts.reveal("3203e0c1bdd1270a213b12b7dca09468462e12f3b0d5bd813d482446f4c6a1be8e79552507fdcda68cd06e5c3710e480a4867048483e55e0c2ab8d7d43030d1ce9c3b183214e2601f2f0d5b782601e2719e8ca")
     };
+
+    // afterDownload value that selects the bundle for the next launch, encoded.
+    static final String POLICY_NEXT_LAUNCH = Texts.reveal("2912e0ffab8e6c70323b1dedd3");
 
     private PushyConfiguration() {}
 
@@ -45,8 +48,8 @@ final class PushyConfiguration {
             "queryUrls", false);
         String afterDownload = options.has("afterDownload")
             ? string(options.get("afterDownload"), "afterDownload", false) : "none";
-        if (!"none".equals(afterDownload) && !"setNeedUpdate".equals(afterDownload)) {
-            throw invalid("afterDownload must be none or setNeedUpdate");
+        if (!"none".equals(afterDownload) && !POLICY_NEXT_LAUNCH.equals(afterDownload)) {
+            throw invalid("afterDownload must be none or " + POLICY_NEXT_LAUNCH);
         }
         Object disabled = options.has("disabled") ? options.get("disabled") : Boolean.FALSE;
         if (!(disabled instanceof Boolean)) {

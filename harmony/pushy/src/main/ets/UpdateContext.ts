@@ -33,10 +33,11 @@ import {
   getErrorMessage,
   toPushyError,
 } from './ErrorCodes';
+import { APP_DELTA_SUFFIX, PPK_DELTA_SUFFIX, PREFERENCES_NAME, STORAGE_DIR_NAME } from './Texts';
 
 export { isSafePathComponent } from './PathUtils';
 
-const TAG = 'UpdateContext';
+const TAG = 'PushyContext';
 // 常规清理保留最近 3 天内触碰过的条目(续传 partial、staging 同样按 mtime)。
 const CLEANUP_MAX_AGE_DAYS = 3;
 
@@ -101,7 +102,7 @@ export class UpdateContext {
 
   private constructor(context: common.UIAbilityContext) {
     this.context = context;
-    this.rootDir = context.filesDir + '/_update';
+    this.rootDir = `${context.filesDir}/${STORAGE_DIR_NAME}`;
     this.instanceId = `uc#${++UpdateContext.instanceCounter}`;
 
     try {
@@ -145,7 +146,7 @@ export class UpdateContext {
   private initPreferences() {
     try {
       this.preferences = preferences.getPreferencesSync(this.context, {
-        name: 'update',
+        name: PREFERENCES_NAME,
       });
     } catch (e) {
       // Fail fast: a missing preferences store means no state can be persisted,
@@ -447,7 +448,7 @@ export class UpdateContext {
 
     logger.info(
       TAG,
-      `binary version changed, resetting update state id=${this.instanceId}`,
+      `binary version changed, resetting state id=${this.instanceId}`,
     );
     UpdateContext.ignoreRollback = false;
     this.cleanUp();
@@ -685,7 +686,7 @@ export class UpdateContext {
       hash,
     );
     params.originHash = assertSafePathComponent(originHash);
-    params.targetFile = `${this.rootDir}/${originHash}_${hash}.ppk.patch`;
+    params.targetFile = `${this.rootDir}/${originHash}_${hash}${PPK_DELTA_SUFFIX}`;
     params.unzipDirectory = `${this.rootDir}/${hash}`;
     params.originDirectory = `${this.rootDir}/${params.originHash}`;
     params.deadlineUptimeMs = deadlineUptimeMs;
@@ -703,7 +704,7 @@ export class UpdateContext {
         url,
         hash,
       );
-      params.targetFile = `${this.rootDir}/${hash}.app.patch`;
+      params.targetFile = `${this.rootDir}/${hash}${APP_DELTA_SUFFIX}`;
       params.unzipDirectory = `${this.rootDir}/${hash}`;
       params.deadlineUptimeMs = deadlineUptimeMs;
       return await this.executeTask(params);
@@ -936,7 +937,7 @@ export class UpdateContext {
   // 安装的二进制,每次(覆盖)安装 updateTime 都会变,每个安装只算一次。
   private static readonly KEY_BUNDLE_HASH_CACHE = 'bundleHashCache';
 
-  private getBundleUpdateTime(): number {
+  private getBundleModifiedTime(): number {
     try {
       const bundleInfo = bundleManager.getBundleInfoForSelfSync(
         this.getBundleFlags(),
@@ -945,7 +946,7 @@ export class UpdateContext {
     } catch (error) {
       logger.error(
         TAG,
-        `Failed to get bundle update time: ${getErrorMessage(error)}`,
+        `Failed to get bundle modification time: ${getErrorMessage(error)}`,
       );
       return 0;
     }
@@ -962,7 +963,7 @@ export class UpdateContext {
       // debug 下 bundle 由 metro 提供,与 dev 删 buildTime 的行为对齐。
       return '';
     }
-    const cachePrefix = `${this.getPackageVersion()}|${this.getBundleUpdateTime()}|`;
+    const cachePrefix = `${this.getPackageVersion()}|${this.getBundleModifiedTime()}|`;
     const cached = this.readString(UpdateContext.KEY_BUNDLE_HASH_CACHE);
     if (cached.startsWith(cachePrefix)) {
       return cached.slice(cachePrefix.length);

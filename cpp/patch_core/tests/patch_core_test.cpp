@@ -22,13 +22,13 @@ extern "C" {
 
 namespace {
 
-using pushy::patch::ApplyPatchFromFileSource;
-using pushy::patch::BundlePatcher;
-using pushy::patch::CleanupOldEntries;
-using pushy::patch::CopyOperation;
-using pushy::patch::FileSourcePatchOptions;
-using pushy::patch::PatchManifest;
-using pushy::patch::Status;
+using pushy::delta::ApplyPatchFromFileSource;
+using pushy::delta::BundleRebuilder;
+using pushy::delta::CleanupOldEntries;
+using pushy::delta::CopyOperation;
+using pushy::delta::FileSourcePatchOptions;
+using pushy::delta::PatchManifest;
+using pushy::delta::Status;
 using pushy::state::BinaryVersionSyncResult;
 using pushy::state::LaunchDecision;
 using pushy::state::MarkSuccessResult;
@@ -36,7 +36,7 @@ using pushy::state::State;
 
 void EnsureDirectory(const std::string& path);
 
-class FakeBundlePatcher final : public BundlePatcher {
+class FakeBundlePatcher final : public BundleRebuilder {
  public:
   mutable int calls = 0;
   std::string output;
@@ -179,7 +179,7 @@ void TestApplyPatchWithHbcTransform() {
   // 临时文件必须被清理
   Expect(
       !Exists(options.bundle_output_path + ".hbct-origin") &&
-          !Exists(options.bundle_output_path + ".hbct-patched"),
+          !Exists(options.bundle_output_path + ".hbct-rebuilt"),
       "hbc transform temp files must be removed");
 }
 
@@ -381,9 +381,9 @@ void TestApplyPatchMergeFallsBackToByteCopy() {
   options.bundle_patch_path = patch;
   options.bundle_output_path = JoinPath(target, "index.bundlejs");
 
-  pushy::patch::internal::g_disable_hard_links = true;
+  pushy::delta::internal::g_disable_hard_links = true;
   Status status = ApplyPatchFromFileSource(options, patcher);
-  pushy::patch::internal::g_disable_hard_links = false;
+  pushy::delta::internal::g_disable_hard_links = false;
   Expect(status.ok, status.message);
 
   struct stat source_stat;
@@ -451,7 +451,7 @@ void TestApplyPatchFromFileSourceRejectsUnsafePaths() {
 // truncates at NUL, so "..\0x" (which compares unequal to "..") would resolve
 // to the parent directory; other control bytes have no legitimate use either.
 void TestIsSafeRelativePathRejectsControlBytes() {
-  using pushy::patch::IsSafeRelativePath;
+  using pushy::delta::IsSafeRelativePath;
   Expect(IsSafeRelativePath("assets/a.png"), "plain relative path is safe");
   Expect(
       IsSafeRelativePath("assets/\xe5\x9b\xbe.png"),
@@ -470,12 +470,12 @@ void TestIsSafeRelativePathRejectsControlBytes() {
   PatchManifest manifest;
   manifest.copies.push_back(CopyOperation{"assets/a.png", std::string("..\0x", 4)});
   Expect(
-      !pushy::patch::ValidateManifest(manifest).ok,
+      !pushy::delta::ValidateManifest(manifest).ok,
       "manifest with a NUL-bearing target must be rejected");
   manifest.copies.clear();
   manifest.deletes.push_back(std::string("assets/\0..", 10));
   Expect(
-      !pushy::patch::ValidateManifest(manifest).ok,
+      !pushy::delta::ValidateManifest(manifest).ok,
       "manifest with a NUL-bearing delete must be rejected");
 }
 
@@ -574,12 +574,12 @@ void TestHpatchRejectsOversizedLzmaDictionary() {
   Status status = ApplyPatchFromFileSource(options);
   Expect(!status.ok, "a patch declaring a 4 GB LZMA dictionary must be refused");
   Expect(
-      status.message.find("hpatch error") != std::string::npos,
-      "refusal surfaces as an hpatch error: " + status.message);
+      status.message.find("bundle delta, error") != std::string::npos,
+      "refusal surfaces as a delta apply error: " + status.message);
   Expect(!Exists(options.bundle_output_path), "no output on failure");
   Expect(
       !Exists(options.bundle_output_path + ".hbct-origin") &&
-          !Exists(options.bundle_output_path + ".hbct-patched"),
+          !Exists(options.bundle_output_path + ".hbct-rebuilt"),
       "temp files are removed on failure");
 }
 

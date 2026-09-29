@@ -1,5 +1,7 @@
 #include <jni.h>
 
+#include "jni_natives.h"
+
 #include <exception>
 #include <string>
 #include <vector>
@@ -15,8 +17,7 @@ using pushy::jni_util::ThrowRuntimeException;
 
 }  // namespace
 
-extern "C" JNIEXPORT void JNICALL
-Java_cn_reactnative_modules_update_DownloadTask_applyPatchFromFileSource(
+void pushy::jni_natives::ApplyDeltaFromSource(
     JNIEnv* env,
     jclass,
     jstring source_root,
@@ -42,7 +43,7 @@ Java_cn_reactnative_modules_update_DownloadTask_applyPatchFromFileSource(
       return;
     }
 
-    pushy::patch::FileSourcePatchOptions options;
+    pushy::delta::FileSourcePatchOptions options;
     options.source_root = JStringToString(env, source_root);
     options.target_root = JStringToString(env, target_root);
     options.origin_bundle_path = JStringToString(env, origin_bundle_path);
@@ -53,15 +54,15 @@ Java_cn_reactnative_modules_update_DownloadTask_applyPatchFromFileSource(
     options.bundle_hbc_transform_meta = JStringToString(env, hbc_transform_meta);
 
     for (size_t index = 0; index < from_values.size(); ++index) {
-      options.manifest.copies.push_back(pushy::patch::CopyOperation{
+      options.manifest.copies.push_back(pushy::delta::CopyOperation{
           from_values[index],
           to_values[index],
       });
     }
     options.manifest.deletes = JArrayToVector(env, deletes);
 
-    const pushy::patch::Status status =
-        pushy::patch::ApplyPatchFromFileSource(options);
+    const pushy::delta::Status status =
+        pushy::delta::ApplyPatchFromFileSource(options);
     if (!status.ok) {
       ThrowRuntimeException(env, status.message);
     }
@@ -72,8 +73,7 @@ Java_cn_reactnative_modules_update_DownloadTask_applyPatchFromFileSource(
   }
 }
 
-extern "C" JNIEXPORT void JNICALL
-Java_cn_reactnative_modules_update_DownloadTask_cleanupOldEntries(
+void pushy::jni_natives::CleanupOldEntries(
     JNIEnv* env,
     jclass,
     jstring root_dir,
@@ -81,7 +81,7 @@ Java_cn_reactnative_modules_update_DownloadTask_cleanupOldEntries(
     jstring keep_previous,
     jint max_age_days) {
   try {
-    const pushy::patch::Status status = pushy::patch::CleanupOldEntries(
+    const pushy::delta::Status status = pushy::delta::CleanupOldEntries(
         JStringToString(env, root_dir),
         JStringToString(env, keep_current),
         JStringToString(env, keep_previous),

@@ -18,6 +18,9 @@
 // Like the TS side this layer is pure: no IO, no time, no randomness — the
 // random sample, identity and parsed JSON all arrive as parameters. The
 // orchestrators (per-platform HTTP/download/state glue) own all effects.
+// Keep the core internal to whichever binary links it (see podspec Core).
+#pragma GCC visibility push(hidden)
+
 namespace flowcore {
 
 uint32_t Murmur3_32(const std::string& key, uint32_t seed = 0);
@@ -93,3 +96,5 @@ flowjson::Value HandleResponse(const std::string& responseText,
                                     const std::string& afterDownload);
 
 }  // namespace flowcore
+
+#pragma GCC visibility pop

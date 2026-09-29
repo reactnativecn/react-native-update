@@ -1,5 +1,8 @@
 #include <jni.h>
 
+#include "jni_natives.h"
+#include "obscured_text.h"
+
 #include <exception>
 #include <string>
 #include <vector>
@@ -137,7 +140,8 @@ jobject NewStateCoreResult(
     bool did_rollback,
     bool consumed_first_time) {
   jclass result_class =
-      env->FindClass("cn/reactnative/modules/update/StateCoreResult");
+      env->FindClass(
+          pushy::text::Reveal("3919bbc3ab8a6b512c3e08f0c0b6df60452311edfbc8f780624b2d1de38c93a99b63511201f9cd97878c695522").c_str());
   if (result_class == nullptr) {
     return nullptr;
   }
@@ -186,7 +190,8 @@ jobject NewArchivePatchPlanResult(
     JNIEnv* env,
     const pushy::archive_patch::ArchivePatchPlan& plan) {
   jclass result_class =
-      env->FindClass("cn/reactnative/modules/update/ArchivePatchPlanResult");
+      env->FindClass(
+          pushy::text::Reveal("3919bbc3ab8a6b512c3e08f0c0b6df60452311edfbc8f780624b2d1de38c81af997f5d270bdbc9b181974c55371dc2c8b9926855").c_str());
   if (result_class == nullptr) {
     return nullptr;
   }
@@ -258,14 +263,14 @@ bool ToArchivePatchType(
       static_cast<int>(patch_type), out);
 }
 
-pushy::patch::PatchManifest BuildManifest(
+pushy::delta::PatchManifest BuildManifest(
     const std::vector<std::string>& copy_froms,
     const std::vector<std::string>& copy_tos,
     const std::vector<std::string>& deletes) {
-  pushy::patch::PatchManifest manifest;
+  pushy::delta::PatchManifest manifest;
   for (size_t index = 0; index < copy_froms.size(); ++index) {
     manifest.copies.push_back(
-        pushy::patch::CopyOperation{copy_froms[index], copy_tos[index]});
+        pushy::delta::CopyOperation{copy_froms[index], copy_tos[index]});
   }
   manifest.deletes = deletes;
   return manifest;
@@ -293,15 +298,13 @@ jobject MakeStateResult(
 
 // 客户端可消费的 diff 轨道版本(能力上报,而非 SDK 版本映射);JS 层经
 // getConstants 暴露,随 checkUpdate 以 diffV 上报,服务端据此下发 v2 轨道。
-extern "C" JNIEXPORT jint JNICALL
-Java_cn_reactnative_modules_update_NativeUpdateCore_getSupportedDiffVersion(
+jint pushy::jni_natives::SupportedDiffVersion(
     JNIEnv*,
     jclass) {
   return static_cast<jint>(pushy::hbc::kSupportedDiffVersion);
 }
 
-extern "C" JNIEXPORT jobject JNICALL
-Java_cn_reactnative_modules_update_UpdateContext_syncStateWithBinaryVersion(
+jobject pushy::jni_natives::SyncStateWithBinaryVersion(
     JNIEnv* env,
     jclass,
     jstring package_version,
@@ -325,8 +328,7 @@ Java_cn_reactnative_modules_update_UpdateContext_syncStateWithBinaryVersion(
   return nullptr;
 }
 
-extern "C" JNIEXPORT jobject JNICALL
-Java_cn_reactnative_modules_update_UpdateContext_runStateCore(
+jobject pushy::jni_natives::RunStateCore(
     JNIEnv* env,
     jclass,
     jint operation,
@@ -383,8 +385,7 @@ Java_cn_reactnative_modules_update_UpdateContext_runStateCore(
   return nullptr;
 }
 
-extern "C" JNIEXPORT jobject JNICALL
-Java_cn_reactnative_modules_update_DownloadTask_buildArchivePatchPlan(
+jobject pushy::jni_natives::BuildArchivePlan(
     JNIEnv* env,
     jclass,
     jint patch_type,
@@ -400,15 +401,15 @@ Java_cn_reactnative_modules_update_DownloadTask_buildArchivePatchPlan(
       return nullptr;
     }
 
-    pushy::patch::PatchManifest manifest =
+    pushy::delta::PatchManifest manifest =
         BuildManifest(from_values, to_values, JArrayToVector(env, deletes));
     pushy::archive_patch::ArchivePatchType archive_type;
     if (!ToArchivePatchType(patch_type, &archive_type)) {
-      ThrowRuntimeException(env, "Unknown archive patch type");
+      ThrowRuntimeException(env, "Unknown archive delta type");
       return nullptr;
     }
     pushy::archive_patch::ArchivePatchPlan plan;
-    pushy::patch::Status status = pushy::archive_patch::BuildArchivePatchPlan(
+    pushy::delta::Status status = pushy::archive_patch::BuildArchivePatchPlan(
         archive_type,
         manifest,
         JArrayToVector(env, entry_names),
@@ -427,8 +428,7 @@ Java_cn_reactnative_modules_update_DownloadTask_buildArchivePatchPlan(
   return nullptr;
 }
 
-extern "C" JNIEXPORT jobjectArray JNICALL
-Java_cn_reactnative_modules_update_DownloadTask_buildCopyGroups(
+jobjectArray pushy::jni_natives::BuildCopyGroups(
     JNIEnv* env,
     jclass,
     jobjectArray copy_froms,
@@ -441,10 +441,10 @@ Java_cn_reactnative_modules_update_DownloadTask_buildCopyGroups(
       return nullptr;
     }
 
-    pushy::patch::PatchManifest manifest = BuildManifest(
+    pushy::delta::PatchManifest manifest = BuildManifest(
         from_values, to_values, std::vector<std::string>());
     std::vector<pushy::archive_patch::CopyGroup> groups;
-    pushy::patch::Status status =
+    pushy::delta::Status status =
         pushy::archive_patch::BuildCopyGroups(manifest, &groups);
     if (!status.ok) {
       ThrowRuntimeException(env, status.message);
@@ -452,7 +452,8 @@ Java_cn_reactnative_modules_update_DownloadTask_buildCopyGroups(
     }
 
     jclass result_class =
-        env->FindClass("cn/reactnative/modules/update/CopyGroupResult");
+        env->FindClass(
+          pushy::text::Reveal("3919bbc3ab8a6b512c3e08f0c0b6df60452311edfbc8f780624b2d1de38c83b28a6e732301fed897878c695522").c_str());
     if (result_class == nullptr) {
       return nullptr;
     }

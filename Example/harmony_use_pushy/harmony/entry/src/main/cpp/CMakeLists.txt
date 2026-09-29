@@ -23,6 +23,6 @@ add_library(rnoh_app SHARED
     "${RNOH_CPP_DIR}/RNOHAppNapiBridge.cpp"
 )
 target_include_directories(rnoh_app PRIVATE "${PUSHY_CPP_DIR}")
-# Pushy's RNOH glue is compiled into rnoh_app directly. librnupdate.so comes from pushy.har.
+# Pushy's RNOH glue is compiled into rnoh_app directly. librnpushy.so comes from pushy.har.
 target_sources(rnoh_app PRIVATE "${PUSHY_CPP_DIR}/PushyTurboModule.cpp")
 target_link_libraries(rnoh_app PUBLIC rnoh)

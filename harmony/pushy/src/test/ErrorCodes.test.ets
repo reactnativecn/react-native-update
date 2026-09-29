@@ -1,7 +1,7 @@
 import { describe, it, expect } from '@ohos/hypium';
 import {
   ERROR_DOWNLOAD_FAILED,
-  ERROR_PATCH_FAILED,
+  ERROR_DELTA_FAILED,
   PushyError,
   createPushyError,
   getErrorMessage,
@@ -13,16 +13,16 @@ import {
 export default function errorCodesTest() {
   describe('ErrorCodes.createPushyError', () => {
     it('sets the code and prefixes the message', 0, () => {
-      const error = createPushyError(ERROR_PATCH_FAILED, 'boom');
+      const error = createPushyError(ERROR_DELTA_FAILED, 'boom');
       expect(error instanceof Error).assertTrue();
-      expect(error.code).assertEqual(ERROR_PATCH_FAILED);
+      expect(error.code).assertEqual(ERROR_DELTA_FAILED);
       expect(error.message).assertEqual('[PATCH_FAILED] boom');
     });
   });
 
   describe('ErrorCodes.toPushyError', () => {
     it('keeps an existing code and never double-prefixes', 0, () => {
-      const original = createPushyError(ERROR_PATCH_FAILED, 'boom');
+      const original = createPushyError(ERROR_DELTA_FAILED, 'boom');
       const wrapped = toPushyError(original, ERROR_DOWNLOAD_FAILED);
       expect(wrapped === original).assertTrue();
       expect(wrapped.message).assertEqual('[PATCH_FAILED] boom');

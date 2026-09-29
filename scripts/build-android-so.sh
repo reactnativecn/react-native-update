@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Builds android/lib/<abi>/librnupdate.so for all ABIs and verifies the
+# Builds android/lib/<abi>/librnpushy.so for all ABIs and verifies the
 # exported JNI symbols.
 #
 # NDK resolution order (CP-8): $ANDROID_NDK_HOME > $ANDROID_NDK_ROOT >

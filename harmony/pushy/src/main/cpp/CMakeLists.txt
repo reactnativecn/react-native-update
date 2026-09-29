@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.13)
-project(rnupdate LANGUAGES C CXX)
+project(rnpushy LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
@@ -23,7 +23,7 @@ if(NOT EXISTS ${UPDATE_FLOW_CORE_DIR}/update_flow_core.cpp)
 endif()
 
 # Always compile from source. A prebuilt-import branch used to live here, but
-# it had no symbol verification: a stale libs/<abi>/librnupdate.so missing a
+# it had no symbol verification: a stale libs/<abi>/librnpushy.so missing a
 # newly added export (e.g. getSupportedDiffVersion) would silently ship and
 # crash getConstants at runtime.
 set(HDIFFPATCH_DIR ${ANDROID_JNI_DIR}/HDiffPatch)
@@ -45,11 +45,11 @@ set(HDP_SOURCES
      ${LZMA_DIR}/C/Lzma2Dec.c
 )
 
-add_library(rnupdate SHARED
+add_library(rnpushy SHARED
     ${HDP_SOURCES}
 )
 
-target_include_directories(rnupdate PRIVATE
+target_include_directories(rnpushy PRIVATE
      ${CMAKE_CURRENT_SOURCE_DIR}
      ${PATCH_CORE_DIR}
      ${UPDATE_FLOW_CORE_DIR}
@@ -59,7 +59,7 @@ target_include_directories(rnupdate PRIVATE
      ${LZMA_DIR}/C
 )
 
-target_link_libraries(rnupdate PUBLIC
+target_link_libraries(rnpushy PUBLIC
     libace_napi.z.so
 )
 
@@ -74,15 +74,15 @@ endif()
 # Optimize binary size for Release builds of the NAPI library. --gc-sections
 # only drops anything when every function/data item sits in its own section,
 # and the module registers itself through NAPI_MODULE's static constructor,
-# so no symbol needs default visibility. Scoped to rnupdate: rnoh_pushy must
+# so no symbol needs default visibility. Scoped to rnpushy: rnoh_pushy must
 # keep exporting PushyTurboModule (JSI_EXPORT) for the host's PackageProvider.
 if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
-    target_compile_options(rnupdate PRIVATE
+    target_compile_options(rnpushy PRIVATE
         -ffunction-sections
         -fdata-sections
         -fvisibility=hidden
         -fvisibility-inlines-hidden
     )
     # Strip debug symbols and garbage-collect the unused sections.
-    target_link_options(rnupdate PRIVATE -Wl,--gc-sections -s)
+    target_link_options(rnpushy PRIVATE -Wl,--gc-sections -s)
 endif()

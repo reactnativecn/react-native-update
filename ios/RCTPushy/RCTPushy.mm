@@ -64,7 +64,7 @@ static NSString *const keyUuid = @"REACTNATIVECN_PUSHY_UUID";
 static NSString *const keyHashInfo = @"REACTNATIVECN_PUSHY_HASH_";
 static NSString *const keyFirstLoadMarked = @"REACTNATIVECN_PUSHY_FIRSTLOADMARKED_KEY";
 static NSString *const keyRolledBackMarked = @"REACTNATIVECN_PUSHY_ROLLEDBACKMARKED_KEY";
-static NSString *const KeyPackageUpdatedMarked = @"REACTNATIVECN_PUSHY_ISPACKAGEUPDATEDMARKED_KEY";
+static NSString *const KeyPackageUpdatedMarked = RCTPushyRevealText("0832d5f29aa549710b0939daf88ca058790f3dded7e888b451640d2ec3f69099bb43711523cafa8ea7bb4372132a");
 // bundleHash cache: "<cacheKey>|<sha256hex>" where cacheKey identifies the
 // installed binary (packageVersion + embedded bundle size + mtime). Recomputed
 // only when the key changes, i.e. once per install.
@@ -84,7 +84,15 @@ static NSString *const PushyErrorDomain = @"cn.reactnative.pushy";
 // file def
 static NSString * const BUNDLE_FILE_NAME = @"index.bundlejs";
 static NSString * const SOURCE_PATCH_NAME = @"__diff.json";
-static NSString * const BUNDLE_PATCH_NAME = @"index.bundlejs.patch";
+static NSString * const BUNDLE_PATCH_NAME = RCTPushyRevealText("3319f0d4b6c56a502c3b10fcdca0de7d4b3307e9");
+// Protocol strings and version-info flags read by JS, stored encoded
+// (RCTPushyRevealText) so they do not appear as plain binary strings.
+static NSString * const PushyOptionUrlKey = RCTPushyRevealText("2f07f0d0ba8e5d572e");
+static NSString * const PushyIpaDeltaSuffix = RCTPushyRevealText("741ee4d0e09b69512137");
+static NSString * const PushyPpkDeltaSuffix = RCTPushyRevealText("7407e4dae09b69512137");
+static NSString * const PushyInfoCrashHold = RCTPushyRevealText("3905f5c2a6b96d56212a19");
+static NSString * const PushyInfoForceBoot = RCTPushyRevealText("3c18e6d2aba9674a360d19ead5a695");
+static NSString * const PushyStatusNone = RCTPushyRevealText("3418c1c1aa8a7c40");
 #define VERSION_COMPLETE_FILE_NAME_LITERAL ".pushy-complete"
 static NSString * const VERSION_COMPLETE_FILE_NAME = @VERSION_COMPLETE_FILE_NAME_LITERAL;
 
@@ -211,7 +219,7 @@ static NSError *PushyEnsureFreeSpace(NSString *path, long long bytesToWrite) {
     if (shortfall == nil) {
         return nil;
     }
-    return PushyErrorWithCode(pushy::error_codes::kPatchFailed, shortfall);
+    return PushyErrorWithCode(pushy::error_codes::kDeltaFailed, shortfall);
 }
 
 // SSZipArchive delegate enforcing cpp/patch_core/archive_limits.h while the
@@ -477,12 +485,12 @@ static std::string PushyToStdString(NSString *value) {
     return std::string([value UTF8String]);
 }
 
-static NSError *PushyNSErrorFromStatus(const pushy::patch::Status &status) {
+static NSError *PushyNSErrorFromStatus(const pushy::delta::Status &status) {
     return [NSError errorWithDomain:PushyErrorDomain
                                code:-1
                            userInfo:@{
                                NSLocalizedDescriptionKey: [NSString stringWithUTF8String:status.message.c_str()],
-                               PushyErrorCodeKey: PushyCode(pushy::error_codes::kPatchFailed),
+                               PushyErrorCodeKey: PushyCode(pushy::error_codes::kDeltaFailed),
                            }];
 }
 
@@ -568,7 +576,7 @@ static BOOL PushyJsonIsAbsent(id value) {
 // raise takes the whole app down (and trips the crash rescue) instead of
 // failing the patch. NO with `reason` set for a malformed manifest.
 static BOOL PushyPatchManifestFromJson(NSDictionary *json,
-                                       pushy::patch::PatchManifest *manifest,
+                                       pushy::delta::PatchManifest *manifest,
                                        NSString **reason) {
     id copies = json[@"copies"];
     if (!PushyJsonIsAbsent(copies)) {
@@ -594,7 +602,7 @@ static BOOL PushyPatchManifestFromJson(NSDictionary *json,
             if ([from length] == 0) {
                 from = to;
             }
-            pushy::patch::CopyOperation operation;
+            pushy::delta::CopyOperation operation;
             operation.from = PushyToStdString(from);
             operation.to = PushyToStdString(to);
             NSNumber *expectedCrc = copiesCrc[to];
@@ -697,14 +705,14 @@ static void PushySwitchVersionLocked(NSString *hash) {
 }
 
 @interface RCTPushy ()
-- (void)downloadUpdate:(PushyType)type
+- (void)fetchPackage:(PushyType)type
                options:(NSDictionary *)options
               resolver:(RCTPromiseResolveBlock)resolve
               rejecter:(RCTPromiseRejectBlock)reject;
-- (void)performUpdate:(PushyType)type
+- (void)performFetch:(PushyType)type
               options:(NSDictionary *)options
              callback:(void (^)(NSError *error))callback;
-- (NSError *)reloadBridgeWithReason:(NSString *)reason;
+- (NSError *)restartBridgeWithReason:(NSString *)reason;
 - (void)unzipDownloadedPackage:(NSString *)zipFilePath
                           hash:(NSString *)hash
                           type:(PushyType)type
@@ -714,7 +722,7 @@ static void PushySwitchVersionLocked(NSString *hash) {
                            type:(PushyType)type
                      originHash:(NSString *)originHash
                        callback:(void (^)(NSError *error))callback;
-- (void)applyPatchForHash:(NSString *)hash
+- (void)applyDeltaForHash:(NSString *)hash
                      type:(PushyType)type
                fromBundle:(NSString *)bundleOrigin
                    source:(NSString *)sourceOrigin
@@ -1328,21 +1336,21 @@ RCT_EXPORT_METHOD(downloadFullUpdate:(NSDictionary *)options
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 {
-    [self downloadUpdate:PushyTypeFullDownload options:options resolver:resolve rejecter:reject];
+    [self fetchPackage:PushyTypeFullDownload options:options resolver:resolve rejecter:reject];
 }
 
 RCT_EXPORT_METHOD(downloadPatchFromPackage:(NSDictionary *)options
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 {
-    [self downloadUpdate:PushyTypePatchFromPackage options:options resolver:resolve rejecter:reject];
+    [self fetchPackage:PushyTypePatchFromPackage options:options resolver:resolve rejecter:reject];
 }
 
 RCT_EXPORT_METHOD(downloadPatchFromPpk:(NSDictionary *)options
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 {
-    [self downloadUpdate:PushyTypePatchFromPpk options:options resolver:resolve rejecter:reject];
+    [self fetchPackage:PushyTypePatchFromPpk options:options resolver:resolve rejecter:reject];
 }
 
 RCT_EXPORT_METHOD(downloadAndInstallApk:(NSDictionary *)options
@@ -1377,7 +1385,7 @@ RCT_EXPORT_METHOD(reloadUpdate:(NSDictionary *)options
         return;
     }
 
-    NSError *reloadError = [self reloadBridgeWithReason:@"pushy reloadUpdate"];
+    NSError *reloadError = [self restartBridgeWithReason:@"pushy restart"];
     if (reloadError != nil) {
         PushyRejectError(reject, reloadError);
         return;
@@ -1388,7 +1396,7 @@ RCT_EXPORT_METHOD(reloadUpdate:(NSDictionary *)options
 RCT_EXPORT_METHOD(restartApp:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 {
-    NSError *reloadError = [self reloadBridgeWithReason:@"pushy restartApp"];
+    NSError *reloadError = [self restartBridgeWithReason:@"pushy restartApp"];
     if (reloadError != nil) {
         PushyRejectError(reject, reloadError);
         return;
@@ -1499,7 +1507,7 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
         // promise settles here, after the cleanup, so a failed wipe reaches
         // JS as RESET_FAILED (Android parity) instead of a warning nobody
         // aggregates.
-        pushy::patch::Status status = pushy::patch::CleanupOldEntries(
+        pushy::delta::Status status = pushy::delta::CleanupOldEntries(
             PushyToStdString([RCTPushy downloadDir]),
             std::vector<std::string>{PushyToStdString(keepVersion)},
             0
@@ -1533,12 +1541,12 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
     hasListeners = NO;
 }
 
-- (void)downloadUpdate:(PushyType)type
+- (void)fetchPackage:(PushyType)type
                options:(NSDictionary *)options
               resolver:(RCTPromiseResolveBlock)resolve
               rejecter:(RCTPromiseRejectBlock)reject
 {
-    [self performUpdate:type options:options callback:^(NSError *error) {
+    [self performFetch:type options:options callback:^(NSError *error) {
         if (error != nil) {
             if (error.userInfo[PushyErrorCodeKey] == nil) {
                 // Unclassified (system/network) errors from the download
@@ -1560,7 +1568,7 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
 // here: it consumes one-shot launch state (first_time, the first-load mark,
 // ignoreRollback), and consuming it for a reload that never happens would
 // make the next cold start roll the freshly switched version back.
-- (NSError *)reloadBridgeWithReason:(NSString *)reason
+- (NSError *)restartBridgeWithReason:(NSString *)reason
 {
 #if PUSHY_HAS_RELOAD_COMMAND
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -1575,7 +1583,7 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
     RCTBridge *bridge = self.bridge;
     if (bridge == nil || object_getClass(bridge) == NSClassFromString(@"RCTBridgeProxy")) {
         return PushyErrorWithCode(pushy::error_codes::kRestartFailed,
-                                  @"no bridge available to reload (bridgeless host without RCTReloadCommand)");
+                                  @"no bridge available to restart (bridgeless host without the RN restart command)");
     }
     dispatch_async(dispatch_get_main_queue(), ^{
         [bridge reload];
@@ -1584,9 +1592,9 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
 #endif
 }
 
-- (void)performUpdate:(PushyType)type options:(NSDictionary *)options callback:(void (^)(NSError *error))callback
+- (void)performFetch:(PushyType)type options:(NSDictionary *)options callback:(void (^)(NSError *error))callback
 {
-    NSString *updateUrl = PushyOptionString(options, @"updateUrl");
+    NSString *updateUrl = PushyOptionString(options, PushyOptionUrlKey);
     NSString *hash = PushyOptionString(options, @"hash");
 
     if (PushyStringIsBlank(updateUrl) || !PushyIsSafePathComponent(hash)) {
@@ -1632,7 +1640,7 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
         }
     };
     void (^deferredStart)(void) = ^{
-        [self performUpdate:type options:options callback:callback];
+        [self performFetch:type options:options callback:callback];
     };
     PushyDownloadRegistration registration = PushyRegisterDownload(
         hash, type, deadlineUptime, callback, progress, deferredStart);
@@ -1669,7 +1677,7 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
                 // version directory in one atomic step.
                 NSString *bundlePath = [staging stringByAppendingPathComponent:BUNDLE_FILE_NAME];
                 if (![fileManager fileExistsAtPath:bundlePath]) {
-                    finalError = PushyErrorWithCode(pushy::error_codes::kPatchFailed,
+                    finalError = PushyErrorWithCode(pushy::error_codes::kDeltaFailed,
                                                     @"bundle missing after install");
                 } else {
                     std::string bundleSha256 = pushy::digest::Sha256File(PushyToStdString(bundlePath));
@@ -1768,7 +1776,7 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
             } @catch (NSException *exception) {
                 // An uncaught exception in a GCD block is fatal (and would
                 // trip the crash rescue); a bad package is a PATCH_FAILED.
-                callback(PushyErrorWithCode(pushy::error_codes::kPatchFailed,
+                callback(PushyErrorWithCode(pushy::error_codes::kDeltaFailed,
                                             exception.reason ?: @"delta failed"));
             }
         });
@@ -1782,7 +1790,7 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
 {
     switch (type) {
         case PushyTypePatchFromPackage:
-            [self applyPatchForHash:hash
+            [self applyDeltaForHash:hash
                                type:type
                          fromBundle:[[RCTPushy binaryBundleURL] path]
                              source:[[NSBundle mainBundle] resourcePath]
@@ -1790,7 +1798,7 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
             return;
         case PushyTypePatchFromPpk: {
             NSString *lastVersionDir = [[RCTPushy downloadDir] stringByAppendingPathComponent:originHash];
-            [self applyPatchForHash:hash
+            [self applyDeltaForHash:hash
                                type:type
                          fromBundle:[lastVersionDir stringByAppendingPathComponent:BUNDLE_FILE_NAME]
                              source:lastVersionDir
@@ -1803,7 +1811,7 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
     }
 }
 
-- (void)applyPatchForHash:(NSString *)hash
+- (void)applyDeltaForHash:(NSString *)hash
                      type:(PushyType)type
                fromBundle:(NSString *)bundleOrigin
                    source:(NSString *)sourceOrigin
@@ -1818,13 +1826,13 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
     NSString *destination = [unzipDir stringByAppendingPathComponent:BUNDLE_FILE_NAME];
     long long manifestBytes = RCTPushyFileSize(sourcePatch);
     if (manifestBytes > pushy::archive_limits::kMaxManifestBytes) {
-        callback(PushyErrorWithCode(pushy::error_codes::kPatchFailed,
+        callback(PushyErrorWithCode(pushy::error_codes::kDeltaFailed,
             [NSString stringWithFormat:@"delta manifest too large: %lld bytes", manifestBytes]));
         return;
     }
     NSData *data = [NSData dataWithContentsOfFile:sourcePatch];
     if (data == nil) {
-        callback(PushyErrorWithCode(pushy::error_codes::kPatchFailed, @"missing patch manifest"));
+        callback(PushyErrorWithCode(pushy::error_codes::kDeltaFailed, @"missing delta manifest"));
         return;
     }
 
@@ -1833,19 +1841,19 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
     if (error != nil) {
         // Classify as a patch failure like the sibling manifest branches;
         // unclassified errors would otherwise be tagged DOWNLOAD_FAILED by the
-        // downloadUpdate fallback even though the download itself succeeded.
-        callback(PushyErrorWithCode(pushy::error_codes::kPatchFailed, error.localizedDescription));
+        // fetchPackage fallback even though the download itself succeeded.
+        callback(PushyErrorWithCode(pushy::error_codes::kDeltaFailed, error.localizedDescription));
         return;
     }
     if (![jsonObject isKindOfClass:[NSDictionary class]]) {
-        callback(PushyErrorWithCode(pushy::error_codes::kPatchFailed, @"invalid patch manifest"));
+        callback(PushyErrorWithCode(pushy::error_codes::kDeltaFailed, @"invalid delta manifest"));
         return;
     }
     NSDictionary *json = (NSDictionary *)jsonObject;
-    pushy::patch::PatchManifest manifest;
+    pushy::delta::PatchManifest manifest;
     NSString *manifestReason = nil;
     if (!PushyPatchManifestFromJson(json, &manifest, &manifestReason)) {
-        callback(PushyErrorWithCode(pushy::error_codes::kPatchFailed, manifestReason));
+        callback(PushyErrorWithCode(pushy::error_codes::kDeltaFailed, manifestReason));
         return;
     }
 
@@ -1858,7 +1866,7 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
     }
 
     pushy::archive_patch::ArchivePatchPlan plan;
-    pushy::patch::Status planStatus = pushy::archive_patch::BuildArchivePatchPlan(
+    pushy::delta::Status planStatus = pushy::archive_patch::BuildArchivePatchPlan(
         type == PushyTypePatchFromPackage
             ? pushy::archive_patch::ArchivePatchType::kPatchFromPackage
             : pushy::archive_patch::ArchivePatchType::kPatchFromPpk,
@@ -1871,8 +1879,8 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
         return;
     }
 
-    pushy::patch::FileSourcePatchOptions options;
-    pushy::patch::Status optionStatus = pushy::archive_patch::BuildFileSourcePatchOptions(
+    pushy::delta::FileSourcePatchOptions options;
+    pushy::delta::Status optionStatus = pushy::archive_patch::BuildFileSourcePatchOptions(
         plan,
         PushyToStdString(sourceOrigin),
         PushyToStdString(unzipDir),
@@ -1901,7 +1909,7 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
         }
     }
 
-    pushy::patch::Status status = pushy::patch::ApplyPatchFromFileSource(options);
+    pushy::delta::Status status = pushy::delta::ApplyPatchFromFileSource(options);
     if (!status.ok) {
         callback(PushyNSErrorFromStatus(status));
         return;
@@ -2025,7 +2033,7 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
         long long archiveBytes = RCTPushyFileSize(path);
         NSError *preflight = nil;
         if (archiveBytes > pushy::archive_limits::kMaxArchiveBytes) {
-            preflight = PushyErrorWithCode(pushy::error_codes::kPatchFailed,
+            preflight = PushyErrorWithCode(pushy::error_codes::kDeltaFailed,
                 [NSString stringWithFormat:@"archive too large: %lld bytes", archiveBytes]);
         } else {
             preflight = PushyEnsureFreeSpace(destination, MAX(0LL, archiveBytes) * 2);
@@ -2063,15 +2071,15 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
 
             NSError *unzipError = error;
             if (guard.violation != nil) {
-                unzipError = PushyErrorWithCode(pushy::error_codes::kPatchFailed, guard.violation);
+                unzipError = PushyErrorWithCode(pushy::error_codes::kDeltaFailed, guard.violation);
             } else if (!succeeded && unzipError == nil) {
-                unzipError = PushyErrorWithCode(pushy::error_codes::kPatchFailed, @"unzip failed");
+                unzipError = PushyErrorWithCode(pushy::error_codes::kDeltaFailed, @"unzip failed");
             } else if (unzipError != nil && unzipError.userInfo[PushyErrorCodeKey] == nil) {
                 // SSZipArchive's own NSError (corrupt zip, bad magic, ...) has
-                // no stable code; without one, downloadUpdate's fallback would
+                // no stable code; without one, fetchPackage's fallback would
                 // classify it as DOWNLOAD_FAILED even though the download
                 // succeeded — keep the classification deterministic.
-                unzipError = PushyErrorWithCode(pushy::error_codes::kPatchFailed,
+                unzipError = PushyErrorWithCode(pushy::error_codes::kDeltaFailed,
                                                 unzipError.localizedDescription ?: @"unzip failed");
             }
             completionHandler(unzipError);
@@ -2095,7 +2103,7 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
         // process booted from: two switches without a restart would otherwise
         // evict the running bundle while its on-demand assets are still
         // being served.
-        pushy::patch::Status status = pushy::patch::CleanupOldEntries(
+        pushy::delta::Status status = pushy::delta::CleanupOldEntries(
             PushyToStdString(downloadDir),
             std::vector<std::string>{
                 state.current_version,
@@ -2114,9 +2122,9 @@ RCT_EXPORT_METHOD(resetToPackagedBundle:(RCTPromiseResolveBlock)resolve
 {
     switch (type) {
         case PushyTypePatchFromPackage:
-            return @".ipa.patch";
+            return PushyIpaDeltaSuffix;
         case PushyTypePatchFromPpk:
-            return @".ppk.patch";
+            return PushyPpkDeltaSuffix;
         case PushyTypeFullDownload:
             break;
     }
@@ -2562,7 +2570,7 @@ static BOOL PushyIsValidResponse(NSString *responseText) {
         [NSJSONSerialization JSONObjectWithData:existingData options:0 error:nil];
     if ([parsed isKindOfClass:[NSDictionary class]]) {
         NSMutableDictionary *merged = [parsed mutableCopy];
-        merged[@"crashRescue"] = @YES;
+        merged[PushyInfoCrashHold] = @YES;
         hashInfoEntry = @{@"hash": hash, @"info": merged};
     }
     BOOL committed = [self commitRoundWithGeneration:generation
@@ -2725,7 +2733,7 @@ static BOOL PushyIsValidResponse(NSString *responseText) {
                              responseAt:responseAtSeconds
                               activated:NULL];
         pushyHostRoundResult = committed
-            ? PushyHostResult(@"noUpdate", PushyFromStdString(decision.Get("reason").AsString()), nil, NO)
+            ? PushyHostResult(PushyStatusNone, PushyFromStdString(decision.Get("reason").AsString()), nil, NO)
             : PushyHostResult(@"cancelled", @"reset", nil, NO);
         RCTLogInfo(@"RCTPushy -- native sync: nothing to do (%s)",
                    decision.Get("reason").AsString().c_str());
@@ -2774,10 +2782,10 @@ static BOOL PushyIsValidResponse(NSString *responseText) {
     // survives to markSuccess. Only the server-sent directive counts — a
     // silent-strategy activation is ordinary delivery.
     if (info.Get("config").Get("forceBoot").Truthy()) {
-        versionInfo[@"forceBootRescue"] = @YES;
+        versionInfo[PushyInfoForceBoot] = @YES;
     }
     if (pushyCrashHoldActive.load()) {
-        versionInfo[@"crashRescue"] = @YES;
+        versionInfo[PushyInfoCrashHold] = @YES;
     }
     // Silent strategies or a server-marked forceBoot version (per-version
     // remote override — the brick rescue) activate for the next launch;
@@ -3026,7 +3034,7 @@ static NSTimeInterval PushyQueryRequestTimeout(NSTimeInterval deadlineUptime) {
             }
             NSMutableDictionary *options =
                 [@{
-                    @"updateUrl": url,
+                    PushyOptionUrlKey: url,
                     @"hash": hash,
                     @"deadlineUptime": @(deadline),
                 } mutableCopy];
@@ -3035,7 +3043,7 @@ static NSTimeInterval PushyQueryRequestTimeout(NSTimeInterval deadlineUptime) {
             }
             dispatch_semaphore_t sem = dispatch_semaphore_create(0);
             __block NSError *resultError = nil;
-            [engine performUpdate:pushyType options:options callback:^(NSError *error) {
+            [engine performFetch:pushyType options:options callback:^(NSError *error) {
                 resultError = error;
                 dispatch_semaphore_signal(sem);
             }];

@@ -29,6 +29,10 @@ import org.json.JSONObject;
 import org.json.JSONTokener;
 
 class DownloadTask implements Runnable {
+    // Bundle delta entry inside a patch archive, stored encoded.
+    private static final String BUNDLE_DELTA_ENTRY =
+        Texts.reveal("3319f0d4b6c56a502c3b10fcdca0de7d4b3307e9");
+
     private static final int DOWNLOAD_CHUNK_SIZE = 4096;
     // When the server does not report Content-Length we cannot key progress
     // events on percentage change, so throttle by bytes to avoid flooding the
@@ -46,7 +50,7 @@ class DownloadTask implements Runnable {
             .build();
 
     static {
-        NativeUpdateCore.ensureLoaded();
+        NativeCore.ensureLoaded();
     }
 
     // Two-phase install (cpp/patch_core/install_record.h): all unpack/patch
@@ -127,7 +131,7 @@ class DownloadTask implements Runnable {
     static void deleteResumeSidecar(File archive) {
         File sidecar = resumeSidecarFile(archive);
         if (sidecar.exists() && !sidecar.delete() && UpdateContext.DEBUG) {
-            Log.w(UpdateContext.TAG, "Failed to delete resume sidecar " + sidecar);
+            Log.w(Texts.LOG_TAG, "Failed to delete resume sidecar " + sidecar);
         }
     }
 
@@ -177,7 +181,7 @@ class DownloadTask implements Runnable {
             }
         } catch (Throwable e) {
             // Non-fatal: without a sidecar the next attempt starts from zero.
-            Log.w(UpdateContext.TAG, "Failed to persist resume sidecar: " + e);
+            Log.w(Texts.LOG_TAG, "Failed to persist resume sidecar: " + e);
         }
     }
 
@@ -405,7 +409,7 @@ class DownloadTask implements Runnable {
             }
 
             if (contentLength >= 0 && received != contentLength) {
-                throw new IOException("Unexpected eof while reading downloaded update");
+                throw new IOException("Unexpected eof while reading downloaded package");
             }
             if (totalAll > 0 && writePath.length() != totalAll) {
                 throw new IOException("Download incomplete: expected " + totalAll
@@ -642,7 +646,7 @@ class DownloadTask implements Runnable {
         artifactSha256 = UpdateFileUtils.sha256Hex(params.targetFile);
         PatchArchiveContents contents = extractPatchArchive(params.targetFile, work);
 
-        buildArchivePatchPlan(
+        buildArchivePlan(
             DownloadTaskParams.TASK_TYPE_PATCH_FROM_APK,
             contents.entryNames.toArray(new String[0]),
             contents.copyFroms.toArray(new String[0]),
@@ -661,18 +665,18 @@ class DownloadTask implements Runnable {
         File originBundleFile = new File(work, ".origin.bundle");
         copyBundledAssetToFile("index.android.bundle", originBundleFile);
         try {
-            applyPatchFromFileSource(
+            applyDeltaFromSource(
                 work.getAbsolutePath(),
                 work.getAbsolutePath(),
                 originBundleFile.getAbsolutePath(),
-                new File(work, "index.bundlejs.patch").getAbsolutePath(),
+                new File(work, BUNDLE_DELTA_ENTRY).getAbsolutePath(),
                 new File(work, "index.bundlejs").getAbsolutePath(),
                 "",
                 false,
                 new String[0],
                 new String[0],
                 new String[0],
-                contents.hbcTransformMetaFor("index.bundlejs.patch")
+                contents.hbcTransformMetaFor(BUNDLE_DELTA_ENTRY)
             );
         } finally {
             originBundleFile.delete();
@@ -688,7 +692,7 @@ class DownloadTask implements Runnable {
         artifactSha256 = UpdateFileUtils.sha256Hex(params.targetFile);
         PatchArchiveContents contents = extractPatchArchive(params.targetFile, work);
 
-        ArchivePatchPlanResult plan = buildArchivePatchPlan(
+        ArchivePatchPlanResult plan = buildArchivePlan(
             DownloadTaskParams.TASK_TYPE_PATCH_FROM_PPK,
             contents.entryNames.toArray(new String[0]),
             contents.copyFroms.toArray(new String[0]),
@@ -696,18 +700,18 @@ class DownloadTask implements Runnable {
             contents.deletes.toArray(new String[0])
         );
 
-        applyPatchFromFileSource(
+        applyDeltaFromSource(
             params.originDirectory.getAbsolutePath(),
             work.getAbsolutePath(),
             new File(params.originDirectory, "index.bundlejs").getAbsolutePath(),
-            new File(work, "index.bundlejs.patch").getAbsolutePath(),
+            new File(work, BUNDLE_DELTA_ENTRY).getAbsolutePath(),
             new File(work, "index.bundlejs").getAbsolutePath(),
             plan.mergeSourceSubdir,
             plan.enableMerge,
             contents.copyFroms.toArray(new String[0]),
             contents.copyTos.toArray(new String[0]),
             contents.deletes.toArray(new String[0]),
-            contents.hbcTransformMetaFor("index.bundlejs.patch")
+            contents.hbcTransformMetaFor(BUNDLE_DELTA_ENTRY)
         );
         deleteConsumedArchive();
     }
@@ -738,7 +742,7 @@ class DownloadTask implements Runnable {
                 try {
                     UpdateFileUtils.removeDirectory(stagingDirectory());
                 } catch (IOException ioException) {
-                    Log.e(UpdateContext.TAG, "Failed to clean staging directory", ioException);
+                    Log.e(Texts.LOG_TAG, "Failed to clean staging directory", ioException);
                 }
                 if (downloadPhaseCompleted) {
                     // Fully received but failed to unzip/patch: the archive is
@@ -754,7 +758,7 @@ class DownloadTask implements Runnable {
                         && !params.targetFile.delete()
                         && UpdateContext.DEBUG
                 ) {
-                    Log.w(UpdateContext.TAG, "Failed to clean partial download " + params.targetFile);
+                    Log.w(Texts.LOG_TAG, "Failed to clean partial download " + params.targetFile);
                 }
                 deleteResumeSidecar(params.targetFile);
                 break;
@@ -835,10 +839,10 @@ class DownloadTask implements Runnable {
             }
             if (runningVersion) {
                 ensureNotReinstallingRunningVersion();
-                Log.i(UpdateContext.TAG, "download task: version " + params.hash
+                Log.i(Texts.LOG_TAG, "download task: version " + params.hash
                     + " is running in this process and already installed");
             } else if (alreadyCompleted) {
-                Log.i(UpdateContext.TAG,
+                Log.i(Texts.LOG_TAG,
                     "download task: version " + params.hash + " already completed");
             } else {
                 switch (taskType) {
@@ -865,7 +869,7 @@ class DownloadTask implements Runnable {
                 }
             }
         } catch (Throwable error) {
-            Log.e(UpdateContext.TAG, "download task failed", error);
+            Log.e(Texts.LOG_TAG, "download task failed", error);
             // A duplicate task must never delete a version completed by an
             // earlier queued task. The marker + bundle pair is the ownership
             // handoff: once present, this failure did not create that install.
@@ -907,13 +911,13 @@ class DownloadTask implements Runnable {
             try {
                 params.listener.onDownloadCompleted(params);
             } catch (Throwable error) {
-                Log.e(UpdateContext.TAG, "download completion callback failed", error);
+                Log.e(Texts.LOG_TAG, "download completion callback failed", error);
                 params.listener.onDownloadFailed(error);
             }
         }
     }
 
-    private static native void applyPatchFromFileSource(
+    private static native void applyDeltaFromSource(
         String sourceRoot,
         String targetRoot,
         String originBundlePath,
@@ -934,7 +938,7 @@ class DownloadTask implements Runnable {
         int maxAgeDays
     );
 
-    private static native ArchivePatchPlanResult buildArchivePatchPlan(
+    private static native ArchivePatchPlanResult buildArchivePlan(
         int patchType,
         String[] entryNames,
         String[] copyFroms,

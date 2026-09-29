@@ -201,7 +201,7 @@ final class BundledResourceCopier {
                         // failure, not a skip: record it and fail the update
                         // after the loop so a broken update is not activated.
                         Log.e(
-                            UpdateContext.TAG,
+                            Texts.LOG_TAG,
                             "Failed to copy resource "
                                 + actualSourcePath
                                 + " to "
@@ -230,7 +230,7 @@ final class BundledResourceCopier {
 
             if (!remainingFiles.isEmpty()) {
                 Log.w(
-                    UpdateContext.TAG,
+                    Texts.LOG_TAG,
                     "Skipped " + remainingFiles.size() + " missing bundled resources"
                 );
             }
@@ -368,7 +368,7 @@ final class BundledResourceCopier {
             }
         } catch (PackageManager.NameNotFoundException e) {
             if (UpdateContext.DEBUG) {
-                Log.w(UpdateContext.TAG, "Failed to get application info: " + e.getMessage());
+                Log.w(Texts.LOG_TAG, "Failed to get application info: " + e.getMessage());
             }
         }
 
@@ -381,7 +381,7 @@ final class BundledResourceCopier {
                 zipFile.close();
             } catch (IOException e) {
                 if (UpdateContext.DEBUG) {
-                    Log.w(UpdateContext.TAG, "Failed to close zip file", e);
+                    Log.w(Texts.LOG_TAG, "Failed to close zip file", e);
                 }
             }
         }

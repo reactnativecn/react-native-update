@@ -6,6 +6,9 @@
 
 #include "hbc_transform.h"
 
+// Keep the core internal to whichever binary links it (see podspec Core).
+#pragma GCC visibility push(hidden)
+
 namespace pushy {
 namespace hbc {
 
@@ -50,3 +53,5 @@ HbcLayoutDesc BuildLayout(
 
 } // namespace hbc
 } // namespace pushy
+
+#pragma GCC visibility pop

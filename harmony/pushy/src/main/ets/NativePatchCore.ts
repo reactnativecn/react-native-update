@@ -1,4 +1,4 @@
-import NativeUpdateCore from 'librnupdate.so';
+import NativeCore from 'librnpushy.so';
 
 export const STATE_OP_SWITCH_VERSION = 1;
 export const STATE_OP_MARK_SUCCESS = 2;
@@ -43,7 +43,7 @@ export interface FileSourcePatchRequest {
   sourceRoot: string;
   targetRoot: string;
   originBundlePath: string;
-  bundlePatchPath: string;
+  bundleDeltaPath: string;
   bundleOutputPath: string;
   mergeSourceSubdir?: string;
   enableMerge?: boolean;
@@ -64,7 +64,7 @@ interface NativePatchCoreBindings {
     flagA?: boolean,
     flagB?: boolean,
   ): StateCoreResult;
-  buildArchivePatchPlan(
+  buildArchivePlan(
     patchType: number,
     entryNames: string[],
     copyFroms: string[],
@@ -73,7 +73,7 @@ interface NativePatchCoreBindings {
     bundlePatchEntryName?: string,
   ): ArchivePatchPlanResult;
   buildCopyGroups(copyFroms: string[], copyTos: string[]): CopyGroupResult[];
-  applyPatchFromFileSource(options: FileSourcePatchRequest): Promise<void>;
+  applyDeltaFromSource(options: FileSourcePatchRequest): Promise<void>;
   /**
    * 删除 rootDir 下超过 maxAgeDays 且名字不在 keepNames 里的条目(native
    * 工作线程)。keepNames 必须包含所有可能仍在使用的版本:持久化的
@@ -114,4 +114,4 @@ interface NativePatchCoreBindings {
   isValidResponse(responseText: string): boolean;
 }
 
-export default NativeUpdateCore as unknown as NativePatchCoreBindings;
+export default NativeCore as unknown as NativePatchCoreBindings;

@@ -1,3 +1,5 @@
+import { POLICY_NEXT_LAUNCH, revealText } from './Texts';
+
 /** Options accepted by PushyFileJSBundleProvider.configure(). */
 export interface PushyConfiguration {
   appKey: string;
@@ -24,21 +26,6 @@ interface PersistedPushyConfiguration {
   rnu: string;
   rn: string;
 }
-
-// Decodes text produced by scripts/encode-native-text.ts (byte i XORed with
-// (0x5A + 0x1D * i) & 0xFF), keeping service addresses and paths out of static
-// string scans of the package. Not a secret.
-export function revealText(hex: string): string {
-  let text = '';
-  for (let i = 0; i < hex.length / 2; i++) {
-    const byte = parseInt(hex.substring(i * 2, i * 2 + 2), 16);
-    text += String.fromCharCode(byte ^ ((0x5a + 0x1d * i) & 0xff));
-  }
-  return text;
-}
-
-// Request path appended to an endpoint base.
-export const QUERY_PATH: string = revealText('7514fcd4ad805d55263e08fc99');
 
 const DEFAULT_ENDPOINTS: string[] = [
   revealText('3203e0c1bdd1270a372f18f8c2b6de7f4f2607f5b3d5b9817b592947e5cdefbc8a7e'),
@@ -99,8 +86,8 @@ export function normalizePushyConfiguration(options: PushyConfiguration): string
     'queryUrls', false,
   );
   const afterDownload = options.afterDownload === undefined ? 'none' : options.afterDownload;
-  if (afterDownload !== 'none' && afterDownload !== 'setNeedUpdate') {
-    throw new Error('Invalid native configuration: afterDownload must be none or setNeedUpdate');
+  if (afterDownload !== 'none' && afterDownload !== POLICY_NEXT_LAUNCH) {
+    throw new Error(`Invalid native configuration: afterDownload must be none or ${POLICY_NEXT_LAUNCH}`);
   }
   if (options.disabled !== undefined && typeof options.disabled !== 'boolean') {
     throw new Error('Invalid native configuration: disabled must be a boolean');

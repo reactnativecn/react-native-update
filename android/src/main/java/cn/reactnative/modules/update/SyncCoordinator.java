@@ -31,6 +31,10 @@ import org.json.JSONObject;
  * version blacklisting.
  */
 final class SyncCoordinator {
+    // Version-info flags read by JS (metadata.ts), stored encoded.
+    private static final String INFO_CRASH_HOLD = Texts.reveal("3905f5c2a6b96d56212a19");
+    private static final String INFO_FORCE_BOOT = Texts.reveal("3c18e6d2aba9674a360d19ead5a695");
+
     static final String KEY_CONFIG = "nativeConfig";
     // Raw response cache for the JS side to reuse (§10.3), scoped to the
     // exact logical request and native config that produced it.
@@ -164,14 +168,14 @@ final class SyncCoordinator {
                     if (hasJsRound(context)) {
                         // Not consuming the round: a later crash rescue may
                         // still need it.
-                        Log.i(UpdateContext.TAG,
+                        Log.i(Texts.LOG_TAG,
                             "native sync skipped: JS already queried in this process");
                         return;
                     }
                     startRound(0);
                 } catch (Throwable e) {
                     // The rescue path must never take the app down with it.
-                    Log.w(UpdateContext.TAG, "native sync failed: " + e);
+                    Log.w(Texts.LOG_TAG, "native sync failed: " + e);
                 }
             }
         }, "pushy-native-sync");
@@ -225,7 +229,7 @@ final class SyncCoordinator {
         try {
             runOnce(sContext, sLaunchRolledBackVersion, deadlineNanos);
         } catch (Throwable e) {
-            Log.w(UpdateContext.TAG, "native sync failed: " + e);
+            Log.w(Texts.LOG_TAG, "native sync failed: " + e);
             roundResult = BundlePreparationResult.of(BundlePreparationResult.FAILED, "internal_error");
         } finally {
             roundCompleted = true;
@@ -275,7 +279,7 @@ final class SyncCoordinator {
         if (existingInfo != null) {
             try {
                 JSONObject info = new JSONObject(existingInfo);
-                info.put("crashRescue", true);
+                info.put(INFO_CRASH_HOLD, true);
                 hashInfoJson = info.toString();
             } catch (JSONException ignored) {
             }
@@ -284,14 +288,14 @@ final class SyncCoordinator {
             if (context.commitSyncResult(
                     unactivatedGeneration, hash, hashInfoJson, true, null)) {
                 unactivatedHash = null;
-                Log.i(UpdateContext.TAG,
+                Log.i(Texts.LOG_TAG,
                     "crash hold: activated downloaded version " + hash);
             } else {
-                Log.i(UpdateContext.TAG,
+                Log.i(Texts.LOG_TAG,
                     "crash hold: reset since download, dropping activation");
             }
         } catch (Exception e) {
-            Log.w(UpdateContext.TAG, "crash hold: activation failed: " + e);
+            Log.w(Texts.LOG_TAG, "crash hold: activation failed: " + e);
         }
     }
 
@@ -396,7 +400,7 @@ final class SyncCoordinator {
         );
         input.put("buildTime", context.getBuildTime());
         input.put("cInfo", cInfo);
-        input.put("supportedDiffVersion", NativeUpdateCore.supportedDiffVersion());
+        input.put("supportedDiffVersion", NativeCore.supportedDiffVersion());
         input.put("bundleHash", context.computeBundleHash());
 
         String body = FlowBridge.buildRequestBody(input.toString());
@@ -407,7 +411,7 @@ final class SyncCoordinator {
 
         String responseText = runQueryRequest(config, appKey, body, deadlineNanos);
         if (responseText == null) {
-            Log.i(UpdateContext.TAG,
+            Log.i(Texts.LOG_TAG,
                 "native sync: no endpoint reachable, giving up until next launch");
             return;
         }
@@ -429,7 +433,7 @@ final class SyncCoordinator {
             roundResult = committed
                 ? BundlePreparationResult.of(BundlePreparationResult.NO_UPDATE, decision.optString("reason"))
                 : BundlePreparationResult.of(BundlePreparationResult.CANCELLED, "reset");
-            Log.i(UpdateContext.TAG,
+            Log.i(Texts.LOG_TAG,
                 "native sync: nothing to do (" + decision.optString("reason") + ")");
             return;
         }
@@ -476,10 +480,10 @@ final class SyncCoordinator {
             // counts — a silent-strategy activation is ordinary delivery.
             JSONObject infoConfig = info.optJSONObject("config");
             if (infoConfig != null && infoConfig.optBoolean("forceBoot", false)) {
-                hashInfo.put("forceBootRescue", true);
+                hashInfo.put(INFO_FORCE_BOOT, true);
             }
             if (crashHoldActive) {
-                hashInfo.put("crashRescue", true);
+                hashInfo.put(INFO_CRASH_HOLD, true);
             }
             hashInfoJson = hashInfo.toString();
         }
@@ -498,22 +502,22 @@ final class SyncCoordinator {
                 activate,
                 buildResponseCacheJson(configJson, body, responseText, responseAtSeconds));
         } catch (Exception e) {
-            Log.w(UpdateContext.TAG, "native sync: commit failed: " + e);
+            Log.w(Texts.LOG_TAG, "native sync: commit failed: " + e);
             roundResult = BundlePreparationResult.of(BundlePreparationResult.FAILED, "commit_failed");
             return;
         }
         if (!committed) {
-            Log.i(UpdateContext.TAG, "native sync: reset during round, dropping result");
+            Log.i(Texts.LOG_TAG, "native sync: reset during round, dropping result");
         } else if (activate) {
             unactivatedHash = null;
-            Log.i(UpdateContext.TAG,
+            Log.i(Texts.LOG_TAG,
                 "native sync: downloaded " + hash + " and set for next launch");
         } else {
             // Remembered so a crash later in this process can still activate
             // it (activatePendingVersion) — JS never will.
             unactivatedGeneration = resetGeneration;
             unactivatedHash = hash;
-            Log.i(UpdateContext.TAG,
+            Log.i(Texts.LOG_TAG,
                 "native sync: downloaded " + hash + ", activation left to JS");
         }
         roundResult = committed
@@ -577,7 +581,7 @@ final class SyncCoordinator {
         } catch (Exception e) {
             // One line per failed endpoint; the fallback chain is otherwise
             // invisible in the field.
-            Log.w(UpdateContext.TAG, "native sync: request failed with "
+            Log.w(Texts.LOG_TAG, "native sync: request failed with "
                 + e.getClass().getName() + ": " + e.getMessage());
             return null;
         }
@@ -595,7 +599,7 @@ final class SyncCoordinator {
         }
         BufferedSource source = body.source();
         if (source.request(MAX_QUERY_RESPONSE_BYTES + 1)) {
-            Log.w(UpdateContext.TAG, "native sync: response exceeds "
+            Log.w(Texts.LOG_TAG, "native sync: response exceeds "
                 + MAX_QUERY_RESPONSE_BYTES + " bytes, ignoring endpoint");
             return null;
         }
@@ -760,7 +764,7 @@ final class SyncCoordinator {
 
                         @Override
                         public void onDownloadFailed(Throwable error) {
-                            Log.i(UpdateContext.TAG, "native sync: " + attemptType
+                            Log.i(Texts.LOG_TAG, "native sync: " + attemptType
                                 + " attempt failed: " + error);
                             latch.countDown();
                         }
@@ -778,7 +782,7 @@ final class SyncCoordinator {
                 }
                 try {
                     if (!latch.await(remainingNanos, TimeUnit.NANOSECONDS)) {
-                        Log.w(UpdateContext.TAG,
+                        Log.w(Texts.LOG_TAG,
                             "native sync: download phase timed out during " + type);
                         // The task shares one download thread with the next
                         // attempt: cancel its transfer (or keep it from

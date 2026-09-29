@@ -25,7 +25,7 @@ extern "C" {
 }
 
 namespace pushy {
-namespace patch {
+namespace delta {
 
 namespace internal {
 bool g_disable_hard_links = false;
@@ -41,7 +41,7 @@ constexpr size_t kCopyBufferSize = 16 * 1024;
 // flowjson::kMaxDepth). Real bundles nest a handful of levels.
 constexpr int kMaxDirectoryDepth = 64;
 
-class HdiffBundlePatcher final : public BundlePatcher {
+class HdiffBundleRebuilder final : public BundleRebuilder {
  public:
   Status Apply(
       const std::string& origin_bundle_path,
@@ -499,8 +499,8 @@ Status ValidateManifest(const PatchManifest& manifest) {
   return ValidateManifestImpl(manifest);
 }
 
-const BundlePatcher& DefaultBundlePatcher() {
-  static const HdiffBundlePatcher kPatcher;
+const BundleRebuilder& DefaultBundleRebuilder() {
+  static const HdiffBundleRebuilder kPatcher;
   return kPatcher;
 }
 
@@ -517,7 +517,7 @@ Status TransformFileInPlace(
     const hbc::HbcLayoutDesc& layout,
     bool inverse) {
   const char* failure = inverse
-      ? "hbcTransform inverse failed on patched bundle"
+      ? "hbcTransform inverse failed on rebuilt bundle"
       : "hbcTransform failed on origin bundle";
 
   const int fd = open(path.c_str(), O_RDWR);
@@ -578,7 +578,7 @@ Status TransformFileInPlace(
 // 端到端不把 bundle 整体读进内存。
 Status ApplyBundlePatchWithHbcTransform(
     const FileSourcePatchOptions& options,
-    const BundlePatcher& bundle_patcher) {
+    const BundleRebuilder& bundle_patcher) {
   hbc::HbcTransformMeta meta;
   if (!hbc::ParseHbcTransformMeta(options.bundle_hbc_transform_meta, &meta)) {
     return Status::Error("Invalid hbcTransform metadata");
@@ -596,7 +596,7 @@ Status ApplyBundlePatchWithHbcTransform(
     return dir_status;
   }
   const std::string temp_origin = options.bundle_output_path + ".hbct-origin";
-  const std::string temp_patched = options.bundle_output_path + ".hbct-patched";
+  const std::string temp_patched = options.bundle_output_path + ".hbct-rebuilt";
   remove(temp_origin.c_str());
   remove(temp_patched.c_str());
 
@@ -647,7 +647,7 @@ Status ApplyBundlePatchWithHbcTransform(
 
 Status ApplyPatchFromFileSource(
     const FileSourcePatchOptions& options,
-    const BundlePatcher& bundle_patcher) {
+    const BundleRebuilder& bundle_patcher) {
   Status manifest_status = ValidateManifest(options.manifest);
   if (!manifest_status) {
     return manifest_status;
@@ -805,7 +805,7 @@ bool IsSafeRelativePath(const std::string& path) {
   return true;
 }
 
-Status HdiffBundlePatcher::Apply(
+Status HdiffBundleRebuilder::Apply(
     const std::string& origin_bundle_path,
     const std::string& bundle_patch_path,
     const std::string& destination_bundle_path) const {
@@ -813,7 +813,7 @@ Status HdiffBundlePatcher::Apply(
     return Status::Error("Origin bundle not found: " + origin_bundle_path);
   }
   if (!PathExists(bundle_patch_path)) {
-    return Status::Error("Bundle patch not found: " + bundle_patch_path);
+    return Status::Error("Bundle delta not found: " + bundle_patch_path);
   }
 
   const std::string parent = Dirname(destination_bundle_path);
@@ -835,10 +835,10 @@ Status HdiffBundlePatcher::Apply(
       bundle_patch_path.c_str());
   if (result != 0) {
     return Status::Error(
-        "Failed to apply bundle patch, hpatch error " + IntToString(result));
+        "Failed to apply bundle delta, error " + IntToString(result));
   }
   return Status::Ok();
 }
 
-}  // namespace patch
+}  // namespace delta
 }  // namespace pushy

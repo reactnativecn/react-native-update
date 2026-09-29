@@ -86,7 +86,7 @@ final class CrashHold {
             : BUDGET_BACKGROUND_THREAD_MILLIS;
         final long deadlineNanos =
             System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(budgetMillis);
-        Log.i(UpdateContext.TAG, "crash hold: holding process for up to "
+        Log.i(Texts.LOG_TAG, "crash hold: holding process for up to "
             + budgetMillis + "ms (uptime " + uptimeMillis + "ms)");
 
         final CountDownLatch done = new CountDownLatch(1);
@@ -96,7 +96,7 @@ final class CrashHold {
                 try {
                     SyncCoordinator.runHoldRound(deadlineNanos);
                 } catch (Throwable e) {
-                    Log.w(UpdateContext.TAG, "crash hold failed: " + e);
+                    Log.w(Texts.LOG_TAG, "crash hold failed: " + e);
                 } finally {
                     done.countDown();
                 }
@@ -106,7 +106,7 @@ final class CrashHold {
         worker.start();
         try {
             if (!done.await(budgetMillis, TimeUnit.MILLISECONDS)) {
-                Log.w(UpdateContext.TAG, "crash hold: budget exhausted, letting go");
+                Log.w(Texts.LOG_TAG, "crash hold: budget exhausted, letting go");
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();

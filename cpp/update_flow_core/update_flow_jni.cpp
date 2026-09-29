@@ -6,6 +6,8 @@
 // it must never unwind through the JNI boundary.
 #include <jni.h>
 
+#include "jni_natives.h"
+
 #include <cstdint>
 #include <exception>
 #include <limits>
@@ -81,8 +83,7 @@ jstring ToJString(JNIEnv* env, const std::string& value) {
 
 }  // namespace
 
-extern "C" JNIEXPORT jstring JNICALL
-Java_cn_reactnative_modules_update_FlowBridge_buildRequestBody(
+jstring pushy::jni_natives::FlowBuildRequestBody(
     JNIEnv* env, jclass, jstring inputJson) {
   try {
     bool ok = false;
@@ -98,8 +99,7 @@ Java_cn_reactnative_modules_update_FlowBridge_buildRequestBody(
   }
 }
 
-extern "C" JNIEXPORT jstring JNICALL
-Java_cn_reactnative_modules_update_FlowBridge_orderEndpointCandidates(
+jstring pushy::jni_natives::FlowOrderEndpointCandidates(
     JNIEnv* env, jclass, jstring endpointsJson, jdouble randomSample) {
   try {
     bool ok = false;
@@ -115,8 +115,7 @@ Java_cn_reactnative_modules_update_FlowBridge_orderEndpointCandidates(
   }
 }
 
-extern "C" JNIEXPORT jboolean JNICALL
-Java_cn_reactnative_modules_update_FlowBridge_isValidResponse(
+jboolean pushy::jni_natives::FlowIsValidResponse(
     JNIEnv* env, jclass, jstring responseText) {
   if (responseText == nullptr) {
     return JNI_FALSE;
@@ -131,8 +130,7 @@ Java_cn_reactnative_modules_update_FlowBridge_isValidResponse(
   }
 }
 
-extern "C" JNIEXPORT jstring JNICALL
-Java_cn_reactnative_modules_update_FlowBridge_handleResponse(
+jstring pushy::jni_natives::FlowHandleResponse(
     JNIEnv* env, jclass, jstring responseText, jstring identityJson,
     jstring afterDownload) {
   try {

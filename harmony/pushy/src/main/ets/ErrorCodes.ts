@@ -5,11 +5,13 @@
 //
 // RNOH 的异步桥以纯字符串 reject,Error 上的 `code` 属性到 JS 侧很可能已丢。
 // 因此每个错误的消息都以 `[CODE] ` 前缀开头,JS 鸿蒙分支据此解析回 code。
-// 本文件不依赖任何其他模块,任何文件都可安全引用它而不会形成 import 环。
+// 本文件只依赖同样无依赖的 Texts,任何文件都可安全引用它而不会形成 import 环。
+
+import { revealText } from './Texts';
 
 export const ERROR_INVALID_OPTIONS = 'INVALID_OPTIONS';
 export const ERROR_DOWNLOAD_FAILED = 'DOWNLOAD_FAILED';
-export const ERROR_PATCH_FAILED = 'PATCH_FAILED';
+export const ERROR_DELTA_FAILED = revealText('0a36c0f286b44e640b1339dd');
 export const ERROR_FILE_OPERATION_FAILED = 'FILE_OPERATION_FAILED';
 export const ERROR_SWITCH_VERSION_FAILED = 'SWITCH_VERSION_FAILED';
 export const ERROR_MARK_SUCCESS_FAILED = 'MARK_SUCCESS_FAILED';

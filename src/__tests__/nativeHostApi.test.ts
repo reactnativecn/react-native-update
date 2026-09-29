@@ -6,6 +6,7 @@ import {
   BundlePreparationRound,
   bundlePreparationResult,
 } from '../../harmony/pushy/src/main/ets/BundlePreparationResult';
+import { STATUS_NONE } from '../../harmony/pushy/src/main/ets/Texts';
 
 // Evaluate the actual Harmony orchestrator in an isolated VM per test. Only
 // platform imports, HTTP and download IO are substituted; entry points,
@@ -77,6 +78,7 @@ function harness() {
       setTimeout: (callback: () => void) => timers.push(callback),
       isSafePathComponent: (hash: string) => /^[a-zA-Z0-9_-]+$/.test(hash),
       getErrorMessage: (error: unknown) => String(error),
+      STATUS_NONE,
       NativePatchCore: {
         getSupportedDiffVersion: () => 2,
         buildRequestBody: (input: string) => input,

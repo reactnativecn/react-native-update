@@ -8,6 +8,9 @@
 //   - HarmonyOS: UpdateContext.ts  (StateOperation usage)
 // Do not renumber existing entries; only append new ones.
 
+// Keep the core internal to whichever binary links it (see podspec Core).
+#pragma GCC visibility push(hidden)
+
 namespace pushy {
 namespace state_ops {
 
@@ -22,3 +25,5 @@ enum class StateOperation {
 
 }  // namespace state_ops
 }  // namespace pushy
+
+#pragma GCC visibility pop

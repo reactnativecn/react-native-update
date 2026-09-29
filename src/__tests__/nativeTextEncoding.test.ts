@@ -1,10 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
-import {
-  normalizePushyConfiguration,
-  QUERY_PATH,
-  revealText,
-} from '../../harmony/pushy/src/main/ets/PushyConfiguration';
+import { normalizePushyConfiguration } from '../../harmony/pushy/src/main/ets/PushyConfiguration';
+import { QUERY_PATH, revealText } from '../../harmony/pushy/src/main/ets/Texts';
 import {
   decodeNativeText,
   encodeNativeText,
@@ -50,7 +47,7 @@ const stripComments = (text: string) =>
 const encodedIn = (text: string) =>
   [
     ...text.matchAll(
-      /\b(?:HttpUtils\.reveal|reveal|RCTPushyRevealText|revealText)\(\s*["']([0-9a-f]+)["']\s*\)/g
+      /\b(?:reveal|RCTPushyRevealText|revealText|RevealStatic|Reveal)\(\s*["']([0-9a-f]+)["']\s*\)/g
     ),
   ].map((match) => match[1]);
 
@@ -62,7 +59,7 @@ describe('native text encoding', () => {
     }
   });
 
-  test('each platform encodes exactly the expected texts', () => {
+  test('each platform encodes the service addresses and path', () => {
     const platforms = {
       android: paths.filter((path) => path.startsWith('android/')),
       ios: paths.filter((path) => path.startsWith('ios/')),
@@ -73,10 +70,13 @@ describe('native text encoding', () => {
         .flatMap((path) => encodedIn(source(path)))
         .map(decodeNativeText)
         .sort();
-      expect({ platform, decoded }).toEqual({
-        platform,
-        decoded: [...plainTexts].sort(),
-      });
+      for (const text of plainTexts) {
+        expect({ platform, text, found: decoded.includes(text) }).toEqual({
+          platform,
+          text,
+          found: true,
+        });
+      }
     }
   });
 
@@ -95,5 +95,48 @@ describe('native text encoding', () => {
     const config = JSON.parse(normalizePushyConfiguration({ appKey: 'k' }));
     expect(config.endpoints).toEqual(plainTexts.slice(1, 3));
     expect(config.queryUrls).toEqual(plainTexts.slice(3));
+  });
+
+  // Every string literal in shipped native code, comments excluded: none may
+  // carry update/patch/rescue/reload wording except the entries below, which
+  // are fixed by a contract that cannot change without breaking callers.
+  test('shipped native string literals carry no update wording', () => {
+    const allowed = [
+      // Public host API constant (Java switch/case needs a compile-time constant).
+      'android/src/main/java/cn/reactnative/modules/update/BundlePreparationResult.java: noUpdate',
+      // Public ArkTS option type (compile-time only).
+      'harmony/pushy/src/main/ets/PushyConfiguration.ts: setNeedUpdate',
+      // JS bridge method names registered with RNOH.
+      'harmony/pushy/src/main/cpp/PushyTurboModule.cpp: reloadUpdate',
+      'harmony/pushy/src/main/cpp/PushyTurboModule.cpp: setNeedUpdate',
+      'harmony/pushy/src/main/cpp/PushyTurboModule.cpp: downloadPatchFromPpk',
+      'harmony/pushy/src/main/cpp/PushyTurboModule.cpp: downloadPatchFromPackage',
+      'harmony/pushy/src/main/cpp/PushyTurboModule.cpp: downloadFullUpdate',
+    ];
+    const wording = /update|patch|rescue|reload|hotfix/i;
+    const literal =
+      /@?"((?:[^"\\\n]|\\.)*)"|'((?:[^'\\\n]|\\.)*)'|`((?:[^`\\\n]|\\.)*)`/g;
+    const offenders = paths.flatMap((path) =>
+      stripComments(source(path))
+        .split('\n')
+        .filter(
+          (line) =>
+            !/^\s*(?:#\s*(?:import|include)|import\b|}\s*from\b)/.test(line)
+        )
+        .filter((line) => !/__has_include/.test(line))
+        .flatMap((line) =>
+          [...line.matchAll(literal)]
+            .map((match) =>
+              (match[1] ?? match[2] ?? match[3] ?? '').replace(
+                /\$\{[^}]*\}/g,
+                ''
+              )
+            )
+            .filter((value) => wording.test(value))
+            .map((value) => `${path}: ${value}`)
+        )
+        .filter((entry) => !allowed.includes(entry))
+    );
+    expect(offenders).toEqual([]);
   });
 });

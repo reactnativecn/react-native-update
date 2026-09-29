@@ -2,7 +2,7 @@ import fileIo from '@ohos.file.fs';
 import statvfs from '@ohos.file.statvfs';
 import {
   ERROR_FILE_OPERATION_FAILED,
-  ERROR_PATCH_FAILED,
+  ERROR_DELTA_FAILED,
   createPushyError,
 } from './ErrorCodes';
 import { isReservedEntryName } from './InstallRecord';
@@ -33,7 +33,7 @@ export function checkUncompressedSize(
 ): void {
   if (uncompressedBytes > MAX_TOTAL_UNCOMPRESSED_BYTES) {
     throw createPushyError(
-      ERROR_PATCH_FAILED,
+      ERROR_DELTA_FAILED,
       `archive expands beyond ${MAX_TOTAL_UNCOMPRESSED_BYTES} bytes ` +
         `(${uncompressedBytes})`,
     );
@@ -44,7 +44,7 @@ export function checkUncompressedSize(
     uncompressedBytes > archiveBytes * MAX_COMPRESSION_RATIO
   ) {
     throw createPushyError(
-      ERROR_PATCH_FAILED,
+      ERROR_DELTA_FAILED,
       `archive compression ratio exceeds ${MAX_COMPRESSION_RATIO}:1 ` +
         `(${uncompressedBytes}/${archiveBytes})`,
     );
@@ -104,7 +104,7 @@ export async function measureExtractedDirectory(
   for (const name of names) {
     if (isReservedEntryName(name)) {
       throw createPushyError(
-        ERROR_PATCH_FAILED,
+        ERROR_DELTA_FAILED,
         `archive contains reserved entry ${name}`,
       );
     }
@@ -113,7 +113,7 @@ export async function measureExtractedDirectory(
     acc.entries += 1;
     if (acc.entries > MAX_ENTRIES) {
       throw createPushyError(
-        ERROR_PATCH_FAILED,
+        ERROR_DELTA_FAILED,
         `archive has too many entries (> ${MAX_ENTRIES})`,
       );
     }
@@ -123,14 +123,14 @@ export async function measureExtractedDirectory(
     }
     if (stat.size > MAX_ENTRY_BYTES) {
       throw createPushyError(
-        ERROR_PATCH_FAILED,
+        ERROR_DELTA_FAILED,
         `archive entry too large: ${name} (${stat.size} bytes)`,
       );
     }
     acc.bytes += stat.size;
     if (acc.bytes > MAX_TOTAL_UNCOMPRESSED_BYTES) {
       throw createPushyError(
-        ERROR_PATCH_FAILED,
+        ERROR_DELTA_FAILED,
         `archive expands beyond ${MAX_TOTAL_UNCOMPRESSED_BYTES} bytes`,
       );
     }

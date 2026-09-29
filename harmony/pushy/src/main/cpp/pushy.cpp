@@ -22,7 +22,6 @@ namespace {
 
 using pushy::state_ops::StateOperation;
 
-constexpr const char* kDefaultBundlePatchEntryName = "index.bundlejs.patch";
 
 void ThrowError(napi_env env, const std::string& message) {
   napi_throw_error(env, nullptr, message.c_str());
@@ -400,14 +399,14 @@ napi_value NewCopyGroupArray(
   return result;
 }
 
-pushy::patch::PatchManifest BuildManifest(
+pushy::delta::PatchManifest BuildManifest(
     const std::vector<std::string>& copy_froms,
     const std::vector<std::string>& copy_tos,
     const std::vector<std::string>& deletes) {
-  pushy::patch::PatchManifest manifest;
+  pushy::delta::PatchManifest manifest;
   for (size_t index = 0; index < copy_froms.size(); ++index) {
     manifest.copies.push_back(
-        pushy::patch::CopyOperation{copy_froms[index], copy_tos[index]});
+        pushy::delta::CopyOperation{copy_froms[index], copy_tos[index]});
   }
   manifest.deletes = deletes;
   return manifest;
@@ -566,7 +565,8 @@ napi_value BuildArchivePatchPlan(napi_env env, napi_callback_info info) {
     return nullptr;
   }
 
-  std::string bundle_patch_entry_name = kDefaultBundlePatchEntryName;
+  std::string bundle_patch_entry_name =
+      pushy::archive_patch::DefaultBundleDeltaEntryName();
   if (argc >= 6) {
     bool ok = false;
     const std::string candidate = GetString(env, args[5], &ok);
@@ -578,15 +578,15 @@ napi_value BuildArchivePatchPlan(napi_env env, napi_callback_info info) {
     }
   }
 
-  const pushy::patch::PatchManifest manifest =
+  const pushy::delta::PatchManifest manifest =
       BuildManifest(copy_froms, copy_tos, deletes);
   pushy::archive_patch::ArchivePatchType archive_type;
   if (!pushy::archive_patch::TryParseArchivePatchType(patch_type, &archive_type)) {
-    ThrowError(env, "Unknown archive patch type");
+    ThrowError(env, "Unknown archive delta type");
     return nullptr;
   }
   pushy::archive_patch::ArchivePatchPlan plan;
-  const pushy::patch::Status status = pushy::archive_patch::BuildArchivePatchPlan(
+  const pushy::delta::Status status = pushy::archive_patch::BuildArchivePatchPlan(
       archive_type,
       manifest,
       entry_names,
@@ -619,10 +619,10 @@ napi_value BuildCopyGroups(napi_env env, napi_callback_info info) {
     return nullptr;
   }
 
-  const pushy::patch::PatchManifest manifest =
+  const pushy::delta::PatchManifest manifest =
       BuildManifest(copy_froms, copy_tos, std::vector<std::string>());
   std::vector<pushy::archive_patch::CopyGroup> groups;
-  const pushy::patch::Status status =
+  const pushy::delta::Status status =
       pushy::archive_patch::BuildCopyGroups(manifest, &groups);
   if (!status.ok) {
     ThrowError(env, status.message);
@@ -635,7 +635,7 @@ napi_value BuildCopyGroups(napi_env env, napi_callback_info info) {
 // ---------------------------------------------------------------------------
 // Async work plumbing for the heavy patch operations.
 //
-// applyPatchFromFileSource and cleanupOldEntries run hdiff / recursive file IO
+// applyDeltaFromSource and cleanupOldEntries run hdiff / recursive file IO
 // that can take hundreds of ms to seconds. The Pushy TurboModule executes on
 // the UI thread, so running these synchronously froze the UI. These are now
 // wrapped in napi_create_async_work: arguments are parsed on the JS thread, the
@@ -659,8 +659,8 @@ void RejectDeferredWithMessage(
 struct ApplyPatchWork {
   napi_async_work work = nullptr;
   napi_deferred deferred = nullptr;
-  pushy::patch::FileSourcePatchOptions options;
-  pushy::patch::Status status{false, ""};
+  pushy::delta::FileSourcePatchOptions options;
+  pushy::delta::Status status{false, ""};
 };
 
 struct CleanupWork {
@@ -672,7 +672,7 @@ struct CleanupWork {
   // evict the running bundle while its on-demand assets are still served).
   std::vector<std::string> keep_names;
   int32_t max_age_days = 0;
-  pushy::patch::Status status{false, ""};
+  pushy::delta::Status status{false, ""};
 };
 
 // Streaming file digest on a worker thread. A full package or bundle is tens
@@ -714,7 +714,7 @@ napi_value ApplyPatchFromFileSource(napi_env env, napi_callback_info info) {
       !GetOptionalStringProperty(env, args[0], "sourceRoot", &source_root) ||
       !GetOptionalStringProperty(env, args[0], "targetRoot", &target_root) ||
       !GetOptionalStringProperty(env, args[0], "originBundlePath", &origin_bundle_path) ||
-      !GetOptionalStringProperty(env, args[0], "bundlePatchPath", &bundle_patch_path) ||
+      !GetOptionalStringProperty(env, args[0], "bundleDeltaPath", &bundle_patch_path) ||
       !GetOptionalStringProperty(env, args[0], "bundleOutputPath", &bundle_output_path) ||
       !GetOptionalStringProperty(env, args[0], "mergeSourceSubdir", &merge_source_subdir) ||
       !GetOptionalStringProperty(
@@ -747,14 +747,14 @@ napi_value ApplyPatchFromFileSource(napi_env env, napi_callback_info info) {
 
   napi_value resource_name = nullptr;
   napi_create_string_utf8(
-      env, "applyPatchFromFileSource", NAPI_AUTO_LENGTH, &resource_name);
+      env, "applyDeltaFromSource", NAPI_AUTO_LENGTH, &resource_name);
   if (napi_create_async_work(
           env,
           nullptr,
           resource_name,
           [](napi_env, void* data) {
             auto* w = static_cast<ApplyPatchWork*>(data);
-            w->status = pushy::patch::ApplyPatchFromFileSource(w->options);
+            w->status = pushy::delta::ApplyPatchFromFileSource(w->options);
           },
           [](napi_env cb_env, napi_status status, void* data) {
             auto* w = static_cast<ApplyPatchWork*>(data);
@@ -841,7 +841,7 @@ napi_value CleanupOldEntries(napi_env env, napi_callback_info info) {
           resource_name,
           [](napi_env, void* data) {
             auto* w = static_cast<CleanupWork*>(data);
-            w->status = pushy::patch::CleanupOldEntries(
+            w->status = pushy::delta::CleanupOldEntries(
                 w->root_dir, w->keep_names, w->max_age_days);
           },
           [](napi_env cb_env, napi_status status, void* data) {
@@ -1213,9 +1213,9 @@ static napi_value FlowHandleResponse(napi_env env,
 napi_value Init(napi_env env, napi_value exports) {
   if (!ExportFunction(env, exports, "syncStateWithBinaryVersion", SyncStateWithBinaryVersion) ||
       !ExportFunction(env, exports, "runStateCore", RunStateCore) ||
-      !ExportFunction(env, exports, "buildArchivePatchPlan", BuildArchivePatchPlan) ||
+      !ExportFunction(env, exports, "buildArchivePlan", BuildArchivePatchPlan) ||
       !ExportFunction(env, exports, "buildCopyGroups", BuildCopyGroups) ||
-      !ExportFunction(env, exports, "applyPatchFromFileSource", ApplyPatchFromFileSource) ||
+      !ExportFunction(env, exports, "applyDeltaFromSource", ApplyPatchFromFileSource) ||
       !ExportFunction(env, exports, "cleanupOldEntries", CleanupOldEntries) ||
       !ExportFunction(env, exports, "sha256Hex", Sha256Hex) ||
       !ExportFunction(env, exports, "sha256HexFile", Sha256HexFile) ||

@@ -6,7 +6,7 @@ import type { UpdateContext } from './UpdateContext';
 import { BundlePreparationRound, bundlePreparationResult } from './BundlePreparationResult';
 import type { BundlePreparationResult } from './BundlePreparationResult';
 import { isSafePathComponent } from './PathUtils';
-import { QUERY_PATH } from './PushyConfiguration';
+import { QUERY_PATH, STATUS_NONE } from './Texts';
 import { monotonicNowMs } from './MonotonicClock';
 import {
   ERROR_DOWNLOAD_FAILED,
@@ -404,7 +404,7 @@ async function runConfiguredRound(
       buildResponseCacheJson(configJson, body, responseText, responseAtSeconds),
     );
     roundResult = committed
-      ? bundlePreparationResult('noUpdate', decision.reason ?? '')
+      ? bundlePreparationResult(STATUS_NONE, decision.reason ?? '')
       : bundlePreparationResult('cancelled', 'reset');
     logger.info(TAG, `nothing to do (${decision.reason ?? ''})`);
     return;

@@ -78,7 +78,7 @@ public class HttpUtilsTest {
         // Encoded with scripts/encode-native-text.ts.
         assertEquals("/checkUpdate/", HttpUtils.QUERY_PATH);
         assertEquals("https://update.react-native.cn/api",
-            HttpUtils.reveal("3203e0c1bdd1270a372f18f8c2b6de7f4f2607f5b3d5b9817b592947e5cdefbc8a7e"));
-        assertEquals("", HttpUtils.reveal(""));
+            Texts.reveal("3203e0c1bdd1270a372f18f8c2b6de7f4f2607f5b3d5b9817b592947e5cdefbc8a7e"));
+        assertEquals("", Texts.reveal(""));
     }
 }

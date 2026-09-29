@@ -3,7 +3,7 @@ package cn.reactnative.modules.update;
 /**
  * Pure string helpers for the HTTP paths (no Android or OkHttp types), kept
  * apart from DownloadTask / SyncCoordinator so they stay testable on
- * a plain JVM: DownloadTask loads librnupdate.so in its static initializer
+ * a plain JVM: DownloadTask loads librnpushy.so in its static initializer
  * and both pull in OkHttp.
  */
 final class HttpUtils {
@@ -16,21 +16,7 @@ final class HttpUtils {
     }
 
     /** Request path appended to an endpoint base, kept out of the plain string table. */
-    static final String QUERY_PATH = reveal("7514fcd4ad805d55263e08fc99");
-
-    /**
-     * Decodes text produced by scripts/encode-native-text.ts: byte i is XORed
-     * with (0x5A + 0x1D * i) & 0xFF. Keeps service addresses and paths out of
-     * static string scans of the binary; it is not a secret.
-     */
-    static String reveal(String hex) {
-        char[] out = new char[hex.length() / 2];
-        for (int i = 0; i < out.length; i++) {
-            int b = Integer.parseInt(hex.substring(i * 2, i * 2 + 2), 16);
-            out[i] = (char) (b ^ ((0x5A + 0x1D * i) & 0xFF));
-        }
-        return new String(out);
-    }
+    static final String QUERY_PATH = Texts.reveal("7514fcd4ad805d55263e08fc99");
 
     /** Strips every trailing slash so "<base><QUERY_PATH><appKey>" never doubles one. */
     static String normalizeEndpointBase(String base) {

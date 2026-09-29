@@ -89,8 +89,8 @@ for (const file of required) {
   }
 }
 for (const abi of requiredAbis) {
-  if (!set.has(`android/lib/${abi}/librnupdate.so`)) {
-    problems.push(`missing: android/lib/${abi}/librnupdate.so`);
+  if (!set.has(`android/lib/${abi}/librnpushy.so`)) {
+    problems.push(`missing: android/lib/${abi}/librnpushy.so`);
   }
 }
 

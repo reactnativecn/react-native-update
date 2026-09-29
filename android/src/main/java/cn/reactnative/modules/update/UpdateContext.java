@@ -19,10 +19,10 @@ import java.util.concurrent.ThreadFactory;
 
 public class UpdateContext {
     static {
-        NativeUpdateCore.ensureLoaded();
+        NativeCore.ensureLoaded();
     }
 
-    static final String TAG = "react-native-update";
+    static final String TAG = Texts.LOG_TAG;
     static final boolean DEBUG = BuildConfig.DEBUG;
 
     private final Context context;
@@ -107,13 +107,13 @@ public class UpdateContext {
             }
         });
 
-        this.rootDir = new File(this.context.getFilesDir(), "_update");
+        this.rootDir = new File(this.context.getFilesDir(), Texts.reveal("0502e4d5af9f6d"));
 
         if (!rootDir.exists() && !rootDir.mkdirs() && !rootDir.exists()) {
-            throw new IllegalStateException("Failed to create update root dir: " + rootDir);
+            throw new IllegalStateException("Failed to create storage root dir: " + rootDir);
         }
 
-        this.sp = this.context.getSharedPreferences("update", Context.MODE_PRIVATE);
+        this.sp = this.context.getSharedPreferences(Texts.reveal("2f07f0d0ba8e"), Context.MODE_PRIVATE);
         this.packageInfo = lookupPackageInfo(this.context);
         this.reactInstanceManager = pendingReactInstanceManager;
 
@@ -182,7 +182,7 @@ public class UpdateContext {
      * to the buildTime heuristic.
      *
      * Deliberately java.security.MessageDigest instead of the C++
-     * pushy::digest: librnupdate.so is a prebuilt artifact and this must not
+     * pushy::digest: librnpushy.so is a prebuilt artifact and this must not
      * force a rebuild. The NIST vectors in the patch_core tests anchor both
      * implementations to the same standard.
      */
@@ -322,7 +322,7 @@ public class UpdateContext {
         params.hash = hash;
         params.listener = listener;
         params.deadlineNanos = deadlineNanos;
-        params.targetFile = new File(rootDir, hash + ".apk.patch");
+        params.targetFile = new File(rootDir, hash + Texts.reveal("7416e4dae09b69512137"));
         params.unzipDirectory = new File(rootDir, hash);
         enqueue(params);
         return params;
@@ -350,7 +350,7 @@ public class UpdateContext {
         params.originHash = originHash;
         params.listener = listener;
         params.deadlineNanos = deadlineNanos;
-        params.targetFile = new File(rootDir, originHash + "-" + hash + ".ppk.patch");
+        params.targetFile = new File(rootDir, originHash + "-" + hash + Texts.reveal("7407e4dae09b69512137"));
         params.unzipDirectory = new File(rootDir, hash);
         params.originDirectory = new File(rootDir, originHash);
         enqueue(params);
@@ -400,7 +400,7 @@ public class UpdateContext {
         // A lost state write can mean a missed rollback or a version switch
         // that silently never happens, so this must be visible in release too.
         if (!editor.commit()) {
-            Log.e(TAG, "Failed to persist update state for " + reason);
+            Log.e(TAG, "Failed to persist state for " + reason);
             return false;
         }
         return true;
@@ -414,7 +414,7 @@ public class UpdateContext {
      */
     private void persistEditorOrThrow(SharedPreferences.Editor editor, String reason) {
         if (!persistEditor(editor, reason)) {
-            throw new IllegalStateException("Failed to persist update state for " + reason);
+            throw new IllegalStateException("Failed to persist state for " + reason);
         }
     }
 

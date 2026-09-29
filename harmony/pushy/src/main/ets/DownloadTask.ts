@@ -31,11 +31,12 @@ import {
   ERROR_DOWNLOAD_FAILED,
   ERROR_FILE_OPERATION_FAILED,
   ERROR_INVALID_OPTIONS,
-  ERROR_PATCH_FAILED,
+  ERROR_DELTA_FAILED,
   createPushyError,
   getErrorMessage,
   toPushyError,
 } from './ErrorCodes';
+import { BUNDLE_DELTA_ENTRY } from './Texts';
 
 const TAG = 'DownloadTask';
 
@@ -92,7 +93,7 @@ export function parseManifestToArrays(
     | undefined;
   const hbcTransformEntry =
     hbcTransform && typeof hbcTransform === 'object'
-      ? hbcTransform[HARMONY_BUNDLE_PATCH_ENTRY]
+      ? hbcTransform[BUNDLE_DELTA_ENTRY]
       : undefined;
   const hbcTransformMeta =
     hbcTransformEntry && typeof hbcTransformEntry === 'object'
@@ -125,7 +126,6 @@ function toArrayBufferSlice(
 }
 
 const DIFF_MANIFEST_ENTRY = '__diff.json';
-const HARMONY_BUNDLE_PATCH_ENTRY = 'bundle.harmony.js.patch';
 const TEMP_ORIGIN_BUNDLE_ENTRY = '.origin.bundle.harmony.js';
 const FILE_COPY_BUFFER_SIZE = 64 * 1024;
 const DOWNLOAD_CALL_TIMEOUT_MS = 10 * 60 * 1000;
@@ -197,7 +197,7 @@ export class DownloadTask {
     const bundlePath = `${work}/${HARMONY_BUNDLE_FILE_NAME}`;
     if (!fileIo.accessSync(bundlePath)) {
       throw createPushyError(
-        ERROR_PATCH_FAILED,
+        ERROR_DELTA_FAILED,
         `bundle missing after install: ${bundlePath}`,
       );
     }
@@ -338,13 +338,13 @@ export class DownloadTask {
       size = await zlib.getOriginalSize(archiveFile);
     } catch (e) {
       throw createPushyError(
-        ERROR_PATCH_FAILED,
+        ERROR_DELTA_FAILED,
         `cannot determine archive expansion size: ${getErrorMessage(e)}`,
       );
     }
     if (typeof size !== 'number' || !Number.isFinite(size) || size < 0) {
       throw createPushyError(
-        ERROR_PATCH_FAILED,
+        ERROR_DELTA_FAILED,
         `cannot determine archive expansion size: ${String(size)}`,
       );
     }
@@ -365,7 +365,7 @@ export class DownloadTask {
     const archiveStat = await fileIo.stat(archiveFile);
     if (archiveStat.size > MAX_ARCHIVE_BYTES) {
       throw createPushyError(
-        ERROR_PATCH_FAILED,
+        ERROR_DELTA_FAILED,
         `archive too large: ${archiveStat.size} bytes`,
       );
     }
@@ -375,7 +375,7 @@ export class DownloadTask {
     try {
       await zlib.decompressFile(archiveFile, unzipDirectory);
     } catch (e) {
-      throw toPushyError(e, ERROR_PATCH_FAILED);
+      throw toPushyError(e, ERROR_DELTA_FAILED);
     }
     await measureExtractedDirectory(unzipDirectory);
   }
@@ -469,7 +469,7 @@ export class DownloadTask {
     const manifestStat = await fileIo.stat(manifestPath);
     if (manifestStat.size > MAX_MANIFEST_BYTES) {
       throw createPushyError(
-        ERROR_PATCH_FAILED,
+        ERROR_DELTA_FAILED,
         `delta manifest too large: ${manifestStat.size} bytes`,
       );
     }
@@ -483,28 +483,28 @@ export class DownloadTask {
   private async applyBundlePatchFromFileSource(
     originContent: ArrayBuffer,
     workingDirectory: string,
-    bundlePatchPath: string,
+    bundleDeltaPath: string,
     outputFile: string,
     hbcTransformMeta = '',
   ): Promise<void> {
     const originBundlePath = `${workingDirectory}/${TEMP_ORIGIN_BUNDLE_ENTRY}`;
     try {
       await this.writeFileContent(originBundlePath, originContent);
-      await NativePatchCore.applyPatchFromFileSource({
+      await NativePatchCore.applyDeltaFromSource({
         copyFroms: [],
         copyTos: [],
         deletes: [],
         sourceRoot: workingDirectory,
         targetRoot: workingDirectory,
         originBundlePath,
-        bundlePatchPath,
+        bundleDeltaPath,
         bundleOutputPath: outputFile,
         enableMerge: false,
         bundleHbcTransformMeta: hbcTransformMeta,
       });
     } catch (error) {
       throw createPushyError(
-        ERROR_PATCH_FAILED,
+        ERROR_DELTA_FAILED,
         `Failed to process bundle delta: ${getErrorMessage(error)}`,
       );
     } finally {
@@ -685,7 +685,7 @@ export class DownloadTask {
       if (!writeError && baseOffset + received > MAX_ARCHIVE_BYTES) {
         // 未知长度/分块传输的兜底:超过上限即停写,请求在下面结算时失败。
         writeError = createPushyError(
-          ERROR_PATCH_FAILED,
+          ERROR_DELTA_FAILED,
           `archive too large: exceeded ${MAX_ARCHIVE_BYTES}`,
         );
       }
@@ -946,7 +946,7 @@ export class DownloadTask {
       }
       if (totalAll > MAX_ARCHIVE_BYTES) {
         writeError = createPushyError(
-          ERROR_PATCH_FAILED,
+          ERROR_DELTA_FAILED,
           `archive too large: ${totalAll} bytes`,
         );
         throw writeError;
@@ -1096,18 +1096,18 @@ export class DownloadTask {
     const inputs = await this.readDeltaInputs(work, true);
     const manifestArrays = inputs.manifestArrays;
 
-    NativePatchCore.buildArchivePatchPlan(
+    NativePatchCore.buildArchivePlan(
       ARCHIVE_PATCH_TYPE_FROM_PACKAGE,
       inputs.entryNames,
       manifestArrays.copyFroms,
       manifestArrays.copyTos,
       manifestArrays.deletes,
-      HARMONY_BUNDLE_PATCH_ENTRY,
+      BUNDLE_DELTA_ENTRY,
     );
 
-    const bundlePatchPath = `${work}/${HARMONY_BUNDLE_PATCH_ENTRY}`;
-    if (!fileIo.accessSync(bundlePatchPath)) {
-      throw createPushyError(ERROR_PATCH_FAILED, 'bundle patch not found');
+    const bundleDeltaPath = `${work}/${BUNDLE_DELTA_ENTRY}`;
+    if (!fileIo.accessSync(bundleDeltaPath)) {
+      throw createPushyError(ERROR_DELTA_FAILED, 'bundle delta not found');
     }
     const resourceManager = this.context.resourceManager;
     const originContent = await resourceManager.getRawFileContent(
@@ -1116,7 +1116,7 @@ export class DownloadTask {
     await this.applyBundlePatchFromFileSource(
       originContent.buffer as ArrayBuffer,
       work,
-      bundlePatchPath,
+      bundleDeltaPath,
       `${work}/${HARMONY_BUNDLE_FILE_NAME}`,
       manifestArrays.hbcTransformMeta,
     );
@@ -1145,28 +1145,28 @@ export class DownloadTask {
     const inputs = await this.readDeltaInputs(work, false);
     const manifestArrays = inputs.manifestArrays;
 
-    const plan = NativePatchCore.buildArchivePatchPlan(
+    const plan = NativePatchCore.buildArchivePlan(
       ARCHIVE_PATCH_TYPE_FROM_PPK,
       inputs.entryNames,
       manifestArrays.copyFroms,
       manifestArrays.copyTos,
       manifestArrays.deletes,
-      HARMONY_BUNDLE_PATCH_ENTRY,
+      BUNDLE_DELTA_ENTRY,
     );
-    await NativePatchCore.applyPatchFromFileSource({
+    await NativePatchCore.applyDeltaFromSource({
       copyFroms: manifestArrays.copyFroms,
       copyTos: manifestArrays.copyTos,
       deletes: manifestArrays.deletes,
       sourceRoot: params.originDirectory,
       targetRoot: work,
       originBundlePath: `${params.originDirectory}/bundle.harmony.js`,
-      bundlePatchPath: `${work}/${HARMONY_BUNDLE_PATCH_ENTRY}`,
+      bundleDeltaPath: `${work}/${BUNDLE_DELTA_ENTRY}`,
       bundleOutputPath: `${work}/${HARMONY_BUNDLE_FILE_NAME}`,
       mergeSourceSubdir: plan.mergeSourceSubdir,
       enableMerge: plan.enableMerge,
       bundleHbcTransformMeta: manifestArrays.hbcTransformMeta,
     });
-    logger.info(TAG, 'Patch from PPK completed');
+    logger.info(TAG, 'Delta from PPK completed');
     await this.deleteArchiveAndSidecar(params.targetFile);
   }
 
@@ -1242,7 +1242,7 @@ export class DownloadTask {
         }
       }
     } catch (error) {
-      const coded = toPushyError(error, ERROR_PATCH_FAILED);
+      const coded = toPushyError(error, ERROR_DELTA_FAILED);
       const message = `Copy from resource failed: ${currentFrom}, ${getErrorMessage(error)}`;
       logger.error(TAG, message);
       throw createPushyError(coded.code, message);
@@ -1276,7 +1276,7 @@ export class DownloadTask {
     const actualCrc = NativePatchCore.crc32(content);
     if (actualCrc !== expectedCrc) {
       throw createPushyError(
-        ERROR_PATCH_FAILED,
+        ERROR_DELTA_FAILED,
         `resource content mismatch (crc32): ${from}`,
       );
     }
@@ -1337,7 +1337,7 @@ export class DownloadTask {
       // (磁盘空间、参数)原样保留。
       const error = toPushyError(
         rawError,
-        this.downloadPhaseCompleted ? ERROR_PATCH_FAILED : ERROR_DOWNLOAD_FAILED,
+        this.downloadPhaseCompleted ? ERROR_DELTA_FAILED : ERROR_DOWNLOAD_FAILED,
       );
       logger.error(TAG, `Task execution failed: ${error.message}`);
       if (params.type !== DownloadTaskParams.TASK_TYPE_CLEANUP) {

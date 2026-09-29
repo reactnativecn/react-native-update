@@ -9,9 +9,8 @@ const source = (path: string) => readFileSync(new URL(path, root), 'utf8');
 // These are forbidden host API identifiers, not backend paths or JS bridge names.
 const oldNames =
   /\b(?:PushyNativeUpdate|NativeUpdateResult|NativeUpdateConfig|RCTPushyNativeUpdateCompletion|RCTPushyNativeConfigurationCompletion|RCTPushyNormalizeNativeConfig|checkAndUpdate(?:WithCompletion|Native)?)\b/;
-// Any other "native update" wording in shipped native code. NativeUpdateCore
-// predates the native round and is bound by JNI symbol names.
-const nativeUpdateWording = /NativeUpdate(?!Core)|native update/i;
+// Any other "native update" wording in shipped native code.
+const nativeUpdateWording = /NativeUpdate|native update/i;
 // Names added with the native round (10.51+) that were renamed to neutral
 // wording. Checked against code only: comments never reach a binary.
 const roundNames =

@@ -22,7 +22,7 @@ import java.util.concurrent.ConcurrentHashMap;
 final class ApkInstaller {
     private static final int COPY_BUFFER_SIZE = 64 * 1024;
     private static final String SESSION_ID_EXTRA =
-        "cn.reactnative.modules.update.extra.PACKAGE_INSTALLER_SESSION_ID";
+        Texts.reveal("3919bac3ab8a6b512c3e08f0c0b6de60452311edfbc8f680624b2d1de38da5a58e65557f3ecaeb8ea3b859661f3dc3f98bab48646c042bd0e19ca546681c2939");
     private static final ConcurrentHashMap<Integer, Promise> pendingPromises =
         new ConcurrentHashMap<Integer, Promise>();
 
@@ -116,7 +116,7 @@ final class ApkInstaller {
         } catch (Throwable error) {
             // A package manager that cannot answer is treated as "not declared":
             // the caller rejects with a code the app can act on.
-            Log.e(UpdateContext.TAG, "Unable to inspect requested permissions", error);
+            Log.e(Texts.LOG_TAG, "Unable to inspect requested permissions", error);
         }
         return false;
     }
@@ -205,7 +205,7 @@ final class ApkInstaller {
                 // The session is already in the system's hands (only session
                 // close failed): the status receiver owns the promise now, so
                 // settling here would be a second, contradictory outcome.
-                Log.w(UpdateContext.TAG, "Install session reported an error after commit", error);
+                Log.w(Texts.LOG_TAG, "Install session reported an error after commit", error);
                 return;
             }
             if (sessionId != -1) {
@@ -214,14 +214,14 @@ final class ApkInstaller {
                     try {
                         packageInstaller.abandonSession(sessionId);
                     } catch (Throwable abandonError) {
-                        Log.w(UpdateContext.TAG, "Unable to abandon failed install session", abandonError);
+                        Log.w(Texts.LOG_TAG, "Unable to abandon failed install session", abandonError);
                     }
                 }
             }
             promise.reject(ErrorCodes.APK_INSTALL_FAILED, "Unable to stage APK installation", error);
         } finally {
             if (apkFile.exists() && !apkFile.delete()) {
-                Log.w(UpdateContext.TAG, "Unable to delete staged APK " + apkFile);
+                Log.w(Texts.LOG_TAG, "Unable to delete staged APK " + apkFile);
             }
         }
     }
@@ -281,7 +281,7 @@ final class ApkInstaller {
                 promise.reject(ErrorCodes.APK_INSTALL_FAILED, message, error);
             }
         } else {
-            Log.e(UpdateContext.TAG, message, error);
+            Log.e(Texts.LOG_TAG, message, error);
         }
     }
 }

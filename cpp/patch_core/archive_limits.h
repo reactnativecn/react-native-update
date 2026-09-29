@@ -12,6 +12,9 @@
 //   - harmony/pushy/src/main/ets/ArchiveLimits.ts
 // iOS (RCTPushy.mm) includes this header directly.
 
+// Keep the core internal to whichever binary links it (see podspec Core).
+#pragma GCC visibility push(hidden)
+
 namespace pushy {
 namespace archive_limits {
 
@@ -40,5 +43,7 @@ constexpr long long kUnknownLengthFreeSpaceProbeBytes = 8LL * 1024 * 1024;
 
 }  // namespace archive_limits
 }  // namespace pushy
+
+#pragma GCC visibility pop
 
 #endif  // PUSHY_PATCH_CORE_ARCHIVE_LIMITS_H_
