@@ -17,7 +17,7 @@ concurrency:
 jobs:
   js-test:
     name: JS Unit Tests
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 5
 
     steps:
@@ -34,7 +34,7 @@ jobs:
 
   cpp-test:
     name: C++ Unit Tests
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 10
 
     steps:
