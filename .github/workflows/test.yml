@@ -17,7 +17,7 @@ concurrency:
 jobs:
   js-test:
     name: JS Unit Tests
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 5
 
     steps:
@@ -34,7 +34,7 @@ jobs:
 
   cpp-test:
     name: C++ Unit Tests
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     timeout-minutes: 10
 
     steps:
