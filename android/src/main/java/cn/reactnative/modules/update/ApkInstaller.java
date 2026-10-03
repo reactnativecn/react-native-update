@@ -169,17 +169,21 @@ final class ApkInstaller {
             }
 
             sessionId = packageInstaller.createSession(sessionParams);
-            try (
-                PackageInstaller.Session session = packageInstaller.openSession(sessionId);
-                FileInputStream input = new FileInputStream(apkFile);
-                OutputStream output = session.openWrite("base.apk", 0, apkFile.length())
-            ) {
-                byte[] buffer = new byte[COPY_BUFFER_SIZE];
-                int count;
-                while ((count = input.read(buffer)) != -1) {
-                    output.write(buffer, 0, count);
+            try (PackageInstaller.Session session = packageInstaller.openSession(sessionId)) {
+                // The write stream has to be closed before commit(): the system
+                // refuses to seal a session with open file transfers
+                // ("SecurityException: Files still open"), on every Android version.
+                try (
+                    FileInputStream input = new FileInputStream(apkFile);
+                    OutputStream output = session.openWrite("base.apk", 0, apkFile.length())
+                ) {
+                    byte[] buffer = new byte[COPY_BUFFER_SIZE];
+                    int count;
+                    while ((count = input.read(buffer)) != -1) {
+                        output.write(buffer, 0, count);
+                    }
+                    session.fsync(output);
                 }
-                session.fsync(output);
 
                 Intent statusIntent = new Intent(
                     reactContext,
