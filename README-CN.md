@@ -102,15 +102,15 @@ Hermes 字节码对通用二进制 diff 极不友好，我们在两个环节同�
 
 此外字节码在产出时就不含 debug info 段（实测小 **21%**，与 React Native 自身 release 构建一致），全量包和由它派生的每一个补丁都随之变小。
 
-以下数据在真实 RN 0.86 应用的 release 产物上实测（Hermes HBC v98，字节码约 4.4 MB）。每个补丁都先通过完整往返校验再记录体积，每个 delta 模式产物都通过与普通编译的等价性校验。完整的评测方法、测试数据与可复现代码见 **[hbc-diff-benchmark](https://github.com/sunnylqm/hbc-diff-benchmark)**。
+以下数据在真实 RN 0.86 应用的 release 产物上实测（Hermes HBC v98，剥离调试信息后字节码约 3.5 MB，即实际下发的产物）。每个补丁都先通过完整往返校验再记录体积，每个 delta 模式产物都通过与普通编译的等价性校验。完整的评测方法、测试数据与可复现代码见 **[hbc-diff-benchmark](https://github.com/sunnylqm/hbc-diff-benchmark)**。
 
 **Hermes 字节码（.hbc）——生产环境 Hermes 应用的实际发包格式：**
 
 | 迭代场景 | 全量 OTA（gzip） | bsdiff | **react-native-update** | 对比 bsdiff |
 |---|---|---|---|---|
-| 单行文案修改 | 1901.5 KB | 93.7 KB | **3.4 KB** | **小 28 倍** |
-| 小功能（约 60 行） | 1913.9 KB | 411.6 KB | **50.2 KB** | **小 8.2 倍** |
-| 中等功能（约 300 行） | 1973.7 KB | 551.6 KB | **97.8 KB** | **小 5.6 倍** |
+| 单行文案修改 | 1544.6 KB | 93.7 KB | **3.4 KB** | **小 28 倍** |
+| 小功能（约 60 行） | 1555.8 KB | 411.6 KB | **50.2 KB** | **小 8.2 倍** |
+| 中等功能（约 300 行） | 1604.7 KB | 551.6 KB | **97.8 KB** | **小 5.6 倍** |
 
 **文本 JS bundle——非 Hermes 应用（同一应用、同样三个场景）：**
 

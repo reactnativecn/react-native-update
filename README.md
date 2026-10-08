@@ -105,15 +105,15 @@ Hermes bytecode is hostile to generic binary diffing, and we attack that at two 
 
 The bytecode is also emitted without its debug-info section — a flat **21%** smaller, the same thing React Native's own release builds do — which shrinks the full package and every patch derived from it.
 
-The numbers below are measured on real release bundles of a React Native 0.86 app (Hermes HBC v98, ~4.4 MB bytecode). Every patch is verified by an actual round-trip before its size is recorded, and every delta-mode build is verified equivalent to a plain compile. Full methodology, fixtures, and runnable code: **[hbc-diff-benchmark](https://github.com/sunnylqm/hbc-diff-benchmark)**.
+The numbers below are measured on real release bundles of a React Native 0.86 app (Hermes HBC v98, ~3.5 MB bytecode with debug info stripped, as shipped). Every patch is verified by an actual round-trip before its size is recorded, and every delta-mode build is verified equivalent to a plain compile. Full methodology, fixtures, and runnable code: **[hbc-diff-benchmark](https://github.com/sunnylqm/hbc-diff-benchmark)**.
 
 **Hermes bytecode (.hbc) — what ships in production Hermes apps:**
 
 | Scenario | Full OTA (gzip) | bsdiff | **react-native-update** | vs bsdiff |
 |---|---|---|---|---|
-| One-line text change | 1901.5 KB | 93.7 KB | **3.4 KB** | **28× smaller** |
-| Small feature (~60 LOC) | 1913.9 KB | 411.6 KB | **50.2 KB** | **8.2× smaller** |
-| Medium feature (~300 LOC) | 1973.7 KB | 551.6 KB | **97.8 KB** | **5.6× smaller** |
+| One-line text change | 1544.6 KB | 93.7 KB | **3.4 KB** | **28× smaller** |
+| Small feature (~60 LOC) | 1555.8 KB | 411.6 KB | **50.2 KB** | **8.2× smaller** |
+| Medium feature (~300 LOC) | 1604.7 KB | 551.6 KB | **97.8 KB** | **5.6× smaller** |
 
 **Plain-text JS bundle — non-Hermes apps (same scenarios, same app):**
 
