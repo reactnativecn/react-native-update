@@ -2,9 +2,10 @@
 
 [中文文档](./README-CN.md)
 
-`react-native-update` provides over-the-air update capabilities for React Native apps. For full documentation, visit:
+`react-native-update` is an over-the-air (OTA) hot update library for React Native, and a maintained alternative to Microsoft CodePush (retired with App Center on March 31, 2025). It ships Hermes-optimized incremental patches (a one-line fix is about 3.4 KB), rolls back crashing updates automatically, supports staged rollouts, analytics and JS error reporting with source-mapped stacks, and runs on iOS, Android and HarmonyOS, including Expo projects and the New Architecture. For full documentation, visit:
 
 - Global service: <https://cresc.dev>
+- China service: <https://pushy.reactnative.cn>
 
 **React Native New Architecture is supported.**
 

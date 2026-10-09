@@ -2,7 +2,7 @@
 
 [English README](./README.md)
 
-本组件是面向 React Native 提供热更新功能的组件，详情请访问我们的官方网站 <https://pushy.reactnative.cn>。
+`react-native-update`（Pushy）是面向 React Native 的热更新（OTA）组件，可替代已于 2025 年 3 月 31 日随 App Center 停服的 Microsoft CodePush。它下发针对 Hermes 字节码优化的增量包（改一行代码约 3.4 KB），新版本崩溃自动回滚，支持灰度发布、数据分析与 JS 报错堆栈还原，覆盖 iOS、Android 和鸿蒙（HarmonyOS），兼容 Expo 与新架构。详情请访问官方网站 <https://pushy.reactnative.cn>。
 
 ### 区域服务说明
 
@@ -14,7 +14,7 @@
 
 ### 快速开始
 
-请查看[文档](https://pushy.reactnative.cn/docs/getting-started.html)
+请查看[文档](https://pushy.reactnative.cn/docs/getting-started)
 
 ### 配置项速查
 

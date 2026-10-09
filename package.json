@@ -1,7 +1,7 @@
 {
   "name": "react-native-update",
   "version": "10.59.2",
-  "description": "react-native hot update",
+  "description": "Hot update (OTA) for React Native with Hermes-optimized diff patches, crash rollback and staged rollout. A CodePush alternative for iOS, Android and HarmonyOS.",
   "main": "src/index",
   "types": "src/index.ts",
   "files": [
@@ -63,7 +63,21 @@
     "react-native",
     "ios",
     "android",
-    "update"
+    "update",
+    "hot-update",
+    "hotfix",
+    "ota",
+    "over-the-air",
+    "codepush",
+    "code-push",
+    "codepush-alternative",
+    "hermes",
+    "harmonyos",
+    "expo",
+    "incremental-update",
+    "bsdiff",
+    "pushy",
+    "cresc"
   ],
   "author": "reactnativecn",
   "license": "MIT",
