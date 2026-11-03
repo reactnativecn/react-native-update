@@ -1,9 +1,13 @@
 package cn.reactnative.modules.update;
 
+import android.app.Activity;
+import android.app.ActivityManager;
+import android.app.Application;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import android.os.Bundle;
 import android.util.Log;
 import androidx.annotation.Nullable;
 import com.facebook.react.ReactInstanceManager;
@@ -40,6 +44,8 @@ public class UpdateContext {
     // Written on the launch path, read from executor/JS threads.
     private volatile boolean isUsingBundleUrl;
     private volatile boolean ignoreRollback;
+    // Guarded by commitLock: the callback that starts a deferred first load.
+    private Application.ActivityLifecycleCallbacks firstLoadStarter;
     // The version whose bundle this process actually loaded (resolved in
     // getBundleUrl). resetToPackagedBundle must not delete its directory:
     // update assets (images/fonts) are read from it on demand at runtime, so
@@ -679,12 +685,13 @@ public class UpdateContext {
             // commitLock.
             synchronized (commitLock) {
                 StateCoreResult currentState = getStateSnapshot();
+                boolean deferFirstLoad = currentState.firstTime && !isProcessForeground();
                 StateCoreResult launchState = runStateCore(
                     STATE_OP_RESOLVE_LAUNCH,
                     currentState,
                     null,
                     ignoreRollback,
-                    true
+                    !deferFirstLoad
                 );
                 syncRolledBackVersion = launchState.rolledBackVersion;
                 if (launchState.didRollback) {
@@ -705,6 +712,17 @@ public class UpdateContext {
                 if (launchState.consumedFirstTime) {
                     // bundleURL may be resolved multiple times in one process.
                     ignoreRollback = true;
+                }
+                if (deferFirstLoad) {
+                    // JS reads the marker once per load: if the user opens the
+                    // app while this instance is alive, its markSuccess has to
+                    // work.
+                    SharedPreferences.Editor editor = sp.edit();
+                    StoreSchema.writeMarker(editor, StoreSchema.KEY_FIRST_LOAD_MARKER, true);
+                    persistEditor(editor, "defer first load");
+                    startFirstLoadWithFirstActivity();
+                    Log.i(TAG, "Started without UI, first load of "
+                        + currentState.currentVersion + " is not counted");
                 }
 
                 String currentVersion = launchState.loadVersion;
@@ -739,6 +757,76 @@ public class UpdateContext {
             // the next-launch rescue check. A null snapshot simply omits the
             // rollback guard for this exceptional launch.
             SyncCoordinator.schedule(this, syncRolledBackVersion);
+        }
+    }
+
+    /**
+     * A start without UI (push message, HeadlessJS task, alarm, boot receiver)
+     * creates the RN instance but mounts no UpdateProvider, so it can never
+     * mark success. It must not use up the new version's first load, or the
+     * next launch rolls back a version that never failed.
+     */
+    private static boolean isProcessForeground() {
+        ActivityManager.RunningAppProcessInfo info = new ActivityManager.RunningAppProcessInfo();
+        ActivityManager.getMyMemoryState(info);
+        return info.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND;
+    }
+
+    /**
+     * Importance can read as background on a launch that does show UI (screen
+     * off, the host created early in Application.onCreate), and a version that
+     * crashes there must still be rolled back. So the first activity started in
+     * this process starts the deferred first load.
+     */
+    private void startFirstLoadWithFirstActivity() {
+        if (firstLoadStarter != null || !(context instanceof Application)) {
+            return;
+        }
+        final Application application = (Application) context;
+        firstLoadStarter = new Application.ActivityLifecycleCallbacks() {
+            @Override
+            public void onActivityStarted(Activity activity) {
+                application.unregisterActivityLifecycleCallbacks(this);
+                startDeferredFirstLoad();
+            }
+
+            @Override
+            public void onActivityCreated(Activity activity, Bundle savedInstanceState) {}
+
+            @Override
+            public void onActivityResumed(Activity activity) {}
+
+            @Override
+            public void onActivityPaused(Activity activity) {}
+
+            @Override
+            public void onActivityStopped(Activity activity) {}
+
+            @Override
+            public void onActivitySaveInstanceState(Activity activity, Bundle outState) {}
+
+            @Override
+            public void onActivityDestroyed(Activity activity) {}
+        };
+        application.registerActivityLifecycleCallbacks(firstLoadStarter);
+    }
+
+    private void startDeferredFirstLoad() {
+        synchronized (commitLock) {
+            firstLoadStarter = null;
+            StateCoreResult currentState = getStateSnapshot();
+            // Already marked, or another version is now pending and this
+            // process is not running it.
+            if (!currentState.firstTime
+                || currentState.currentVersion == null
+                || !currentState.currentVersion.equals(launchVersion)) {
+                return;
+            }
+            SharedPreferences.Editor editor = sp.edit();
+            applyState(editor, runStateCore(
+                STATE_OP_RESOLVE_LAUNCH, currentState, null, false, true));
+            persistEditor(editor, "start deferred first load");
+            ignoreRollback = true;
         }
     }
 
