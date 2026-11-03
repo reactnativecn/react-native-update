@@ -11,22 +11,29 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.zip.ZipEntry;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 final class BundledResourceCopier {
     private static final Pattern VERSION_QUALIFIER_PATTERN = Pattern.compile("-v\\d+(?=/)");
     private static final String AAB_BASE_PREFIX = "base/";
+    // split_config.xxhdpi.apk, split_feature.config.xxhdpi.apk
+    private static final Pattern DENSITY_SPLIT_PATTERN =
+        Pattern.compile("(?:^|[._])config\\.((?:ld|md|hd|xhd|xxhd|xxxhd|tvd)pi)\\.apk$");
 
     private final Context context;
 
     private static final class ResolvedResourceSource {
         final int resourceId;
         final String assetPath;
+        final int density;
 
-        ResolvedResourceSource(int resourceId, String assetPath) {
+        ResolvedResourceSource(int resourceId, String assetPath, int density) {
             this.resourceId = resourceId;
             this.assetPath = assetPath;
+            this.density = density;
         }
     }
 
@@ -56,17 +63,20 @@ final class BundledResourceCopier {
     void copyFromResource(File targetRoot, CopyGroupResult[] groups) throws IOException {
         HashMap<String, ArrayList<File>> resToCopy = new HashMap<String, ArrayList<File>>();
         HashMap<String, Long> crcByFrom = new HashMap<String, Long>();
+        HashMap<String, String[]> toPathsByFrom = new HashMap<String, String[]>();
         for (CopyGroupResult group : groups) {
             ArrayList<File> targets = new ArrayList<File>();
             for (String to : group.toPaths) {
                 targets.add(new File(targetRoot, to));
             }
             resToCopy.put(group.from, targets);
+            toPathsByFrom.put(group.from, group.toPaths);
             if (group.expectedCrc >= 0) {
                 crcByFrom.put(group.from, group.expectedCrc);
             }
         }
         ArrayList<String> apkPaths = collectApkPaths();
+        HashSet<String> installedDensities = installedSplitDensities(apkPaths);
         ArrayList<SafeZipFile> zipFiles = new ArrayList<SafeZipFile>();
         // Entry name -> first archive (base APK first) that carries it.
         HashMap<String, ZipSource> availableEntries = new HashMap<String, ZipSource>();
@@ -116,6 +126,7 @@ final class BundledResourceCopier {
             // these fail the whole patch — the JS strategy chain then falls
             // back to the full package.
             ArrayList<String> crcMismatches = new ArrayList<String>();
+            int substitutedDensities = 0;
 
             for (String fromPath : new ArrayList<String>(remainingFiles.keySet())) {
                 ArrayList<File> targets = remainingFiles.get(fromPath);
@@ -127,6 +138,7 @@ final class BundledResourceCopier {
                 String actualSourcePath = fromPath;
                 ResolvedResourceSource resolvedResource = null;
                 Long wantedCrc = crcByFrom.get(fromPath);
+                boolean pathMatchDrifted = false;
 
                 if (entry == null) {
                     String normalizedFrom = normalizeResPath(fromPath);
@@ -147,6 +159,7 @@ final class BundledResourceCopier {
                     && entry.entry.getCrc() != wantedCrc.longValue()) {
                     entry = null;
                     actualSourcePath = fromPath;
+                    pathMatchDrifted = true;
                 }
 
                 // Content (CRC32) match: robust across APK/AAB packaging because
@@ -157,6 +170,39 @@ final class BundledResourceCopier {
                     if (matched != null) {
                         entry = matched;
                         actualSourcePath = matched.entry.getName();
+                    }
+                }
+
+                // A density split install only carries the device's density,
+                // so the expected bytes of another density cannot be on disk.
+                // That is not drift: fill the targets with the installed
+                // variant, because the JS side picks drawable-<scale>/ by the
+                // current PixelRatio and a missing file is a broken image.
+                if (entry == null && wantedCrc != null && !pathMatchDrifted) {
+                    String[] toPaths = toPathsByFrom.get(fromPath);
+                    ZipSource[] substitutes = resolveDensitySubstitutes(
+                        toPaths, installedDensities, availableEntries
+                    );
+                    if (substitutes != null) {
+                        for (int i = 0; i < substitutes.length; i++) {
+                            File target = targets.get(i);
+                            try {
+                                substitutes[i].zipFile.unzipToFile(substitutes[i].entry, target);
+                                substitutedDensities++;
+                            } catch (IOException e) {
+                                Log.e(
+                                    Texts.LOG_TAG,
+                                    "Failed to copy resource "
+                                        + substitutes[i].entry.getName()
+                                        + " to "
+                                        + target,
+                                    e
+                                );
+                                failedCopies.add(substitutes[i].entry.getName() + " -> " + target);
+                            }
+                        }
+                        remainingFiles.remove(fromPath);
+                        continue;
                     }
                 }
 
@@ -235,6 +281,15 @@ final class BundledResourceCopier {
                 );
             }
 
+            if (substitutedDensities > 0) {
+                Log.i(
+                    Texts.LOG_TAG,
+                    "Filled " + substitutedDensities
+                        + " density variants missing from this split install ("
+                        + installedDensities + ") with the installed variant"
+                );
+            }
+
             if (!remainingFiles.isEmpty()) {
                 Log.w(
                     Texts.LOG_TAG,
@@ -244,6 +299,90 @@ final class BundledResourceCopier {
         } finally {
             closeZipFiles(zipFiles);
         }
+    }
+
+    private ZipSource[] resolveDensitySubstitutes(
+        String[] toPaths,
+        HashSet<String> installedDensities,
+        HashMap<String, ZipSource> availableEntries
+    ) {
+        if (!canSubstituteDensityVariant(toPaths, installedDensities)) {
+            return null;
+        }
+        ZipSource[] substitutes = new ZipSource[toPaths.length];
+        for (int i = 0; i < toPaths.length; i++) {
+            ResolvedResourceSource resolved = resolveBundledResource(toPaths[i]);
+            // Resolving to the target's own density means this very variant is
+            // installed, so its bytes should have matched: that is drift. So is
+            // a resource the binary no longer has. bundletool can place another
+            // density's variant in the device's split, so the split name alone
+            // does not settle this.
+            if (resolved == null
+                || Integer.valueOf(resolved.density).equals(densityOf(toPaths[i]))) {
+                return null;
+            }
+            substitutes[i] = availableEntries.get(resolved.assetPath);
+            if (substitutes[i] == null) {
+                return null;
+            }
+        }
+        return substitutes;
+    }
+
+    /**
+     * Whether copy targets can be outside what a density split install carries.
+     * Only the targets can tell: release APKs shorten res/ paths (res/5u.png),
+     * so the manifest's source path says nothing about its density.
+     */
+    static boolean canSubstituteDensityVariant(
+        String[] toPaths,
+        HashSet<String> installedDensities
+    ) {
+        if (installedDensities.isEmpty() || toPaths == null || toPaths.length == 0) {
+            return false;
+        }
+        for (String toPath : toPaths) {
+            String directory = resourceDirectory(toPath);
+            if (!toPath.startsWith("drawable-")
+                || densityOf(toPath) == null
+                || installedDensities.contains(densityQualifier(directory))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static Integer densityOf(String resourcePath) {
+        String directory = resourceDirectory(resourcePath);
+        return directory == null ? null : parseDensityQualifier(directory);
+    }
+
+    private static String densityQualifier(String directory) {
+        for (String qualifier : directory.split("-")) {
+            if (parseDensityQualifier(qualifier) != null) {
+                return qualifier;
+            }
+        }
+        return null;
+    }
+
+    private static String resourceDirectory(String resourcePath) {
+        String path = resourcePath.startsWith("res/")
+            ? resourcePath.substring("res/".length())
+            : resourcePath;
+        int slash = path.indexOf('/');
+        return slash <= 0 ? null : path.substring(0, slash);
+    }
+
+    static HashSet<String> installedSplitDensities(ArrayList<String> apkPaths) {
+        HashSet<String> densities = new HashSet<String>();
+        for (String apkPath : apkPaths) {
+            Matcher matcher = DENSITY_SPLIT_PATTERN.matcher(new File(apkPath).getName());
+            if (matcher.find()) {
+                densities.add(matcher.group(1));
+            }
+        }
+        return densities;
     }
 
     private String normalizeResPath(String path) {
@@ -273,7 +412,7 @@ final class BundledResourceCopier {
         return fileName.substring(0, extensionIndex);
     }
 
-    private Integer parseDensityQualifier(String directoryName) {
+    private static Integer parseDensityQualifier(String directoryName) {
         String[] qualifiers = directoryName.split("-");
         for (String qualifier : qualifiers) {
             if ("ldpi".equals(qualifier)) {
@@ -347,7 +486,7 @@ final class BundledResourceCopier {
             assetPath = assetPath.substring(1);
         }
 
-        return new ResolvedResourceSource(resourceId, assetPath);
+        return new ResolvedResourceSource(resourceId, assetPath, typedValue.density);
     }
 
     private InputStream openResolvedResourceStream(ResolvedResourceSource source) throws IOException {

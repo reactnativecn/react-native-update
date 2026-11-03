@@ -106,7 +106,9 @@
 2. `copiesCrc` 扩展到**全部** copies 条目（CLI 2.21.2）；
 3. 客户端拷贝前校验，不符 → 整次 pdiff 失败、JS 策略链落 full，**永不装出坏包**：
    Android `BundledResourceCopier`、iOS/共享 C++ `CopyOperation.expected_crc`
-   （`ApplyPatchFromFileSource`，`digest::Crc32File`）、Harmony 经 NAPI `crc32`；
+   （`ApplyPatchFromFileSource`，`digest::Crc32File`）、Harmony 经 NAPI `crc32`。
+   例外：Android 密度分包安装里，其他密度本来就不在设备上，不算漂移，目标文件用该资源
+   已安装的变体填充；已安装密度或路径存在但内容不符的条目仍然失败；
 4. 遥测：本地事件 `downloadFallback`（增量失败但后续策略救回），失败码为 PATCH_FAILED 时
    映射服务端 `patch_fail`（为此 Android `PatchFailedException`、Harmony patch 阶段补齐了
    稳定码）。
