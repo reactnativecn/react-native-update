@@ -345,6 +345,9 @@ final class BundledResourceCopier {
             String directory = resourceDirectory(toPath);
             if (!toPath.startsWith("drawable-")
                 || densityOf(toPath) == null
+                // Another qualifier (drawable-night-hdpi) would not survive the
+                // lookup, which resolves those from the current configuration.
+                || !directory.equals("drawable-" + densityQualifier(directory))
                 || installedDensities.contains(densityQualifier(directory))) {
                 return false;
             }

@@ -57,6 +57,13 @@ public class BundledResourceCopierTest {
     }
 
     @Test
+    public void targetsWithAnotherQualifierAreDrift() {
+        assertFalse(canSubstitute(XXHDPI, "drawable-night-hdpi/a.png"));
+        assertFalse(canSubstitute(XXHDPI, "drawable-hdpi-v21/a.png"));
+        assertFalse(canSubstitute(XXHDPI, "drawable-mdpi/a.png", "drawable-land-hdpi/b.png"));
+    }
+
+    @Test
     public void targetsWithoutADensityAreDrift() {
         assertFalse(canSubstitute(XXHDPI, "assets/a.png"));
         assertFalse(canSubstitute(XXHDPI, "raw/a.bin"));
