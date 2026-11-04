@@ -323,6 +323,73 @@ describe('testUrls', () => {
   });
 });
 
+describe('testUrls mirror priority', () => {
+  const delayed = (ms: number, url: string, signal?: AbortSignal) =>
+    new Promise<any>((resolve, reject) => {
+      const timer = setTimeout(
+        () => resolve({ status: 200, statusText: 'OK', url }),
+        ms
+      );
+      signal?.addEventListener('abort', () => {
+        clearTimeout(timer);
+        reject(new Error('aborted'));
+      });
+    });
+  const FIRST = 'https://first.example.com/x';
+  const SECOND = 'https://second.example.com/x';
+
+  test('a healthy first mirror wins and costs a single request', async () => {
+    const calls: string[] = [];
+    (globalThis as any).fetch = mock(async (url: string, init: any) => {
+      calls.push(url);
+      return delayed(url === FIRST ? 20 : 1, url, init?.signal);
+    });
+    expect(await testUrls([FIRST, SECOND], 200)).toBe(FIRST);
+    expect(calls).toEqual([FIRST]);
+  });
+
+  test('a silent first mirror gets the next one probed after the delay', async () => {
+    const calls: string[] = [];
+    (globalThis as any).fetch = mock(async (url: string, init: any) => {
+      calls.push(url);
+      return delayed(url === FIRST ? 2000 : 1, url, init?.signal);
+    });
+    const start = Date.now();
+    expect(await testUrls([FIRST, SECOND], 30)).toBe(SECOND);
+    expect(calls).toEqual([FIRST, SECOND]);
+    expect(Date.now() - start).toBeLessThan(1000);
+  });
+
+  test('a failed first mirror gets the next one probed at once', async () => {
+    (globalThis as any).fetch = mock(async (url: string) => {
+      if (url === FIRST) {
+        throw new Error('network');
+      }
+      return { status: 200, statusText: 'OK', url };
+    });
+    const start = Date.now();
+    expect(await testUrls([FIRST, SECOND], 5000)).toBe(SECOND);
+    expect(Date.now() - start).toBeLessThan(1000);
+  });
+
+  test('a redirected winner returns its final url', async () => {
+    const shed = 'https://origin.example.com/x';
+    (globalThis as any).fetch = mock(async () => ({
+      status: 200,
+      statusText: 'OK',
+      url: shed,
+    }));
+    expect(await testUrls([FIRST, SECOND], 200)).toBe(shed);
+  });
+
+  test('when every mirror fails the first one is kept', async () => {
+    (globalThis as any).fetch = mock(async () => {
+      throw new Error('network');
+    });
+    expect(await testUrls([FIRST, SECOND], 5)).toBe(FIRST);
+  });
+});
+
 describe('promiseAny', () => {
   test('rejects immediately on an empty array instead of hanging (JS-18)', async () => {
     await expect(promiseAny([])).rejects.toThrow('error_all_promises_rejected');

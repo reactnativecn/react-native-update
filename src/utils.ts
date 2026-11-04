@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import { selectFastestSuccessfulEndpoint } from './endpoint';
 import i18n from './i18n';
 
 // log/info are developer diagnostics (they include full check request bodies
@@ -82,15 +83,20 @@ export const emptyModule = new Proxy(emptyModuleTarget, {
   },
 });
 
-const ping = async (url: string) => {
+const ping = async (url: string, signal?: AbortSignal) => {
   try {
     const {
       status,
       statusText,
       url: finalUrl,
-    } = await fetchWithTimeout(url, {
-      method: 'HEAD',
-    });
+    } = await fetchWithTimeout(
+      url,
+      {
+        method: 'HEAD',
+      },
+      DEFAULT_FETCH_TIMEOUT_MS,
+      signal
+    );
     if (status === 200) {
       if (isProtocolDowngrade(url, finalUrl)) {
         // The probe was redirected from https to plaintext http. Never let a
@@ -104,23 +110,42 @@ const ping = async (url: string) => {
     log('ping failed', url, status, statusText);
     throw Error(i18n.t('error_ping_failed'));
   } catch (e) {
-    log('ping error', url, e);
+    if (!signal?.aborted) {
+      log('ping error', url, e);
+    }
     throw e;
   }
 };
 
-export const testUrls = async (urls?: string[]): Promise<string | null> => {
+// Longer than a first HTTPS request on a mobile network (TCP, TLS and HEAD are
+// about three round trips), or the next mirror would start on nearly every
+// download and the server's order would mean nothing. A second of probing is
+// small next to the download it picks a mirror for.
+export const DOWNLOAD_HEDGE_DELAY_MS = 1000;
+
+/**
+ * Picks the mirror to download from, preferring the server's order: the next
+ * mirror is only probed after a delay without an answer, or at once when the
+ * previous one failed. A healthy first mirror costs a single HEAD.
+ */
+export const testUrls = async (
+  urls?: string[],
+  hedgeDelayMs: number = DOWNLOAD_HEDGE_DELAY_MS
+): Promise<string | null> => {
   if (!urls?.length) {
     return null;
   }
 
-  try {
-    const ret = await promiseAny(urls.map(ping));
-    if (ret) {
-      log('ping success, use url:', ret);
-      return ret as string;
-    }
-  } catch {}
+  const { success } = await selectFastestSuccessfulEndpoint(
+    urls,
+    ping,
+    Date.now,
+    hedgeDelayMs
+  );
+  if (success?.value) {
+    log('ping success, use url:', success.value);
+    return success.value;
+  }
   log('all ping failed, use first url:', urls[0]);
   return urls[0];
 };

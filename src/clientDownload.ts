@@ -101,7 +101,7 @@ export class Downloader {
   };
 
   /**
-   * Orders candidate mirrors for one artifact: the HEAD-race winner first
+   * Orders candidate mirrors for one artifact: the HEAD probe's winner first
    * (its post-redirect URL), then the remaining mirrors in configured order.
    * Empty when there is nothing to try.
    */
@@ -225,7 +225,7 @@ export class Downloader {
           hash,
         }),
     };
-    // Mirror ranking per strategy, kept across retry attempts: the HEAD race
+    // Mirror ranking per strategy, kept across retry attempts: the HEAD probe
     // runs once per strategy per download instead of once per attempt. A
     // winner that failed its download is demoted to the back for the next
     // attempt (every mirror is tried on every attempt anyway).
@@ -266,7 +266,7 @@ export class Downloader {
           if (exhaustedStrategies.has(type)) {
             continue;
           }
-          // The HEAD race only ranks mirrors; it is not proof that a mirror can
+          // The HEAD probe only ranks mirrors; it is not proof that a mirror can
           // serve the whole artifact (CDNs answer HEAD and GET differently, and
           // a transfer can die mid-stream). Every mirror of the same artifact
           // gets a real download attempt before the strategy is abandoned —
