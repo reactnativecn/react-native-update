@@ -30,6 +30,16 @@
             "actions": [
               "action.system.home"
             ]
+          },
+          {
+            "actions": [
+              "ohos.want.action.viewData"
+            ],
+            "uris": [
+              {
+                "scheme": "testhotupdate"
+              }
+            ]
           }
         ]
       }
